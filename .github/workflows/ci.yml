@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Validate repository
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(".")
+          errors = []
+
+          package_path = root / "package.json"
+          try:
+              package = json.loads(package_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              errors.append(f"package.json is not valid JSON: {exc}")
+          else:
+              for key in ("name", "version", "displayName", "unity"):
+                  if key not in package or not package[key]:
+                      errors.append(f"package.json is missing required key: {key}")
+
+          forbidden_paths = []
+          for path in root.rglob("*"):
+              if ".git" in path.parts:
+                  continue
+              if path.name == ".DS_Store" or ".idea" in path.parts:
+                  forbidden_paths.append(str(path))
+
+          if forbidden_paths:
+              errors.append("Repository contains local junk files:\n- " + "\n- ".join(sorted(forbidden_paths)))
+
+          forbidden_terms = {
+              "Tool" + "FunctionProvider": "Stale attribute name; use [ToolProvider] instead.",
+              "get_" + "compilation_errors": "Stale tool name; this tool does not exist in the package.",
+          }
+
+          for path in root.rglob("*"):
+              if not path.is_file() or ".git" in path.parts:
+                  continue
+              if path.suffix not in {".md", ".cs", ".json", ".yml", ".yaml"}:
+                  continue
+
+              text = path.read_text(encoding="utf-8", errors="ignore")
+              for term, reason in forbidden_terms.items():
+                  if term in text:
+                      errors.append(f"{path}: found forbidden term '{term}'. {reason}")
+
+          if errors:
+              print("Validation failed:\n")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          print("Repository validation passed.")
+          PY
