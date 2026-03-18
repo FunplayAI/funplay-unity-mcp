@@ -72,6 +72,7 @@ openupm add com.gamebooom.unity.mcp
 {
   "mcpServers": {
     "gamebooom": {
+      "type": "http",
       "url": "http://localhost:8765/"
     }
   }
@@ -81,7 +82,7 @@ openupm add com.gamebooom.unity.mcp
 </details>
 
 <details>
-<summary>Cursor / VS Code / Windsurf</summary>
+<summary>Cursor</summary>
 
 ```json
 {
@@ -92,6 +93,70 @@ openupm add com.gamebooom.unity.mcp
   }
 }
 ```
+
+</details>
+
+<details>
+<summary>VS Code</summary>
+
+```json
+{
+  "servers": {
+    "gamebooom": {
+      "type": "http",
+      "url": "http://localhost:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Trae</summary>
+
+```json
+{
+  "mcpServers": {
+    "gamebooom": {
+      "url": "http://localhost:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Kiro</summary>
+
+```json
+{
+  "mcpServers": {
+    "gamebooom": {
+      "type": "http",
+      "url": "http://localhost:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Codex</summary>
+
+```toml
+[mcp_servers.gamebooom]
+url = "http://localhost:8765/"
+```
+
+</details>
+
+<details>
+<summary>Windsurf</summary>
+
+除非你本地 Windsurf 版本要求不同的 MCP 配置格式，否则可直接使用与 Cursor 相同的 JSON 结构。
 
 </details>
 

@@ -72,6 +72,7 @@ The server runs on `http://localhost:8765/` by default.
 {
   "mcpServers": {
     "gamebooom": {
+      "type": "http",
       "url": "http://localhost:8765/"
     }
   }
@@ -81,7 +82,7 @@ The server runs on `http://localhost:8765/` by default.
 </details>
 
 <details>
-<summary>Cursor / VS Code / Windsurf</summary>
+<summary>Cursor</summary>
 
 ```json
 {
@@ -92,6 +93,70 @@ The server runs on `http://localhost:8765/` by default.
   }
 }
 ```
+
+</details>
+
+<details>
+<summary>VS Code</summary>
+
+```json
+{
+  "servers": {
+    "gamebooom": {
+      "type": "http",
+      "url": "http://localhost:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Trae</summary>
+
+```json
+{
+  "mcpServers": {
+    "gamebooom": {
+      "url": "http://localhost:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Kiro</summary>
+
+```json
+{
+  "mcpServers": {
+    "gamebooom": {
+      "type": "http",
+      "url": "http://localhost:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Codex</summary>
+
+```toml
+[mcp_servers.gamebooom]
+url = "http://localhost:8765/"
+```
+
+</details>
+
+<details>
+<summary>Windsurf</summary>
+
+Use the same JSON structure as Cursor unless your local Windsurf version requires a different MCP config format.
 
 </details>
 
