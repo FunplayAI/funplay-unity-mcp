@@ -12,6 +12,9 @@
   <p align="center">
     中文 | <a href="./README.md">English</a>
   </p>
+  <p align="center">
+    <img src="./Documentation~/Text%2BLogo.png" alt="The Most Advanced MCP Server for Unity" width="100%">
+  </p>
 </p>
 
 ---
