@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">GameBooom MCP For Unity</h1>
   <p align="center">
-    <strong>开源 Unity 编辑器 MCP 服务器</strong>
+    <strong>The Most Advanced MCP Server for Unity Editor</strong>
   </p>
   <p align="center">
     <a href="#"><img src="https://img.shields.io/badge/Unity-2022.3%2B-black?logo=unity" alt="Unity 6000.0+"></a>
