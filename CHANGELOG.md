@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.5] - 2026-04-01
 
 ### Added
 - Performance analysis tools: `get_performance_snapshot` and `analyze_scene_complexity`
