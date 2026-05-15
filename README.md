@@ -30,16 +30,11 @@ Describe your game in one sentence — your AI assistant builds it in Unity thro
 > Your AI assistant handles it through Funplay MCP for Unity: creates the scene, generates all scripts, sets up the UI, and configures the game logic — all from a single prompt.
 
 <p align="center">
-  <video src="https://github.com/FunplayAI/funplay-unity-mcp/raw/main/Documentation%7E/demo.mp4"
-         controls
-         poster="https://raw.githubusercontent.com/FunplayAI/funplay-unity-mcp/main/Documentation%7E/demo-thumb.png"
-         width="100%">
-    <a href="https://github.com/FunplayAI/funplay-unity-mcp/raw/main/Documentation%7E/demo.mp4">
-      <img src="./Documentation~/demo-thumb.png" alt="Funplay MCP for Unity — 16s demo (click to play)" width="100%">
-    </a>
-  </video>
+  <a href="https://github.com/FunplayAI/funplay-unity-mcp/raw/main/Documentation~/demo.mp4">
+    <img src="./Documentation~/demo-thumb.png" alt="Funplay MCP for Unity — 16s demo (click to play)" width="100%">
+  </a>
 </p>
-<p align="center"><em>16-second demo — AI generates a 3D model and integrates it into the scene end-to-end.</em></p>
+<p align="center"><em>16-second demo — click thumbnail to play. AI generates a 3D model and integrates it into the scene end-to-end.</em></p>
 
 ## Quick Start
 
