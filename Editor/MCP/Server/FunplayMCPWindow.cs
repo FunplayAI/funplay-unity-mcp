@@ -183,6 +183,11 @@ namespace Funplay.Editor.MCP.Server
                 },
                 new MCPConfigTarget
                 {
+                    Name = "LM Studio",
+                    ConfigPath = Path.Combine(homePath, ".lmstudio", "mcp.json"),
+                },
+                new MCPConfigTarget
+                {
                     Name = "VS Code",
                     ConfigPath = GetVSCodeConfigPath(homePath),
                     IncludeTypeField = true,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.4] - 2026-05-20
+
+### Added
+- Added LM Studio to the MCP Server window's one-click configuration targets. The generated config writes `funplay` to LM Studio's `mcp.json` using Cursor-compatible `mcpServers` JSON.
+- Documented manual LM Studio setup paths for macOS/Linux and Windows.
+
 ## [0.3.3] - 2026-05-20
 
 ### Fixed

@@ -21,7 +21,7 @@
 
 ---
 
-Funplay MCP for Unity is an MIT-licensed Unity Editor MCP server that lets AI assistants like Claude Code, Cursor, Windsurf, Codex, and VS Code Copilot operate directly inside your running Unity project.
+Funplay MCP for Unity is an MIT-licensed Unity Editor MCP server that lets AI assistants like Claude Code, Cursor, LM Studio, Windsurf, Codex, and VS Code Copilot operate directly inside your running Unity project.
 
 Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's 91 built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
 
@@ -92,6 +92,23 @@ If you prefer to edit config files manually, use the examples below as fallback 
 
 <details>
 <summary>Cursor</summary>
+
+```json
+{
+  "mcpServers": {
+    "funplay": {
+      "url": "http://127.0.0.1:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>LM Studio</summary>
+
+LM Studio uses `~/.lmstudio/mcp.json` on macOS/Linux and `%USERPROFILE%\.lmstudio\mcp.json` on Windows. In LM Studio, you can also open it from **Program > Install > Edit mcp.json**.
 
 ```json
 {
@@ -210,11 +227,11 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
 - **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
-- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, VS Code, Kiro, Trae, Codex, and similar clients directly from the Unity window
+- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, LM Studio, VS Code, Kiro, Trae, Codex, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
 - **Project Skills Manager** — Configure project-level skills for supported AI clients, currently installing the default `unity-mcp-workflow` skill
 - **Plugin Settings** — Toggle verbose plugin debug logging when troubleshooting MCP connections or tool execution
-- **Vendor Agnostic** — Works with any AI client that supports MCP: Claude Code, Cursor, Windsurf, Codex, VS Code Copilot, etc.
+- **Vendor Agnostic** — Works with any AI client that supports MCP: Claude Code, Cursor, LM Studio, Windsurf, Codex, VS Code Copilot, etc.
 
 ## `execute_code`: In-Memory C# Execution
 
@@ -278,7 +295,7 @@ The table below compares this repository with Unity Technologies' official `com.
 | Generic escape hatch | `execute_code` — CodeDom in-memory compile, `IFunplayCommand` + Undo, no sandbox (client-side approval) | `RunCommand` — namespace blacklist sandbox |
 | Play mode validation | Full loop: enter / simulate input / capture / read logs / exit | Enter/Exit only; no input simulation |
 | Asset generators | Not built-in (compose external APIs via `execute_code`) | Native Image / Mesh / PBR / Sound / Animation generators |
-| Primary client model | BYO any MCP client (Claude Code / Cursor / Codex / VS Code) | Built-in chat window + ACP for Claude/Gemini via Gateway |
+| Primary client model | BYO any MCP client (Claude Code / Cursor / LM Studio / Codex / VS Code) | Built-in chat window + ACP for Claude/Gemini via Gateway |
 | Offline-capable | Yes for tool calls (inference depends on chosen client) | No (inference requires Unity Cloud) |
 
 For a long-form comparison of the two approaches see [Funplay Unity MCP vs Unity AI Assistant detailed comparison](https://blog.csdn.net/m0_62670368/article/details/161039766) (Chinese).

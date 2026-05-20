@@ -17,9 +17,9 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 - 91 built-in tool functions across scene, asset, script, prefab, UI, animation, camera, screenshot, package, editor-state, menu-item, and feedback workflows
 - Structured `{success, message, data}` JSON returns with stable `instanceId` fields so agents can chain `by_id` lookups
 - `IFunplayCommand` template for `execute_code` with auto-Undo, structured logs, and a returned changelog of created/modified/destroyed objects
-- HTTP JSON-RPC 2.0 MCP server compatible with Claude Code, Cursor, Windsurf, Codex, VS Code Copilot, and other MCP clients
+- HTTP JSON-RPC 2.0 MCP server compatible with Claude Code, Cursor, LM Studio, Windsurf, Codex, VS Code Copilot, and other MCP clients
 - Reflection-based tool discovery via `[ToolProvider]`
-- One-click local MCP config generation for supported clients
+- One-click local MCP config generation for supported clients, including LM Studio
 - Separate tool exposure window for editing which tools `core` and `full` expose
 - One-click MCP config plus project workflow skill setup for Claude Code, Cursor, and Codex
 - Project skills management for supported AI clients, currently installing the default `unity-mcp-workflow` skill

@@ -21,7 +21,7 @@
 
 ---
 
-Funplay MCP for Unity 是一个采用 MIT 协议的 Unity 编辑器 MCP 服务器，让 Claude Code、Cursor、Windsurf、Codex、VS Code Copilot 等 AI 助手直接操作正在运行的 Unity 项目。
+Funplay MCP for Unity 是一个采用 MIT 协议的 Unity 编辑器 MCP 服务器，让 Claude Code、Cursor、LM Studio、Windsurf、Codex、VS Code Copilot 等 AI 助手直接操作正在运行的 Unity 项目。
 
 一句话描述你的游戏 — AI 助手通过 Funplay MCP for Unity 的 91 个内置工具自动创建场景、编写脚本、验证运行态、模拟输入、分析性能并完成编辑器自动化，把所有逻辑串联起来。
 
@@ -92,6 +92,23 @@ https://github.com/FunplayAI/funplay-unity-mcp.git
 
 <details>
 <summary>Cursor</summary>
+
+```json
+{
+  "mcpServers": {
+    "funplay": {
+      "url": "http://127.0.0.1:8765/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>LM Studio</summary>
+
+LM Studio 在 macOS/Linux 上使用 `~/.lmstudio/mcp.json`，在 Windows 上使用 `%USERPROFILE%\.lmstudio\mcp.json`。你也可以在 LM Studio 中通过 **Program > Install > Edit mcp.json** 打开配置文件。
 
 ```json
 {
@@ -212,11 +229,11 @@ url = "http://127.0.0.1:8765/"
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
 - **输入模拟 + 截图验证** — 在 Play Mode 中模拟键盘/鼠标，再用 Game View / Scene View 截图验证结果
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
-- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、VS Code、Kiro、Trae、Codex 等客户端生成 MCP 配置
+- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、LM Studio、VS Code、Kiro、Trae、Codex 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
 - **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，目前安装默认的 `unity-mcp-workflow` skill
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志
-- **厂商无关** — 兼容任意支持 MCP 的 AI 客户端：Claude Code、Cursor、Windsurf、Codex、VS Code Copilot 等
+- **厂商无关** — 兼容任意支持 MCP 的 AI 客户端：Claude Code、Cursor、LM Studio、Windsurf、Codex、VS Code Copilot 等
 
 ## `execute_code`：内存 C# 执行
 
@@ -280,7 +297,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 | 通用逃生口 | `execute_code` — CodeDom 内存编译、`IFunplayCommand` + Undo、无沙箱（客户端层审批）| `RunCommand` — 命名空间黑名单沙箱 |
 | Play Mode 验证 | 完整闭环：进入 / 模拟输入 / 截图 / 读日志 / 退出 | 仅进入/退出，无输入模拟 |
 | 资产生成器 | 不内建（通过 `execute_code` 组合外部 API）| 内建 Image / Mesh / PBR / Sound / Animation 五类生成器 |
-| 主要客户端模型 | BYO 任意 MCP 客户端（Claude Code / Cursor / Codex / VS Code）| 自带对话窗口 + ACP 经 Gateway 接 Claude/Gemini |
+| 主要客户端模型 | BYO 任意 MCP 客户端（Claude Code / Cursor / LM Studio / Codex / VS Code）| 自带对话窗口 + ACP 经 Gateway 接 Claude/Gemini |
 | 离线可用 | ✅ 工具调用本身全本地（推理依赖所选客户端）| ❌ 推理必须连 Unity Cloud |
 
 长文对比见 [Funplay Unity MCP 与 Unity AI Assistant 详细对比](https://blog.csdn.net/m0_62670368/article/details/161039766)。
