@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+- Made HTTP transport stop cleanup idempotent during Unity domain reloads, avoiding disposed `HttpListener` errors when reload cleanup runs after the listener has already been closed.
+- Recognize Windows `HttpListenerException` address-in-use error codes and messages during restart retry detection.
+
 ## [0.3.4] - 2026-05-20
 
 ### Added

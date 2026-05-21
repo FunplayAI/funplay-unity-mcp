@@ -94,18 +94,26 @@ namespace Funplay.Editor.MCP.Server
 
         public void Stop()
         {
-            if (!_isRunning) return;
+            if (!_isRunning && _listener == null) return;
             try
             {
                 _cts?.Cancel();
                 _listener?.Stop();
                 _listener?.Close();
-                _isRunning = false;
                 PluginDebugLogger.Log("[Funplay MCP Server] HTTP transport stopped");
+            }
+            catch (ObjectDisposedException)
+            {
+                PluginDebugLogger.Log("[Funplay MCP Server] HTTP transport was already disposed");
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[Funplay MCP Server] Error stopping HTTP transport: {ex.Message}");
+            }
+            finally
+            {
+                _isRunning = false;
+                _listener = null;
             }
         }
 
@@ -130,6 +138,9 @@ namespace Funplay.Editor.MCP.Server
             return ex is HttpListenerException listenerException &&
                    (listenerException.ErrorCode == 48 ||
                     listenerException.ErrorCode == 98 ||
+                    listenerException.ErrorCode == 183 ||
+                    listenerException.ErrorCode == 10048 ||
+                    listenerException.Message.IndexOf("Only one usage", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     listenerException.Message.IndexOf("Address already in use", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
