@@ -17,6 +17,8 @@ namespace Funplay.Editor.MCP.Server
     {
         private const string WasRunningKey = "Funplay_MCPServer_WasRunning";
         private const string PortKey = "Funplay_MCPServer_Port";
+        private const string RestartDeadlineTicksKey = "Funplay_MCPServer_RestartDeadlineTicks";
+        private static readonly TimeSpan RestartRetryWindow = TimeSpan.FromMinutes(5);
         private static bool _restartScheduled;
         private static bool _restartInProgress;
 
@@ -43,6 +45,7 @@ namespace Funplay.Editor.MCP.Server
                 PluginDebugLogger.Log("[Funplay MCP Server] Saving state before domain reload");
                 SessionState.SetBool(WasRunningKey, true);
                 SessionState.SetInt(PortKey, mcpServer.Port);
+                SessionState.SetString(RestartDeadlineTicksKey, DateTime.UtcNow.Add(RestartRetryWindow).Ticks.ToString());
             }
             catch (Exception ex)
             {
@@ -116,13 +119,20 @@ namespace Funplay.Editor.MCP.Server
 
             if (!SessionState.GetBool(WasRunningKey, false))
             {
-                EditorApplication.update -= RestartWhenEditorIsReady;
-                _restartScheduled = false;
+                ClearScheduledRestart();
                 return;
             }
 
             if (EditorApplication.isCompiling)
                 return;
+
+            if (RestartDeadlineExpired())
+            {
+                Debug.LogError("[Funplay MCP Server] Timed out restarting after domain reload.");
+                ClearPendingRestart();
+                ClearScheduledRestart();
+                return;
+            }
 
             var services = RootScopeServices.Services;
             if (services == null)
@@ -133,8 +143,6 @@ namespace Funplay.Editor.MCP.Server
             if (mcpServer == null)
                 return;
 
-            EditorApplication.update -= RestartWhenEditorIsReady;
-            _restartScheduled = false;
             _restartInProgress = true;
 
             try
@@ -146,8 +154,22 @@ namespace Funplay.Editor.MCP.Server
                 if (!mcpServer.IsRunning)
                 {
                     var started = await mcpServer.StartAsync();
-                    if (!started)
+                    if (started)
+                    {
+                        ClearPendingRestart();
+                        ClearScheduledRestart();
+                    }
+                    else if (RestartDeadlineExpired())
+                    {
                         Debug.LogError("[Funplay MCP Server] Failed to restart after domain reload.");
+                        ClearPendingRestart();
+                        ClearScheduledRestart();
+                    }
+                }
+                else
+                {
+                    ClearPendingRestart();
+                    ClearScheduledRestart();
                 }
             }
             catch (Exception ex)
@@ -156,10 +178,34 @@ namespace Funplay.Editor.MCP.Server
             }
             finally
             {
-                SessionState.EraseBool(WasRunningKey);
-                SessionState.EraseInt(PortKey);
                 _restartInProgress = false;
             }
+        }
+
+        private static bool RestartDeadlineExpired()
+        {
+            var deadlineText = SessionState.GetString(RestartDeadlineTicksKey, string.Empty);
+            if (!long.TryParse(deadlineText, out var deadlineTicks))
+            {
+                SessionState.SetString(RestartDeadlineTicksKey, DateTime.UtcNow.Add(RestartRetryWindow).Ticks.ToString());
+                return false;
+            }
+
+            return DateTime.UtcNow.Ticks >= deadlineTicks;
+        }
+
+        private static void ClearPendingRestart()
+        {
+            SessionState.EraseBool(WasRunningKey);
+            SessionState.EraseInt(PortKey);
+            SessionState.EraseString(RestartDeadlineTicksKey);
+        }
+
+        private static void ClearScheduledRestart()
+        {
+            EditorApplication.delayCall -= RestartWhenEditorIsReady;
+            EditorApplication.update -= RestartWhenEditorIsReady;
+            _restartScheduled = false;
         }
     }
 }

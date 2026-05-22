@@ -32,6 +32,9 @@ namespace Funplay.Editor.Threading
 
         public Task ExecuteOnEditorThreadAsync(Action action)
         {
+            if (_disposed)
+                return CreateCanceledTask();
+
             if (IsMainThread)
             {
                 try
@@ -52,6 +55,9 @@ namespace Funplay.Editor.Threading
 
         public Task<T> ExecuteOnEditorThreadAsync<T>(Func<T> func)
         {
+            if (_disposed)
+                return CreateCanceledTask<T>();
+
             if (IsMainThread)
             {
                 try
@@ -76,6 +82,9 @@ namespace Funplay.Editor.Threading
 
         public Task<T> ExecuteAsyncOnEditorThreadAsync<T>(Func<Task<T>> asyncFunc)
         {
+            if (_disposed)
+                return CreateCanceledTask<T>();
+
             if (IsMainThread)
             {
                 return asyncFunc();
@@ -83,16 +92,28 @@ namespace Funplay.Editor.Threading
 
             var outerTcs = new TaskCompletionSource<T>();
             var tcs = new TaskCompletionSource<object>();
+            tcs.Task.ContinueWith(
+                task =>
+                {
+                    if (task.IsCanceled)
+                        outerTcs.TrySetCanceled();
+                    else if (task.IsFaulted)
+                        outerTcs.TrySetException(task.Exception?.InnerException ?? task.Exception ?? new Exception("Unknown error"));
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
             _funcQueue.Enqueue((() =>
             {
                 asyncFunc().ContinueWith(task =>
                 {
                     if (task.IsFaulted)
-                        outerTcs.SetException(task.Exception?.InnerException ?? task.Exception ?? new Exception("Unknown error"));
+                        outerTcs.TrySetException(task.Exception?.InnerException ?? task.Exception ?? new Exception("Unknown error"));
                     else if (task.IsCanceled)
-                        outerTcs.SetCanceled();
+                        outerTcs.TrySetCanceled();
                     else
-                        outerTcs.SetResult(task.Result);
+                        outerTcs.TrySetResult(task.Result);
                 });
                 return (object)null;
             }, tcs));
@@ -146,6 +167,20 @@ namespace Funplay.Editor.Threading
                 item.tcs.TrySetCanceled();
             while (_funcQueue.TryDequeue(out var item))
                 item.tcs.TrySetCanceled();
+        }
+
+        private static Task CreateCanceledTask()
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            tcs.SetCanceled();
+            return tcs.Task;
+        }
+
+        private static Task<T> CreateCanceledTask<T>()
+        {
+            var tcs = new TaskCompletionSource<T>();
+            tcs.SetCanceled();
+            return tcs.Task;
         }
     }
 }

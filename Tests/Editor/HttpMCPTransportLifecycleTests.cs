@@ -21,10 +21,9 @@ namespace Funplay.Editor
     {
         private const string ServerName = "Funplay MCP Server - Test Project";
         private const string ProjectIdentityA = "project-a";
-        private const string ProjectIdentityB = "project-b";
 
         [UnityTest]
-        public IEnumerator StartAsync_AttachesToExistingSameProjectFunplayServer()
+        public IEnumerator StartAsync_WhenPortIsAlreadyOwned_ReturnsFalseWithoutStoppingOwner()
         {
             var port = GetFreeTcpPort();
             var firstTransport = new HttpMCPTransport(port, ServerName, ProjectIdentityA);
@@ -40,12 +39,15 @@ namespace Funplay.Editor
                 Assert.IsTrue(firstStart.Result, "The first transport should bind a free port.");
 
                 var stopwatch = Stopwatch.StartNew();
-                var secondStart = secondTransport.StartAsync();
-                yield return WaitForTask(secondStart);
-                Assert.IsTrue(secondStart.Result, "A second transport for the same project should attach to the existing Funplay server instead of timing out.");
+                using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(900)))
+                {
+                    var secondStart = secondTransport.StartAsync(cts.Token);
+                    yield return WaitForTask(secondStart);
+                    Assert.IsFalse(secondStart.Result, "A second transport must not report running when it does not own the listener.");
+                }
                 stopwatch.Stop();
 
-                Assert.IsTrue(secondTransport.IsAttachedToExistingServer);
+                Assert.IsFalse(secondTransport.IsAttachedToExistingServer);
                 Assert.Less(stopwatch.Elapsed, TimeSpan.FromSeconds(2));
 
                 secondTransport.Stop();
@@ -55,7 +57,7 @@ namespace Funplay.Editor
                 Assert.That(
                     probeTask.Result,
                     Does.Contain(ProjectIdentityA),
-                    "Stopping an attached transport must not stop the owning listener.");
+                    "Stopping a failed second transport must not stop the owning listener.");
             }
             finally
             {
@@ -65,11 +67,11 @@ namespace Funplay.Editor
         }
 
         [UnityTest]
-        public IEnumerator StartAsync_DoesNotAttachToSameNameDifferentProject()
+        public IEnumerator Stop_ReleasesOwnedPortForRestart()
         {
             var port = GetFreeTcpPort();
             var firstTransport = new HttpMCPTransport(port, ServerName, ProjectIdentityA);
-            var secondTransport = new HttpMCPTransport(port, ServerName, ProjectIdentityB);
+            var secondTransport = new HttpMCPTransport(port, ServerName, ProjectIdentityA);
 
             firstTransport.OnRequestReceived += (request, sendResponse) =>
                 HandleInitializeRequest(request, sendResponse, ProjectIdentityA);
@@ -80,17 +82,11 @@ namespace Funplay.Editor
                 yield return WaitForTask(firstStart);
                 Assert.IsTrue(firstStart.Result);
 
-                using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(900)))
-                {
-                    var secondStart = secondTransport.StartAsync(cts.Token);
-                    yield return WaitForTask(secondStart);
-                    Assert.IsFalse(secondStart.Result);
-                }
+                firstTransport.Stop();
 
-                Assert.IsFalse(secondTransport.IsAttachedToExistingServer);
-                var probeTask = SendInitializeRequestAsync(port);
-                yield return WaitForTask(probeTask);
-                Assert.That(probeTask.Result, Does.Contain(ProjectIdentityA));
+                var secondStart = secondTransport.StartAsync();
+                yield return WaitForTask(secondStart);
+                Assert.IsTrue(secondStart.Result, "Stopping the owner should release the port for a fresh transport.");
             }
             finally
             {
@@ -100,7 +96,7 @@ namespace Funplay.Editor
         }
 
         [UnityTest]
-        public IEnumerator StartAsync_ProbeTimeoutIsNotTreatedAsExternalCancellation()
+        public IEnumerator StartAsync_UnresponsivePortOwnerFailsWithoutReportingRunning()
         {
             var port = GetFreeTcpPort();
             using (var listener = CreateHttpListener(port))
@@ -128,6 +124,32 @@ namespace Funplay.Editor
                     listener.Close();
                     serverTask.Wait(100);
                 }
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator RequestWithoutSubscriber_ReturnsServerNotReadyErrorWithoutWaitingForTimeout()
+        {
+            var port = GetFreeTcpPort();
+            var transport = new HttpMCPTransport(port, ServerName, ProjectIdentityA);
+
+            try
+            {
+                var startTask = transport.StartAsync();
+                yield return WaitForTask(startTask);
+                Assert.IsTrue(startTask.Result);
+
+                var stopwatch = Stopwatch.StartNew();
+                var probeTask = SendInitializeRequestAsync(port);
+                yield return WaitForTask(probeTask, 2f);
+                stopwatch.Stop();
+
+                Assert.That(probeTask.Result, Does.Contain("MCP server is stopping or not ready."));
+                Assert.Less(stopwatch.Elapsed, TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                transport.Dispose();
             }
         }
 

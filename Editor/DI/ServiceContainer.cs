@@ -208,8 +208,9 @@ namespace Funplay.Editor.DI
         {
             lock (_lock)
             {
-                foreach (var disposable in _disposables)
+                for (var i = _disposables.Count - 1; i >= 0; i--)
                 {
+                    var disposable = _disposables[i];
                     try { disposable.Dispose(); } catch { }
                 }
                 _disposables.Clear();
@@ -319,8 +320,9 @@ namespace Funplay.Editor.DI
         {
             lock (_lock)
             {
-                foreach (var disposable in _disposables)
+                for (var i = _disposables.Count - 1; i >= 0; i--)
                 {
+                    var disposable = _disposables[i];
                     try { disposable.Dispose(); } catch { }
                 }
                 _disposables.Clear();
