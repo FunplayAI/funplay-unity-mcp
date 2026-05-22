@@ -163,7 +163,8 @@ namespace Funplay.Editor.MCP.Server
                 var toolExposureSetting = BuildToolExposureSetting();
                 PluginDebugLogger.Log("[Funplay MCP Server] Starting server...");
 
-                transport = new HttpMCPTransport(startupPort);
+                var serverName = "Funplay MCP Server - " + Application.productName;
+                transport = new HttpMCPTransport(startupPort, serverName);
                 var toolExporter = new MCPToolExporter(_settings);
                 var executionBridge = new MCPExecutionBridge(_threadHelper, _settings, _stateController, _invoker, InteractionLog);
                 resourceProvider = new MCPResourceProvider(_contextBuilder, _applicationPaths, InteractionLog);
@@ -173,7 +174,7 @@ namespace Funplay.Editor.MCP.Server
                     executionBridge,
                     resourceProvider,
                     promptProvider,
-                    "Funplay MCP Server - " + Application.productName,
+                    serverName,
                     PackageVersionUtility.CurrentVersion);
 
                 transport.OnRequestReceived += HandleRequestReceived;

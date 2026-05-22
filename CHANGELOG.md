@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Reuse an already-running Funplay HTTP transport for the same Unity project when a duplicate start sees the configured port as in use, while still failing normally for unrelated listeners.
+
 ## [0.3.6] - 2026-05-21
 
 ### Fixed

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,16 +22,20 @@ namespace Funplay.Editor.MCP.Server
         private HttpListener _listener;
         private CancellationTokenSource _cts;
         private readonly int _port;
+        private readonly string _expectedServerName;
         private bool _isRunning;
+        private bool _ownsListener;
         private const int StartRetryAttempts = 40;
         private const int StartRetryDelayMs = 250;
+        private const int ExistingServerProbeTimeoutMs = 500;
 
         public bool IsRunning => _isRunning;
         public event Action<MCPRequest, Action<MCPResponse>> OnRequestReceived;
 
-        public HttpMCPTransport(int port)
+        public HttpMCPTransport(int port, string expectedServerName = null)
         {
             _port = port;
+            _expectedServerName = expectedServerName;
         }
 
         public async Task<bool> StartAsync(CancellationToken ct = default)
@@ -50,6 +55,7 @@ namespace Funplay.Editor.MCP.Server
 
                     _cts = new CancellationTokenSource();
                     _isRunning = true;
+                    _ownsListener = true;
 
                     _ = Task.Run(() => ListenLoopAsync(_cts.Token), _cts.Token);
 
@@ -62,9 +68,22 @@ namespace Funplay.Editor.MCP.Server
                     _isRunning = false;
                     return false;
                 }
-                catch (Exception ex) when (IsAddressInUse(ex) && attempt < StartRetryAttempts)
+                catch (Exception ex) when (IsAddressInUse(ex))
                 {
                     CleanupFailedStart();
+
+                    if (await TryAttachToExistingFunplayServerAsync(ct))
+                    {
+                        return true;
+                    }
+
+                    if (attempt >= StartRetryAttempts)
+                    {
+                        Debug.LogError($"[Funplay MCP Server] Failed to start HTTP transport: {ex.Message}");
+                        _isRunning = false;
+                        return false;
+                    }
+
                     if (attempt == 1)
                     {
                         Debug.LogWarning(
@@ -99,10 +118,17 @@ namespace Funplay.Editor.MCP.Server
 
             try
             {
-                _cts?.Cancel();
-                _listener?.Stop();
-                _listener?.Close();
-                PluginDebugLogger.Log("[Funplay MCP Server] HTTP transport stopped");
+                if (_ownsListener)
+                {
+                    _cts?.Cancel();
+                    _listener?.Stop();
+                    _listener?.Close();
+                    PluginDebugLogger.Log("[Funplay MCP Server] HTTP transport stopped");
+                }
+                else if (_isRunning)
+                {
+                    PluginDebugLogger.Log("[Funplay MCP Server] Detached from existing HTTP transport");
+                }
             }
             catch (ObjectDisposedException)
             {
@@ -115,6 +141,7 @@ namespace Funplay.Editor.MCP.Server
             finally
             {
                 _isRunning = false;
+                _ownsListener = false;
                 _listener = null;
                 _cts?.Dispose();
                 _cts = null;
@@ -134,7 +161,64 @@ namespace Funplay.Editor.MCP.Server
             finally
             {
                 _listener = null;
+                _ownsListener = false;
             }
+        }
+
+        private async Task<bool> TryAttachToExistingFunplayServerAsync(CancellationToken ct)
+        {
+            try
+            {
+                var responseText = await SendInitializeProbeAsync(ct);
+
+                if (!IsExpectedFunplayServer(responseText, _expectedServerName))
+                    return false;
+
+                _isRunning = true;
+                _ownsListener = false;
+                PluginDebugLogger.Log(
+                    $"[Funplay MCP Server] Reusing existing HTTP transport on http://127.0.0.1:{_port}/");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<string> SendInitializeProbeAsync(CancellationToken ct)
+        {
+            var body = "{\"jsonrpc\":\"2.0\",\"id\":\"funplay-existing-server-probe\",\"method\":\"initialize\",\"params\":{}}";
+            using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            using (var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(ExistingServerProbeTimeoutMs) })
+            using (var content = new StringContent(body, Encoding.UTF8, "application/json"))
+            {
+                timeoutCts.CancelAfter(ExistingServerProbeTimeoutMs);
+                var response = await client.PostAsync($"http://127.0.0.1:{_port}/", content, timeoutCts.Token);
+                if (response.StatusCode != HttpStatusCode.OK)
+                    return string.Empty;
+
+                return await response.Content.ReadAsStringAsync();
+            }
+        }
+
+        private static bool IsExpectedFunplayServer(string responseText, string expectedServerName)
+        {
+            if (string.IsNullOrEmpty(responseText) ||
+                responseText.IndexOf("\"serverInfo\"", StringComparison.OrdinalIgnoreCase) < 0 ||
+                responseText.IndexOf("\"name\"", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(expectedServerName))
+                return responseText.IndexOf(expectedServerName, StringComparison.Ordinal) >= 0;
+
+            return responseText.IndexOf("Funplay MCP Server", StringComparison.Ordinal) >= 0;
         }
 
         private static bool IsAddressInUse(Exception ex)
