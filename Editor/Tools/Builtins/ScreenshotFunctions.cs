@@ -23,6 +23,17 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Width of the screenshot in pixels", Required = false)] int width = 0,
             [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0)
         {
+            // First try: read the Game View's last-rendered frame directly from the
+            // PlayModeView's internal RenderTexture. This is pipeline-agnostic and
+            // works correctly with URP, HDRP, and Built-in render pipelines.
+            // camera.Render() (used in the fallback) bypasses Scriptable Render Pipelines
+            // and produces a black image for URP/HDRP cameras.
+            var directCapture = TryCapturePlayModeViewRT();
+            if (directCapture != null)
+                return directCapture;
+
+            // Fallback: render the camera manually into a temporary RT.
+            // Works for Built-in pipeline in Edit Mode.
             if (!TryResolveGameViewSize(ref width, ref height))
             {
                 width = Mathf.Clamp(width > 0 ? width : 512, 64, 4096);
@@ -268,6 +279,74 @@ namespace Funplay.Editor.Tools.Builtins
         {
             a.Encapsulate(b);
             return a;
+        }
+
+        /// <summary>
+        /// Reads the last rendered frame directly from the PlayModeView's internal
+        /// RenderTexture via reflection. This approach is render-pipeline-agnostic:
+        /// it captures whatever Unity has already rendered to the Game View, including
+        /// all URP/HDRP post-processing and ScreenSpaceOverlay UI.
+        ///
+        /// The source texture is often in BGRA32 format (Metal/Vulkan) and cannot be
+        /// read directly with Texture2D.ReadPixels — it must first be blitted into an
+        /// ARGB32 RenderTexture to produce a correctly-formatted, CPU-readable buffer.
+        ///
+        /// Returns null when the Game View is unavailable or has not rendered a frame.
+        /// </summary>
+        private static string TryCapturePlayModeViewRT()
+        {
+            RenderTexture blitRT = null;
+            Texture2D screenshot = null;
+            var previousActive = RenderTexture.active;
+
+            try
+            {
+                var playModeViewType = Type.GetType("UnityEditor.PlayModeView,UnityEditor");
+                var getMainMethod = playModeViewType?.GetMethod(
+                    "GetMainPlayModeView",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                var playModeView = getMainMethod?.Invoke(null, null);
+                if (playModeView == null)
+                    return null;
+
+                var rtField = playModeView.GetType().GetField(
+                    "m_RenderTexture",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var sourceRT = rtField?.GetValue(playModeView) as RenderTexture;
+
+                if (sourceRT == null || !sourceRT.IsCreated() || sourceRT.width <= 0 || sourceRT.height <= 0)
+                    return null;
+
+                // Blit into a readable ARGB32 RT. Direct ReadPixels from the source
+                // (BGRA32 on Metal/URP) produces black pixels on some platforms.
+                blitRT = new RenderTexture(sourceRT.width, sourceRT.height, 0, RenderTextureFormat.ARGB32);
+                blitRT.Create();
+                Graphics.Blit(sourceRT, blitRT);
+
+                RenderTexture.active = blitRT;
+                screenshot = new Texture2D(blitRT.width, blitRT.height, TextureFormat.RGB24, false);
+                screenshot.ReadPixels(new Rect(0, 0, blitRT.width, blitRT.height), 0, 0);
+                screenshot.Apply();
+
+                var pngBytes = screenshot.EncodeToPNG();
+                return ImagePrefix + Convert.ToBase64String(pngBytes);
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                RenderTexture.active = previousActive;
+
+                if (blitRT != null)
+                {
+                    blitRT.Release();
+                    UnityEngine.Object.DestroyImmediate(blitRT);
+                }
+                if (screenshot != null)
+                    UnityEngine.Object.DestroyImmediate(screenshot);
+            }
         }
 
         private static bool TryResolveGameViewSize(ref int width, ref int height)
