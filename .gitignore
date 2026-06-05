@@ -30,6 +30,8 @@
 .DS_Store
 Thumbs.db
 !Documentation~/
+!Broker~/
+!Broker~/**
 
 # Builds
 *.apk

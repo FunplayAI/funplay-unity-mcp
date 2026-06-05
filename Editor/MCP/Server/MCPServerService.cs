@@ -177,7 +177,24 @@ namespace Funplay.Editor.MCP.Server
 
                 var serverName = "Funplay MCP Server - " + Application.productName;
                 var projectIdentity = FunplayProjectIdentity.FromProjectPath(_applicationPaths.ProjectPath);
-                transport = new HttpMCPTransport(startupPort, serverName, projectIdentity);
+
+                // Out-of-process broker mode (survives Unity domain reloads). The broker process
+                // binds the SAME port as the server (startupPort), so MCP clients need no config
+                // change; this plugin connects to it as a client (BrokerClientTransport). When broker
+                // mode is off we also kill any stale broker so the in-process listener can bind.
+                // See Broker~/README.md for the design and the reference broker process.
+                if (_settings.BrokerModeEnabled && BrokerProcessManager.EnsureRunning(startupPort, _settings.BrokerMonoPath))
+                {
+                    transport = new BrokerClientTransport(startupPort);
+                }
+                else
+                {
+                    if (_settings.BrokerModeEnabled)
+                        Debug.LogWarning($"[Funplay MCP Server] Broker mode requested but the broker could not start ({BrokerProcessManager.LastError}); falling back to the in-process transport.");
+                    else
+                        BrokerProcessManager.Stop();
+                    transport = new HttpMCPTransport(startupPort, serverName, projectIdentity);
+                }
                 var toolExporter = new MCPToolExporter(_settings);
                 var executionBridge = new MCPExecutionBridge(_threadHelper, _settings, _stateController, _invoker, InteractionLog);
                 resourceProvider = new MCPResourceProvider(_contextBuilder, _applicationPaths, InteractionLog);
