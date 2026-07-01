@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Added 12 Profiler tools (category `Profiler`): `profiler_start`/`profiler_stop`/`profiler_status` for session control; `get_frame_timing`/`get_counters` for CPU/GPU frame timing and persistent `ProfilerRecorder` counters; `get_object_memory` for per-asset/GameObject runtime memory footprint; `memory_take_snapshot`/`memory_list_snapshots`/`memory_compare_snapshots` for lightweight aggregate memory snapshots (not real `.snap` files); `frame_debugger_enable`/`frame_debugger_disable`/`frame_debugger_get_events` for driving the Frame Debugger via reflection. See [PROFILER_TOOLS.md](PROFILER_TOOLS.md) for the full reference, implementation notes, known limitations, and test report.
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
