@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Fixed `get_performance_snapshot` and `analyze_scene_complexity` under-reporting scene stats in multi-scene projects. Both tools sourced root GameObjects from `SceneManager.GetActiveScene()` only, silently excluding any additively loaded scenes (e.g. a bootstrap scene loading a content scene on top); they now walk every loaded scene via `SceneManager.sceneCount`/`GetSceneAt`, and the "Scene:" summary line is renamed "Scene(s):" to list every scene that was counted.
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
