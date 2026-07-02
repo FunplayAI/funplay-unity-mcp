@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Added Unity Test Runner integration with an async job pattern: `run_tests` starts an EditMode/PlayMode run (with optional test/category/assembly filters) and returns a job id immediately; `get_test_job` polls progress (completed/total) and final results (pass/fail/skip counts plus failure messages and truncated stack traces); `cancel_test_run` cancels a stuck run (requires com.unity.test-framework 1.3+, resolved by reflection and reported as unsupported on the 1.1.x that Unity 2022.3 bundles). Job state lives in SessionState and the results callback re-registers on every domain load, so PlayMode runs that reload the domain mid-run still report completion.
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
