@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Added Animator runtime control tools: `get_animator_state` reads the current state (state name resolved from the controller when possible, including through AnimatorOverrideController) plus all parameters with current values; `set_animator_parameter` sets a parameter by name with automatic Float/Int/Bool/Trigger type detection; `play_animator_state` plays a named state and force-evaluates the animator once in Edit Mode so poses apply without entering Play Mode (useful for driving UI to a known state before a screenshot).
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
