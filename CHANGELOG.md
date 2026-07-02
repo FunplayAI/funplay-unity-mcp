@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- `get_console_logs` gained two optional parameters: `group_duplicates` collapses repeated identical messages into one "message (xN)" line (in a real project this compacted 100 cached entries down to 20 unique lines, keeping spammy Animator warnings from drowning out unique entries), and `filter_text` filters entries by a case-insensitive substring. Both apply to the cache and console read paths; default behavior is unchanged.
+
+### Fixed
+- `get_console_logs` now truncates each emitted line to 300 characters (annotated with the remaining length). A single log entry containing a huge one-line payload (observed in the wild: an entire 280KB save-file JSON logged to the console) previously blew up the whole tool response.
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
