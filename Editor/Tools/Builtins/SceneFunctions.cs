@@ -51,22 +51,29 @@ namespace Funplay.Editor.Tools.Builtins
             return $"Created and saved new scene: {fullPath}";
         }
 
-        [Description("Get information about the current scene")]
+        [Description("Get information about every loaded scene (the active scene plus any additively loaded ones), " +
+                     "including path, dirty state, and a shallow root-object hierarchy per scene.")]
         [ReadOnlyTool]
         public static string GetSceneInfo()
         {
-            var scene = EditorSceneManager.GetActiveScene();
-            var rootObjects = scene.GetRootGameObjects();
-
+            var activeScene = EditorSceneManager.GetActiveScene();
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Scene: {scene.name}");
-            sb.AppendLine($"Path: {scene.path}");
-            sb.AppendLine($"Is Dirty: {scene.isDirty}");
-            sb.AppendLine($"Root Objects ({rootObjects.Length}):");
 
-            foreach (var go in rootObjects)
+            for (int i = 0; i < SceneManager.sceneCount; i++)
             {
-                AppendHierarchy(sb, go.transform, 1, 3);
+                var scene = SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue;
+
+                var rootObjects = scene.GetRootGameObjects();
+                sb.AppendLine(scene == activeScene ? $"Scene: {scene.name} (active)" : $"Scene: {scene.name} (additive)");
+                sb.AppendLine($"Path: {scene.path}");
+                sb.AppendLine($"Is Dirty: {scene.isDirty}");
+                sb.AppendLine($"Root Objects ({rootObjects.Length}):");
+
+                foreach (var go in rootObjects)
+                {
+                    AppendHierarchy(sb, go.transform, 1, 3);
+                }
             }
 
             return sb.ToString();
