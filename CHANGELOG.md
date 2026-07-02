@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Added ScriptableObject asset tools: `create_scriptable_object` creates a new asset of any ScriptableObject-derived type, `get_scriptable_object` reads all serialized properties (including `[SerializeField]` private fields), and `set_scriptable_object_properties` writes fields with a per-field success report and persists via `SaveAssetIfDirty`. Reuses the component property machinery (`ComponentSerializer` signatures widened from `Component` to `UnityEngine.Object`, source-compatible for existing callers).
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
