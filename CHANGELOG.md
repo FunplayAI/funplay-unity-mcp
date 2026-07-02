@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Added prefab stage editing tools: `open_prefab_stage` opens a prefab asset in Prefab Mode for isolated editing (hierarchy/component tools and `execute_code` then operate on the prefab contents), `save_prefab_stage` persists edits back to the `.prefab` asset without closing, and `close_prefab_stage` returns to the main stage with an explicit save/discard choice. Closing clears the stage's dirty flag first so a blocking "save changes?" modal can never stall the MCP request.
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
