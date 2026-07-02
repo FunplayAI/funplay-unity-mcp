@@ -181,6 +181,7 @@ namespace Funplay.Editor.MCP.Server
                 var projectIdentity = FunplayProjectIdentity.FromProjectPath(_applicationPaths.ProjectPath);
                 transport = CreateTransport(startupPort, serverName, projectIdentity);
                 var toolExporter = new MCPToolExporter(_settings);
+                MCPToolListChangeNotifier.CheckForChanges(toolExporter);
                 var executionBridge = new MCPExecutionBridge(_threadHelper, _settings, _stateController, _invoker, InteractionLog);
                 resourceProvider = new MCPResourceProvider(_contextBuilder, _applicationPaths, InteractionLog);
                 var promptProvider = new MCPPromptProvider(Application.productName, _applicationPaths.ProjectPath);

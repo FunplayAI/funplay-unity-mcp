@@ -4,7 +4,10 @@ namespace Funplay.Editor.MCP.Server
 {
     internal static class MCPBrokerProtocol
     {
-        public const int Version = 1;
+        // v2: pull responses carry AcceptSseHeader (client's Accept: text/event-stream),
+        //     push requests may carry ContentTypeHeader to override the client-facing
+        //     response content type (used for SSE-piggybacked notifications).
+        public const int Version = 2;
         public const string Name = "funplay-unity-mcp-broker";
         public const string HealthPath = "/_funplay/broker/health";
         public const string AttachPath = "/_funplay/broker/attach";
@@ -17,5 +20,7 @@ namespace Funplay.Editor.MCP.Server
         public const string ReqIdHeader = "X-Funplay-Broker-ReqId";
         public const string RedeliveryHeader = "X-Funplay-Broker-Redelivery";
         public const string BrokerHeader = "X-Funplay-Broker";
+        public const string AcceptSseHeader = "X-Funplay-Broker-Accept-SSE";
+        public const string ContentTypeHeader = "X-Funplay-Broker-Content-Type";
     }
 }

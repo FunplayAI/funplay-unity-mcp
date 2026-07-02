@@ -55,6 +55,17 @@ namespace Funplay.Editor.MCP.Server
                         return true;
                     }
 
+                    // The pid file points at a broker we started, but it no longer passes
+                    // the probe (typically a protocol-version mismatch after a package
+                    // upgrade). Shut it down with its recorded token so the port frees up,
+                    // instead of leaving the stale process squatting on the port forever.
+                    if (existing.Port == port && IsTcpPortOpen(port))
+                    {
+                        SendShutdown(existing.Port, existing.Token);
+                        WaitForExit(existing.Pid, 2500);
+                        KillVerifiedProcess(existing.Pid);
+                    }
+
                     DeletePidFile(paths.PidFilePath);
                     if (existing.Port == port && IsTcpPortOpen(port))
                     {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Declared `capabilities.tools.listChanged` in the `initialize` response and implemented lazy `notifications/tools/list_changed` delivery: when the exposed tool set changes (Tool Exposure save, newly registered tools after a recompile), the next client request that accepts `text/event-stream` receives an SSE response carrying the notification before the JSON-RPC result, so MCP clients such as Claude Code refresh their tool list without a session restart. Supported on both the direct HTTP transport and broker mode (broker protocol v2 with Accept/Content-Type passthrough).
+
+### Fixed
+- Broker manager now gracefully shuts down a stale broker process that no longer passes the health probe (typically a protocol-version mismatch after a package upgrade) instead of leaving it holding the port and failing the server with "Address already in use".
+- A failure while handling a single broker-delivered request no longer terminates the broker poll loop (which previously left all subsequent requests queued forever).
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
