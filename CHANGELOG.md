@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+- MCP Server panel UX improvements to the transport/broker controls:
+  - The transport selector is now a "Transport Mode" dropdown (`Direct HTTP (default)` / `Broker Mode (Experimental)`) instead of a checkbox, so the two transports read as an explicit mutually-exclusive choice instead of an on/off flag.
+  - The "Broker Mono Path" field now shows the real effect of the "leave empty to auto-detect" default instead of always rendering blank: when no override is set, the field displays the actually auto-detected Mono executable path (display-only — it does not persist as an override), and if auto-detection fails, the field stays empty and a red inline hint explains that broker mode needs the path set manually.
+
+  Behavior, defaults, and the underlying settings are unchanged — both are presentation-only improvements.
+
+### Fixed
+- Fixed a broker process leak when the Server Port setting changes while broker mode is active: `MCPBrokerProcessManager.EnsureRunning` only shut down the previously recorded broker process when its recorded port matched the newly requested port, so changing the port left the old broker orphaned (and deleted its pid file, making it unrecoverable by any later cleanup) while a fresh broker started on the new port. The stale-broker shutdown now runs regardless of whether the port changed.
+- The "Server Port" field now restarts the server transport when changed (matching how the Transport Mode dropdown already behaves), instead of only updating the setting and waiting for an unrelated restart (e.g. a script recompile) to actually bind the new port. The field commits on Enter/blur rather than per keystroke to avoid restarting once per typed digit.
+
 ## [0.4.8] - 2026-06-24
 
 ### Fixed
