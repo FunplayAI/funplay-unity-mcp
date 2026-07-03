@@ -33,7 +33,8 @@ namespace Funplay.Editor.Services.UnityLogs
             Application.logMessageReceived -= OnLogReceived;
         }
 
-        public string GetRecentLogs(string logType = "all", int count = 30, int sinceSeconds = 0)
+        public string GetRecentLogs(string logType = "all", int count = 30, int sinceSeconds = 0,
+            string filterText = null, bool groupDuplicates = false)
         {
             count = Mathf.Clamp(count, 1, 200);
             var filter = (logType ?? "all").ToLowerInvariant();
@@ -48,10 +49,9 @@ namespace Funplay.Editor.Services.UnityLogs
             if (snapshot.Count == 0)
                 return null;
 
-            var sb = new StringBuilder();
-            int matchCount = 0;
+            var lines = new List<string>();
 
-            for (int i = snapshot.Count - 1; i >= 0 && matchCount < count; i--)
+            for (int i = snapshot.Count - 1; i >= 0 && lines.Count < count; i--)
             {
                 var entry = snapshot[i];
                 if (cutoff.HasValue && entry.Timestamp < cutoff.Value)
@@ -60,11 +60,14 @@ namespace Funplay.Editor.Services.UnityLogs
                 if (!MatchesFilter(entry.Type, filter))
                     continue;
 
-                sb.AppendLine($"[{ToLabel(entry.Type)}] {FirstLine(entry.Message)}");
-                matchCount++;
+                var firstLine = FirstLine(entry.Message);
+                if (!MatchesTextFilter(firstLine, filterText))
+                    continue;
+
+                lines.Add($"[{ToLabel(entry.Type)}] {TruncateLine(firstLine)}");
             }
 
-            if (matchCount == 0)
+            if (lines.Count == 0)
             {
                 if (sinceSeconds > 0)
                     return $"No {filter} entries found in cached logs from the last {sinceSeconds} second(s)";
@@ -72,8 +75,67 @@ namespace Funplay.Editor.Services.UnityLogs
                 return $"No {filter} entries found in cached logs";
             }
 
+            var sb = new StringBuilder();
+            var uniqueCount = AppendLines(sb, lines, groupDuplicates);
+
             var timeSuffix = sinceSeconds > 0 ? $", last {sinceSeconds}s" : string.Empty;
-            return $"Console logs ({matchCount} entries, filter: {filter}, source: cache{timeSuffix}):\n{sb}";
+            var textSuffix = string.IsNullOrEmpty(filterText) ? string.Empty : $", text: '{filterText}'";
+            var groupSuffix = groupDuplicates && uniqueCount < lines.Count
+                ? $", {uniqueCount} unique"
+                : string.Empty;
+            return $"Console logs ({lines.Count} entries{groupSuffix}, filter: {filter}, source: cache{timeSuffix}{textSuffix}):\n{sb}";
+        }
+
+        internal static bool MatchesTextFilter(string line, string filterText)
+        {
+            if (string.IsNullOrEmpty(filterText))
+                return true;
+            return line != null && line.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        // A single log line can be enormous (e.g. an entire save-file JSON dumped to the console).
+        // Cap emitted lines so one such entry cannot blow up the whole tool response.
+        private const int MaxEmittedLineLength = 300;
+
+        internal static string TruncateLine(string line)
+        {
+            if (string.IsNullOrEmpty(line) || line.Length <= MaxEmittedLineLength)
+                return line;
+            return line.Substring(0, MaxEmittedLineLength) + $"... (+{line.Length - MaxEmittedLineLength} chars)";
+        }
+
+        // Appends lines to the builder; with grouping, identical lines collapse to one
+        // "line (xN)" entry in first-seen order. Returns the number of lines written.
+        internal static int AppendLines(StringBuilder sb, List<string> lines, bool groupDuplicates)
+        {
+            if (!groupDuplicates)
+            {
+                foreach (var line in lines)
+                    sb.AppendLine(line);
+                return lines.Count;
+            }
+
+            var order = new List<string>();
+            var counts = new Dictionary<string, int>();
+            foreach (var line in lines)
+            {
+                if (counts.TryGetValue(line, out var existing))
+                {
+                    counts[line] = existing + 1;
+                }
+                else
+                {
+                    counts[line] = 1;
+                    order.Add(line);
+                }
+            }
+
+            foreach (var line in order)
+            {
+                var n = counts[line];
+                sb.AppendLine(n > 1 ? $"{line} (x{n})" : line);
+            }
+            return order.Count;
         }
 
         public void Clear()

@@ -87,14 +87,18 @@ namespace Funplay.Editor.Tools.Builtins
         [Description("Get recent console log messages from Unity. " +
                      "Returns Debug.Log, Debug.LogWarning, and Debug.LogError output. " +
                      "Useful for checking runtime behavior after play mode actions. " +
-                     "Supports reading from the live log cache, clearing the cache, and time-based filtering.")]
+                     "Supports reading from the live log cache, clearing the cache, time-based filtering, " +
+                     "case-insensitive text filtering, and collapsing repeated identical messages into one " +
+                     "'message (xN)' line so spammy warnings don't drown out unique entries.")]
         [ReadOnlyTool]
         public static string GetConsoleLogs(
             [ToolParam("Filter by log type: 'all', 'log', 'warning', 'error'", Required = false)] string log_type = "all",
             [ToolParam("Maximum number of entries to return", Required = false)] int count = 30,
             [ToolParam("Source: 'auto', 'cache', or 'console'", Required = false)] string source = "auto",
             [ToolParam("Clear the cached logs before reading", Required = false)] bool clear_cache = false,
-            [ToolParam("Only include cached log entries from the last N seconds (cache/auto only)", Required = false)] int since_seconds = 0)
+            [ToolParam("Only include cached log entries from the last N seconds (cache/auto only)", Required = false)] int since_seconds = 0,
+            [ToolParam("Only include entries whose message contains this text (case-insensitive)", Required = false)] string filter_text = null,
+            [ToolParam("Collapse repeated identical messages into one line with a (xN) count", Required = false)] bool group_duplicates = false)
         {
             count = Mathf.Clamp(count, 1, 200);
             since_seconds = Mathf.Clamp(since_seconds, 0, 86400);
@@ -111,7 +115,7 @@ namespace Funplay.Editor.Tools.Builtins
 
             if (source == "cache" || source == "auto")
             {
-                var cachedLogs = logsRepository?.GetRecentLogs(log_type, count, since_seconds);
+                var cachedLogs = logsRepository?.GetRecentLogs(log_type, count, since_seconds, filter_text, group_duplicates);
                 if (!string.IsNullOrEmpty(cachedLogs))
                     return cachedLogs;
 
@@ -156,10 +160,9 @@ namespace Funplay.Editor.Tools.Builtins
             startMethod.Invoke(null, null);
             try
             {
-                var sb = new StringBuilder();
-                int matchCount = 0;
+                var lines = new System.Collections.Generic.List<string>();
 
-                for (int i = totalCount - 1; i >= 0 && matchCount < count; i--)
+                for (int i = totalCount - 1; i >= 0 && lines.Count < count; i--)
                 {
                     var entry = Activator.CreateInstance(logEntryType);
                     getEntryMethod.Invoke(null, new object[] { i, entry });
@@ -188,15 +191,24 @@ namespace Funplay.Editor.Tools.Builtins
                     if (filterLower == "warning" && !isWarning) continue;
                     if (filterLower == "log" && (isError || isWarning)) continue;
 
-                    var firstLine = message.Split('\n')[0];
-                    sb.AppendLine($"[{typeLabel}] {firstLine}");
-                    matchCount++;
+                    var firstLine = string.IsNullOrEmpty(message) ? string.Empty : message.Split('\n')[0];
+                    if (!UnityLogsRepository.MatchesTextFilter(firstLine, filter_text))
+                        continue;
+
+                    lines.Add($"[{typeLabel}] {UnityLogsRepository.TruncateLine(firstLine)}");
                 }
 
-                if (matchCount == 0)
+                if (lines.Count == 0)
                     return $"No {log_type} entries found in console";
 
-                return $"Console logs ({matchCount} entries, filter: {log_type}, source: console):\n{sb}";
+                var sb = new StringBuilder();
+                var uniqueCount = UnityLogsRepository.AppendLines(sb, lines, group_duplicates);
+
+                var textSuffix = string.IsNullOrEmpty(filter_text) ? string.Empty : $", text: '{filter_text}'";
+                var groupSuffix = group_duplicates && uniqueCount < lines.Count
+                    ? $", {uniqueCount} unique"
+                    : string.Empty;
+                return $"Console logs ({lines.Count} entries{groupSuffix}, filter: {log_type}, source: console{textSuffix}):\n{sb}";
             }
             finally
             {
