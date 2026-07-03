@@ -188,6 +188,53 @@ namespace Funplay.Editor
             }
         }
 
+        [UnityTest]
+        public IEnumerator SseAcceptingRequest_DeliversToolsListChangedOnce()
+        {
+            var port = GetFreeTcpPort();
+            var transport = new HttpMCPTransport(port, ServerName, ProjectIdentityA);
+            transport.OnRequestReceived += (request, sendResponse) =>
+            {
+                sendResponse(new MCPResponse
+                {
+                    Id = request.Id,
+                    Result = new Dictionary<string, object> { ["ok"] = true }
+                });
+            };
+
+            try
+            {
+                var startTask = transport.StartAsync();
+                yield return WaitForTask(startTask);
+                Assert.IsTrue(startTask.Result);
+
+                MCPToolListChangeNotifier.RestorePending();
+
+                var firstRequest = SendToolListRequestAsync(port, acceptSse: true);
+                yield return WaitForTask(firstRequest, 2f);
+                Assert.AreEqual("text/event-stream", firstRequest.Result.ContentType);
+                Assert.That(firstRequest.Result.Body, Does.Contain(MCPToolListChangeNotifier.NotificationJson));
+                Assert.That(firstRequest.Result.Body, Does.Contain("\"id\":\"test\""));
+                Assert.Less(
+                    firstRequest.Result.Body.IndexOf(MCPToolListChangeNotifier.NotificationJson, StringComparison.Ordinal),
+                    firstRequest.Result.Body.IndexOf("\"id\":\"test\"", StringComparison.Ordinal));
+
+                var secondRequest = SendToolListRequestAsync(port, acceptSse: true);
+                yield return WaitForTask(secondRequest, 2f);
+                Assert.AreEqual("application/json", secondRequest.Result.ContentType);
+                Assert.That(secondRequest.Result.Body, Does.Not.Contain(MCPToolListChangeNotifier.NotificationJson));
+                Assert.That(secondRequest.Result.Body, Does.Contain("\"id\":\"test\""));
+            }
+            finally
+            {
+                while (MCPToolListChangeNotifier.TryConsumePending())
+                {
+                }
+
+                transport.Dispose();
+            }
+        }
+
         private static IEnumerator WaitForTask(Task task, float timeoutSeconds = 5f)
         {
             var start = Time.realtimeSinceStartup;
@@ -272,6 +319,28 @@ namespace Funplay.Editor
             }
         }
 
+        private static async Task<HttpResult> SendToolListRequestAsync(int port, bool acceptSse)
+        {
+            using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) })
+            using (var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}/"))
+            {
+                request.Content = new StringContent(
+                    "{\"jsonrpc\":\"2.0\",\"id\":\"test\",\"method\":\"tools/list\",\"params\":{}}",
+                    Encoding.UTF8,
+                    "application/json");
+
+                if (acceptSse)
+                    request.Headers.Accept.ParseAdd("text/event-stream");
+
+                var response = await client.SendAsync(request);
+                return new HttpResult
+                {
+                    ContentType = response.Content.Headers.ContentType?.MediaType,
+                    Body = await response.Content.ReadAsStringAsync()
+                };
+            }
+        }
+
         private static async Task HoldRequestsOpenAsync(HttpListener listener, CancellationToken ct)
         {
             try
@@ -298,6 +367,12 @@ namespace Funplay.Editor
             {
                 // Listener shutdown during test cleanup.
             }
+        }
+
+        private sealed class HttpResult
+        {
+            public string ContentType;
+            public string Body;
         }
     }
 }

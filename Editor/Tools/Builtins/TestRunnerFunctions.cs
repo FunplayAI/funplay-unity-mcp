@@ -56,6 +56,10 @@ namespace Funplay.Editor.Tools.Builtins
             if (!string.IsNullOrWhiteSpace(test_names)) filter.testNames = SplitList(test_names);
             if (!string.IsNullOrWhiteSpace(category_names)) filter.categoryNames = SplitList(category_names);
             if (!string.IsNullOrWhiteSpace(assembly_names)) filter.assemblyNames = SplitList(assembly_names);
+            var hasFilters =
+                (filter.testNames != null && filter.testNames.Length > 0) ||
+                (filter.categoryNames != null && filter.categoryNames.Length > 0) ||
+                (filter.assemblyNames != null && filter.assemblyNames.Length > 0);
 
             var api = ScriptableObject.CreateInstance<TestRunnerApi>();
             string guid;
@@ -74,7 +78,8 @@ namespace Funplay.Editor.Tools.Builtins
                 ["status"] = "running",
                 ["mode"] = testMode.ToString(),
                 ["startedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                ["testsCompleted"] = 0
+                ["testsCompleted"] = 0,
+                ["hasFilters"] = hasFilters
             };
             SaveJob(job);
 
@@ -199,7 +204,16 @@ namespace Funplay.Editor.Tools.Builtins
             {
                 var job = TestRunnerFunctions.LoadJob();
                 if (job == null || job.Value<string>("status") != "running") return;
-                job["totalTests"] = CountLeafTests(testsToRun);
+                if (job.Value<bool?>("hasFilters") == true)
+                {
+                    // Unity's callback tree can include unfiltered tests even when ExecutionSettings
+                    // applies test/category/assembly filters, so avoid exposing a misleading total.
+                    job.Remove("totalTests");
+                }
+                else
+                {
+                    job["totalTests"] = CountLeafTests(testsToRun);
+                }
                 TestRunnerFunctions.SaveJob(job);
             }
 
@@ -229,6 +243,9 @@ namespace Funplay.Editor.Tools.Builtins
                 job["failCount"] = result.FailCount;
                 job["skipCount"] = result.SkipCount;
                 job["inconclusiveCount"] = result.InconclusiveCount;
+                var finalTotal = result.PassCount + result.FailCount + result.SkipCount + result.InconclusiveCount;
+                job["testsCompleted"] = finalTotal;
+                job["totalTests"] = finalTotal;
                 job["durationSeconds"] = Math.Round(result.Duration, 2);
                 job["failures"] = failures;
                 TestRunnerFunctions.SaveJob(job);

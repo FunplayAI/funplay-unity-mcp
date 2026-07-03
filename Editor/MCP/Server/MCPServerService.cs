@@ -181,6 +181,7 @@ namespace Funplay.Editor.MCP.Server
                 var projectIdentity = FunplayProjectIdentity.FromProjectPath(_applicationPaths.ProjectPath);
                 transport = CreateTransport(startupPort, serverName, projectIdentity);
                 var toolExporter = new MCPToolExporter(_settings);
+                MCPToolListChangeNotifier.CheckForChanges(toolExporter);
                 var executionBridge = new MCPExecutionBridge(_threadHelper, _settings, _stateController, _invoker, InteractionLog);
                 resourceProvider = new MCPResourceProvider(_contextBuilder, _applicationPaths, InteractionLog);
                 var promptProvider = new MCPPromptProvider(Application.productName, _applicationPaths.ProjectPath);
@@ -554,11 +555,16 @@ namespace Funplay.Editor.MCP.Server
                 return;
 
             _restartScheduled = true;
+            EditorApplication.update -= RestartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
             EditorApplication.delayCall += RestartTransportAfterSettingsChange;
+            EditorApplication.update += RestartTransportAfterSettingsChange;
         }
 
         private async void RestartTransportAfterSettingsChange()
         {
+            EditorApplication.update -= RestartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
             _restartScheduled = false;
 
             if (_disposed)
@@ -578,7 +584,7 @@ namespace Funplay.Editor.MCP.Server
                 if (_disposed)
                     return;
 
-                EditorApplication.delayCall += StartTransportAfterSettingsChange;
+                ScheduleStartAfterSettingsChange();
             }
             catch (Exception ex)
             {
@@ -587,8 +593,19 @@ namespace Funplay.Editor.MCP.Server
             }
         }
 
+        private void ScheduleStartAfterSettingsChange()
+        {
+            EditorApplication.update -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall += StartTransportAfterSettingsChange;
+            EditorApplication.update += StartTransportAfterSettingsChange;
+        }
+
         private async void StartTransportAfterSettingsChange()
         {
+            EditorApplication.update -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= StartTransportAfterSettingsChange;
+
             try
             {
                 if (!_disposed)

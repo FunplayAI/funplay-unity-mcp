@@ -93,7 +93,9 @@ namespace Funplay.Editor.MCP.Server
                 },
                 ["capabilities"] = new Dictionary<string, object>
                 {
-                    ["tools"] = new Dictionary<string, object>(),
+                    // listChanged: the server piggybacks notifications/tools/list_changed
+                    // onto the next POST response (SSE) after the exposed tool set changes.
+                    ["tools"] = new Dictionary<string, object> { ["listChanged"] = true },
                     ["resources"] = new Dictionary<string, object>(),
                     ["prompts"] = new Dictionary<string, object>()
                 }

@@ -17,7 +17,7 @@ namespace Funplay.UnityMcp.Broker
 {
     internal static class Program
     {
-        private const int ProtocolVersion = 1;
+        private const int ProtocolVersion = 2;
         private const int PullTimeoutMs = 25000;
         private const long HoldDeadlineMs = 300000;
         private const int MaxHeaderBytes = 64 * 1024;
@@ -30,6 +30,8 @@ namespace Funplay.UnityMcp.Broker
         private const string ReqIdHeader = "X-Funplay-Broker-ReqId";
         private const string RedeliveryHeader = "X-Funplay-Broker-Redelivery";
         private const string BrokerHeader = "X-Funplay-Broker";
+        private const string AcceptSseHeader = "X-Funplay-Broker-Accept-SSE";
+        private const string ContentTypeHeader = "X-Funplay-Broker-Content-Type";
         private const string AttachPath = "/_funplay/broker/attach";
         private const string DetachPath = "/_funplay/broker/detach";
 
@@ -51,6 +53,7 @@ namespace Funplay.UnityMcp.Broker
             public long EnqueuedAt;
             public string ActiveSession;
             public bool Redelivered;
+            public bool AcceptsSse;
         }
 
         private sealed class Waiter
@@ -224,7 +227,9 @@ namespace Funplay.UnityMcp.Broker
 
                 string session;
                 headers.TryGetValue(SessionHeader.ToLowerInvariant(), out session);
-                var accepted = HandlePush(reqId, session, body);
+                string pushContentType;
+                headers.TryGetValue(ContentTypeHeader.ToLowerInvariant(), out pushContentType);
+                var accepted = HandlePush(reqId, session, body, pushContentType);
                 WriteResponse(stream, accepted ? 200 : 409, accepted ? "OK" : "Conflict", "application/json",
                     BrokerHeaderLine(), accepted ? "{\"ok\":true}" : "{\"ok\":false}");
                 SafeClose(client);
@@ -280,7 +285,11 @@ namespace Funplay.UnityMcp.Broker
                 return;
             }
 
-            HandleClientRequest(client, stream, body);
+            string acceptHeader;
+            headers.TryGetValue("accept", out acceptHeader);
+            var acceptsSse = !string.IsNullOrEmpty(acceptHeader) &&
+                             acceptHeader.IndexOf("text/event-stream", StringComparison.OrdinalIgnoreCase) >= 0;
+            HandleClientRequest(client, stream, body, acceptsSse);
         }
 
         private static void HandlePull(TcpClient client, NetworkStream stream, string session)
@@ -302,7 +311,7 @@ namespace Funplay.UnityMcp.Broker
             }
         }
 
-        private static bool HandlePush(long reqId, string session, string body)
+        private static bool HandlePush(long reqId, string session, string body, string contentType)
         {
             lock (Gate)
             {
@@ -317,7 +326,10 @@ namespace Funplay.UnityMcp.Broker
                 Queue.Remove(reqId);
                 try
                 {
-                    WriteResponse(pending.Stream, 200, "OK", "application/json; charset=utf-8", null, body ?? string.Empty);
+                    var responseContentType = string.IsNullOrEmpty(contentType)
+                        ? "application/json; charset=utf-8"
+                        : contentType;
+                    WriteResponse(pending.Stream, 200, "OK", responseContentType, null, body ?? string.Empty);
                 }
                 catch (Exception ex)
                 {
@@ -394,7 +406,7 @@ namespace Funplay.UnityMcp.Broker
             }
         }
 
-        private static void HandleClientRequest(TcpClient client, NetworkStream stream, string body)
+        private static void HandleClientRequest(TcpClient client, NetworkStream stream, string body, bool acceptsSse)
         {
             lock (Gate)
             {
@@ -411,7 +423,8 @@ namespace Funplay.UnityMcp.Broker
                     Client = client,
                     Stream = stream,
                     Body = body ?? string.Empty,
-                    EnqueuedAt = NowMs()
+                    EnqueuedAt = NowMs(),
+                    AcceptsSse = acceptsSse
                 };
                 Queue.Add(reqId);
                 TryDispatch();
@@ -472,7 +485,8 @@ namespace Funplay.UnityMcp.Broker
 
                 var headers = BrokerHeaderLine() +
                               ReqIdHeader + ": " + reqId + "\r\n" +
-                              RedeliveryHeader + ": " + (pending.Redelivered ? "1" : "0") + "\r\n";
+                              RedeliveryHeader + ": " + (pending.Redelivered ? "1" : "0") + "\r\n" +
+                              AcceptSseHeader + ": " + (pending.AcceptsSse ? "1" : "0") + "\r\n";
                 try
                 {
                     WriteResponse(waiter.Stream, 200, "OK", "application/json; charset=utf-8", headers, pending.Body);

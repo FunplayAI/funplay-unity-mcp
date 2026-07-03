@@ -276,6 +276,12 @@ namespace Funplay.Editor.MCP.Server
                                 {
                                     await SendAcceptedAsync(stream, ct);
                                 }
+                                else if (httpRequest.AcceptsEventStream &&
+                                         !string.Equals(request.Method, "initialize", StringComparison.Ordinal) &&
+                                         MCPToolListChangeNotifier.TryConsumePending())
+                                {
+                                    await SendSseResponseAsync(stream, response, ct);
+                                }
                                 else
                                 {
                                     await SendResponseAsync(stream, response, ct);
@@ -337,6 +343,7 @@ namespace Funplay.Editor.MCP.Server
                 return null;
 
             var contentLength = 0;
+            var acceptsEventStream = false;
             for (var i = 1; i < lines.Length; i++)
             {
                 var separator = lines[i].IndexOf(':');
@@ -344,11 +351,15 @@ namespace Funplay.Editor.MCP.Server
                     continue;
 
                 var name = lines[i].Substring(0, separator).Trim();
-                if (!string.Equals(name, "Content-Length", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                int.TryParse(lines[i].Substring(separator + 1).Trim(), out contentLength);
-                break;
+                if (string.Equals(name, "Content-Length", StringComparison.OrdinalIgnoreCase))
+                {
+                    int.TryParse(lines[i].Substring(separator + 1).Trim(), out contentLength);
+                }
+                else if (string.Equals(name, "Accept", StringComparison.OrdinalIgnoreCase))
+                {
+                    acceptsEventStream = lines[i].Substring(separator + 1)
+                        .IndexOf("text/event-stream", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
             }
 
             var bodyStart = headerEnd + 4;
@@ -368,6 +379,7 @@ namespace Funplay.Editor.MCP.Server
             return new HttpRequestData
             {
                 Method = requestLineParts[0],
+                AcceptsEventStream = acceptsEventStream,
                 Body = Encoding.UTF8.GetString(bodyBytes, 0, copied)
             };
         }
@@ -421,8 +433,29 @@ namespace Funplay.Editor.MCP.Server
             {
                 PluginDebugLogger.Log($"[Funplay MCP Server] Response not sent because the client disconnected: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Streamable-HTTP style response: an SSE body that carries the pending
+        /// tools/list_changed notification followed by the JSON-RPC response.
+        /// Only used when the client declared Accept: text/event-stream.
+        /// </summary>
+        private async Task SendSseResponseAsync(NetworkStream stream, MCPResponse mcpResponse, CancellationToken ct)
+        {
+            try
+            {
+                var body = MCPToolListChangeNotifier.BuildSseBody(SerializeResponse(mcpResponse));
+                await SendRawResponseAsync(stream, 200, "OK", "text/event-stream", body, ct);
+                PluginDebugLogger.Log("[Funplay MCP Server] Delivered tools/list_changed notification via SSE response.");
+            }
+            catch (Exception ex) when (IsExpectedClientDisconnect(ex, ct))
+            {
+                MCPToolListChangeNotifier.RestorePending();
+                PluginDebugLogger.Log($"[Funplay MCP Server] SSE response not sent because the client disconnected: {ex.Message}");
+            }
             catch (Exception ex)
             {
+                MCPToolListChangeNotifier.RestorePending();
                 Debug.LogError($"[Funplay MCP Server] Failed to send response: {ex.Message}");
             }
         }
@@ -573,6 +606,7 @@ namespace Funplay.Editor.MCP.Server
         private sealed class HttpRequestData
         {
             public string Method { get; set; }
+            public bool AcceptsEventStream { get; set; }
             public string Body { get; set; }
         }
     }

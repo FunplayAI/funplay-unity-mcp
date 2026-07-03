@@ -113,13 +113,27 @@ namespace Funplay.Editor.MCP.Server
                 if (pull == null)
                     continue;
 
-                await HandleAndPushAsync(pull, ct);
+                try
+                {
+                    await HandleAndPushAsync(pull, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // Never let a single bad request kill the poll loop -- that would
+                    // leave the broker queueing requests with nobody pulling them.
+                    Debug.LogError("[Funplay MCP Server] Broker request handling failed: " + ex.Message);
+                }
             }
         }
 
         private async Task HandleAndPushAsync(BrokerPullResult pull, CancellationToken ct)
         {
             var responseJson = string.Empty;
+            var canPiggybackNotification = false;
             try
             {
                 var request = ParseJsonRequest(pull.Body);
@@ -143,9 +157,16 @@ namespace Funplay.Editor.MCP.Server
                         if (completed == responseTcs.Task)
                         {
                             var response = await responseTcs.Task;
-                            responseJson = response == null
-                                ? SerializeResponse(CreateAccepted(request.Id))
-                                : SerializeResponse(response);
+                            if (response == null)
+                            {
+                                responseJson = SerializeResponse(CreateAccepted(request.Id));
+                            }
+                            else
+                            {
+                                responseJson = SerializeResponse(response);
+                                canPiggybackNotification =
+                                    !string.Equals(request.Method, "initialize", StringComparison.Ordinal);
+                            }
                         }
                         else
                         {
@@ -162,16 +183,28 @@ namespace Funplay.Editor.MCP.Server
                 responseJson = SerializeResponse(CreateError(null, -32603, "Internal error: " + ex.Message));
             }
 
+            string contentType = null;
+            if (canPiggybackNotification && pull.AcceptsSse && MCPToolListChangeNotifier.TryConsumePending())
+            {
+                responseJson = MCPToolListChangeNotifier.BuildSseBody(responseJson);
+                contentType = "text/event-stream";
+                PluginDebugLogger.Log("[Funplay MCP Server] Delivering tools/list_changed notification via broker SSE response.");
+            }
+
             try
             {
-                await Task.Run(() => PushOnce(pull.RequestId, responseJson), ct);
+                await Task.Run(() => PushOnce(pull.RequestId, responseJson, contentType), ct);
             }
             catch (OperationCanceledException)
             {
                 // The broker will make this request available to the next Unity session.
+                if (contentType != null)
+                    MCPToolListChangeNotifier.RestorePending();
             }
             catch (Exception ex)
             {
+                if (contentType != null)
+                    MCPToolListChangeNotifier.RestorePending();
                 Debug.LogError("[Funplay MCP Server] Broker push failed: " + ex.Message);
             }
         }
@@ -199,6 +232,7 @@ namespace Funplay.Editor.MCP.Server
                     throw new InvalidOperationException("Broker pull did not include a request id.");
 
                 var redeliveryText = response.Headers[MCPBrokerProtocol.RedeliveryHeader];
+                var acceptsSseText = response.Headers[MCPBrokerProtocol.AcceptSseHeader];
                 using (var stream = response.GetResponseStream())
                 using (var reader = new StreamReader(stream ?? Stream.Null, Encoding.UTF8))
                 {
@@ -206,13 +240,14 @@ namespace Funplay.Editor.MCP.Server
                     {
                         RequestId = reqId,
                         IsRedelivery = string.Equals(redeliveryText, "1", StringComparison.Ordinal),
+                        AcceptsSse = string.Equals(acceptsSseText, "1", StringComparison.Ordinal),
                         Body = reader.ReadToEnd()
                     };
                 }
             }
         }
 
-        private void PushOnce(long requestId, string body)
+        private void PushOnce(long requestId, string body, string clientContentType = null)
         {
             var request = (HttpWebRequest)WebRequest.Create(_baseUrl + MCPBrokerProtocol.PushPath);
             request.Method = "POST";
@@ -223,6 +258,8 @@ namespace Funplay.Editor.MCP.Server
             request.Headers[MCPBrokerProtocol.TokenHeader] = _token;
             request.Headers[MCPBrokerProtocol.SessionHeader] = _sessionId;
             request.Headers[MCPBrokerProtocol.ReqIdHeader] = requestId.ToString();
+            if (!string.IsNullOrEmpty(clientContentType))
+                request.Headers[MCPBrokerProtocol.ContentTypeHeader] = clientContentType;
 
             var bytes = Encoding.UTF8.GetBytes(body ?? string.Empty);
             request.ContentLength = bytes.Length;
@@ -360,6 +397,7 @@ namespace Funplay.Editor.MCP.Server
         {
             public long RequestId;
             public bool IsRedelivery;
+            public bool AcceptsSse;
             public string Body;
         }
     }

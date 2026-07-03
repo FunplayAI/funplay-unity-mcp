@@ -55,17 +55,28 @@ namespace Funplay.Editor.MCP.Server
                         return true;
                     }
 
-                    DeletePidFile(paths.PidFilePath);
-                    if (existing.Port == port && IsTcpPortOpen(port))
+                    // The pid file points at a broker we previously started, either on this
+                    // port (but it no longer passes the health probe -- typically a
+                    // protocol-version mismatch after a package upgrade) or on a different
+                    // port (the Server Port setting changed). Either way it's ours: shut it
+                    // down with its recorded token so its port frees up, instead of leaving
+                    // it orphaned and squatting on that port forever.
+                    if (IsTcpPortOpen(existing.Port))
                     {
-                        LastError = "Port is already in use, but it is not a verified Funplay broker.";
-                        return false;
+                        var shutdownAccepted = SendShutdown(existing.Port, existing.Token);
+                        WaitForExit(existing.Pid, 2500);
+                        if (shutdownAccepted)
+                            KillVerifiedProcess(existing.Pid);
                     }
+
+                    DeletePidFile(paths.PidFilePath);
                 }
 
                 if (IsTcpPortOpen(port))
                 {
-                    LastError = "Port is already in use by another process.";
+                    LastError = existing != null && existing.Port == port
+                        ? "Port is already in use, but it is not a verified Funplay broker."
+                        : "Port is already in use by another process.";
                     return false;
                 }
 
@@ -479,8 +490,10 @@ namespace Funplay.Editor.MCP.Server
                     Protocol = protocol
                 };
 
-                return state.Protocol == MCPBrokerProtocol.Version &&
-                       state.Pid > 0 &&
+                // Keep stale protocol records readable so upgrades can shut down a
+                // previously started broker with its recorded token before starting
+                // the new protocol version.
+                return state.Pid > 0 &&
                        state.Port > 0 &&
                        !string.IsNullOrEmpty(state.Token);
             }
