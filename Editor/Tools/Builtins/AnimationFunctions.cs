@@ -207,21 +207,33 @@ namespace Funplay.Editor.Tools.Builtins
 
             var hash = Animator.StringToHash(state);
             bool found = false;
+            var resolvedLayer = layer;
             if (layer >= 0)
             {
-                found = layer < animator.layerCount && animator.HasState(layer, hash);
+                if (layer >= animator.layerCount)
+                    return Response.Error("INVALID_LAYER", new { layer, layerCount = animator.layerCount });
+                found = animator.HasState(layer, hash);
+            }
+            else if (layer < -1)
+            {
+                return Response.Error("INVALID_LAYER", new { layer, layerCount = animator.layerCount, accepted = "-1 or a valid layer index" });
             }
             else
             {
                 for (int l = 0; l < animator.layerCount; l++)
                 {
-                    if (animator.HasState(l, hash)) { found = true; break; }
+                    if (animator.HasState(l, hash))
+                    {
+                        found = true;
+                        resolvedLayer = l;
+                        break;
+                    }
                 }
             }
             if (!found)
                 return Response.Error("STATE_NOT_FOUND", new { state, layer, hint = "Check the state name in the Animator Controller (short name or 'LayerName.StateName')." });
 
-            animator.Play(hash, layer, normalized_time);
+            animator.Play(hash, resolvedLayer, normalized_time);
 
             // In Edit Mode the animator doesn't tick on its own -- evaluate once so the pose is visible immediately.
             if (!EditorApplication.isPlaying)
@@ -231,7 +243,8 @@ namespace Funplay.Editor.Tools.Builtins
             {
                 gameObject = new { instanceId = ObjectIdHelper.GetSerializableId(animator.gameObject), name = animator.gameObject.name },
                 state,
-                layer
+                layer = resolvedLayer,
+                requestedLayer = layer
             });
         }
 

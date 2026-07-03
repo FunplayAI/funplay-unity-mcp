@@ -4,6 +4,22 @@
 
 ### Added
 - Added Animator runtime control tools: `get_animator_state` reads the current state (state name resolved from the controller when possible, including through AnimatorOverrideController) plus all parameters with current values; `set_animator_parameter` sets a parameter by name with automatic Float/Int/Bool/Trigger type detection; `play_animator_state` plays a named state and force-evaluates the animator once in Edit Mode so poses apply without entering Play Mode (useful for driving UI to a known state before a screenshot).
+- Added Unity Test Runner integration with an async job pattern: `run_tests` starts an EditMode/PlayMode run (with optional test/category/assembly filters) and returns a job id immediately; `get_test_job` polls progress (completed/total) and final results (pass/fail/skip counts plus failure messages and truncated stack traces); `cancel_test_run` cancels a stuck run (requires com.unity.test-framework 1.3+, resolved by reflection and reported as unsupported on the 1.1.x that Unity 2022.3 bundles). Job state lives in SessionState and the results callback re-registers on every domain load, so PlayMode runs that reload the domain mid-run still report completion.
+- Declared `capabilities.tools.listChanged` in the `initialize` response and implemented lazy `notifications/tools/list_changed` delivery: when the exposed tool set changes (Tool Exposure save, newly registered tools after a recompile), the next client request that accepts `text/event-stream` receives an SSE response carrying the notification before the JSON-RPC result, so MCP clients such as Claude Code refresh their tool list without a session restart. Supported on both the direct HTTP transport and broker mode (broker protocol v2 with Accept/Content-Type passthrough).
+
+### Changed
+- MCP Server panel UX improvements to the transport/broker controls:
+  - The transport selector is now a "Transport Mode" dropdown (`Direct HTTP (default)` / `Broker Mode (Experimental)`) instead of a checkbox, so the two transports read as an explicit mutually-exclusive choice instead of an on/off flag.
+  - The "Broker Mono Path" field now shows the real effect of the "leave empty to auto-detect" default instead of always rendering blank: when no override is set, the field displays the actually auto-detected Mono executable path (display-only — it does not persist as an override), and if auto-detection fails, the field stays empty and a red inline hint explains that broker mode needs the path set manually.
+
+  Behavior, defaults, and the underlying settings are unchanged — both are presentation-only improvements.
+
+### Fixed
+- Broker manager now gracefully shuts down a stale broker process that no longer passes the health probe (typically a protocol-version mismatch after a package upgrade) instead of leaving it holding the port and failing the server with "Address already in use".
+- A failure while handling a single broker-delivered request no longer terminates the broker poll loop (which previously left all subsequent requests queued forever).
+- Fixed a broker process leak when the Server Port setting changes while broker mode is active: `MCPBrokerProcessManager.EnsureRunning` only shut down the previously recorded broker process when its recorded port matched the newly requested port, so changing the port left the old broker orphaned (and deleted its pid file, making it unrecoverable by any later cleanup) while a fresh broker started on the new port. The stale-broker shutdown now runs regardless of whether the port changed.
+- The "Server Port" field now commits on Enter/blur rather than per keystroke, so the settings-change restart path runs once per committed value instead of once per typed digit. The restart scheduler also uses editor-update fallbacks alongside `delayCall` for both stop and start phases, so port changes made from tools or non-IMGUI callbacks cannot get stuck with a scheduled-but-never-run restart.
+- Fixed `get_hierarchy` and `get_scene_info` silently omitting additively loaded scenes: both sourced content from `SceneManager.GetActiveScene()` only, so in multi-scene projects (e.g. a bootstrap scene additively loading a content scene) everything outside the active scene was invisible. Both tools now walk every loaded scene, label each as `(active)`/`(additive)`, and `get_hierarchy`'s `root_name` inactive-object search fallback also spans all loaded scenes.
 
 ## [0.4.8] - 2026-06-24
 

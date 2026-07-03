@@ -99,6 +99,36 @@ namespace Funplay.Editor.Tests
             }
         }
 
+        [Test]
+        public void AnalyzeScriptChangeState_ResolvedOutputNewerThanSource_IsNotPending()
+        {
+            var temp = CreateTempDirectory();
+            try
+            {
+                var staleOutput = Path.Combine(temp, "ScriptAssemblies", "Funplay.Editor.dll");
+                var source = Path.Combine(temp, "MCPServerService.cs");
+                Directory.CreateDirectory(Path.GetDirectoryName(staleOutput));
+                File.WriteAllText(staleOutput, "old compiled copy");
+                File.WriteAllText(source, "class MCPServerService {}");
+                File.SetLastWriteTimeUtc(staleOutput, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                File.SetLastWriteTimeUtc(source, new DateTime(2026, 1, 1, 0, 0, 5, DateTimeKind.Utc));
+
+                var resolvedOutputTime = new DateTime(2026, 1, 1, 0, 0, 10, DateTimeKind.Utc);
+                var state = EditorRefreshHelper.AnalyzeScriptChangeState(
+                    new[] { new ScriptCompilationArtifact(staleOutput, new[] { source }, resolvedOutputTime) },
+                    Array.Empty<string>(),
+                    TimeSpan.FromSeconds(1));
+
+                Assert.IsFalse(state.HasPendingScriptChanges);
+                Assert.AreEqual(0, state.OutOfDateSourceCount);
+                Assert.AreEqual(0, state.UnknownProjectScriptCount);
+            }
+            finally
+            {
+                DeleteTempDirectory(temp);
+            }
+        }
+
         private static string CreateTempDirectory()
         {
             var path = Path.Combine(Path.GetTempPath(), "FunplayEditorRefreshTests_" + Guid.NewGuid().ToString("N"));
