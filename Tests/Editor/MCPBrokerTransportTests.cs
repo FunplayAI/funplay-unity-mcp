@@ -3,6 +3,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -70,6 +71,72 @@ namespace Funplay.Editor
             finally
             {
                 listener.Stop();
+                MCPBrokerProcessManager.Stop(paths);
+                DeleteTempRoot(root);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator BrokerProcess_PortChangeStopsRecordedBroker()
+        {
+            var root = CreateTempRoot();
+            var paths = CreateBrokerPaths(root);
+            var oldPort = GetFreeTcpPort();
+            var newPort = GetFreeTcpPort();
+
+            try
+            {
+                Assume.That(!string.IsNullOrEmpty(MCPBrokerProcessManager.ResolveMono(string.Empty)),
+                    "Unity-bundled Mono is required for broker process tests.");
+
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(oldPort, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, oldPort, out var oldConnection));
+
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(newPort, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, newPort, out var newConnection));
+
+                Assert.IsFalse(MCPBrokerProcessManager.TryProbeBroker(oldPort, oldConnection.Token, out _));
+                Assert.IsTrue(MCPBrokerProcessManager.TryProbeBroker(newPort, newConnection.Token, out var health));
+                Assert.AreEqual(newConnection.Pid, health.Pid);
+            }
+            finally
+            {
+                MCPBrokerProcessManager.Stop(paths);
+                DeleteTempRoot(root);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator BrokerProcess_DoesNotKillUnverifiedPidFromStaleState()
+        {
+            var root = CreateTempRoot();
+            var paths = CreateBrokerPaths(root);
+            var recordedPort = GetFreeTcpPort();
+            var requestedPort = GetFreeTcpPort();
+            var recordedPortOwner = new TcpListener(IPAddress.Loopback, recordedPort);
+            var requestedPortOwner = new TcpListener(IPAddress.Loopback, requestedPort);
+            Process unrelatedProcess = null;
+
+            try
+            {
+                recordedPortOwner.Start();
+                requestedPortOwner.Start();
+                unrelatedProcess = StartLongRunningProcess();
+                WriteBrokerState(paths, unrelatedProcess.Id, recordedPort, "stale-token");
+
+                Assert.IsFalse(MCPBrokerProcessManager.EnsureRunning(requestedPort, string.Empty, paths));
+                StringAssert.Contains("Port is already in use", MCPBrokerProcessManager.LastError);
+                Assert.IsFalse(unrelatedProcess.HasExited, "A stale pid file must not let broker cleanup kill an unverified process.");
+            }
+            finally
+            {
+                recordedPortOwner.Stop();
+                requestedPortOwner.Stop();
+                StopProcess(unrelatedProcess);
                 MCPBrokerProcessManager.Stop(paths);
                 DeleteTempRoot(root);
             }
@@ -458,6 +525,63 @@ namespace Funplay.Editor
                 "keepalive-broker.cs.txt");
             Assert.IsTrue(File.Exists(path), "Broker source was not found at " + path);
             return path;
+        }
+
+        private static void WriteBrokerState(
+            MCPBrokerProcessManager.MCPBrokerRuntimePaths paths,
+            int pid,
+            int port,
+            string token)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(paths.PidFilePath));
+            File.WriteAllText(paths.PidFilePath,
+                pid + "\n" +
+                port + "\n" +
+                token + "\n" +
+                MCPBrokerProtocol.Version + "\n");
+        }
+
+        private static Process StartLongRunningProcess()
+        {
+            var startInfo = Application.platform == RuntimePlatform.WindowsEditor
+                ? new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/C ping -n 60 127.0.0.1 > nul",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+                : new ProcessStartInfo
+                {
+                    FileName = "/bin/sleep",
+                    Arguments = "60",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+            var process = Process.Start(startInfo);
+            Assert.NotNull(process, "Failed to start a long-running test process.");
+            return process;
+        }
+
+        private static void StopProcess(Process process)
+        {
+            if (process == null)
+                return;
+
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill();
+                process.WaitForExit(2000);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                process.Dispose();
+            }
         }
 
         private static string CreateTempRoot()

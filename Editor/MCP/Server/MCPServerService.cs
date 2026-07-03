@@ -554,11 +554,16 @@ namespace Funplay.Editor.MCP.Server
                 return;
 
             _restartScheduled = true;
+            EditorApplication.update -= RestartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
             EditorApplication.delayCall += RestartTransportAfterSettingsChange;
+            EditorApplication.update += RestartTransportAfterSettingsChange;
         }
 
         private async void RestartTransportAfterSettingsChange()
         {
+            EditorApplication.update -= RestartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
             _restartScheduled = false;
 
             if (_disposed)
@@ -578,7 +583,7 @@ namespace Funplay.Editor.MCP.Server
                 if (_disposed)
                     return;
 
-                EditorApplication.delayCall += StartTransportAfterSettingsChange;
+                ScheduleStartAfterSettingsChange();
             }
             catch (Exception ex)
             {
@@ -587,8 +592,19 @@ namespace Funplay.Editor.MCP.Server
             }
         }
 
+        private void ScheduleStartAfterSettingsChange()
+        {
+            EditorApplication.update -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall += StartTransportAfterSettingsChange;
+            EditorApplication.update += StartTransportAfterSettingsChange;
+        }
+
         private async void StartTransportAfterSettingsChange()
         {
+            EditorApplication.update -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= StartTransportAfterSettingsChange;
+
             try
             {
                 if (!_disposed)
