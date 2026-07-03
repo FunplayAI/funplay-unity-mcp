@@ -32,11 +32,17 @@ namespace Funplay.Editor.Tools.Builtins
                     GameObject root = GameObject.Find(root_name);
                     if (root == null)
                     {
-                        // Search inactive objects too
-                        foreach (var sceneRoot in SceneManager.GetActiveScene().GetRootGameObjects())
+                        // Search inactive objects too, across every loaded scene (additively
+                        // loaded scenes are real content GetActiveScene() alone would miss).
+                        for (int i = 0; i < SceneManager.sceneCount && root == null; i++)
                         {
-                            root = FindInChildren(sceneRoot.transform, root_name)?.gameObject;
-                            if (root != null) break;
+                            var candidateScene = SceneManager.GetSceneAt(i);
+                            if (!candidateScene.isLoaded) continue;
+                            foreach (var sceneRoot in candidateScene.GetRootGameObjects())
+                            {
+                                root = FindInChildren(sceneRoot.transform, root_name)?.gameObject;
+                                if (root != null) break;
+                            }
                         }
                     }
                     if (root == null)
@@ -46,13 +52,18 @@ namespace Funplay.Editor.Tools.Builtins
                 }
                 else
                 {
-                    // Full scene
-                    var scene = SceneManager.GetActiveScene();
-                    sb.AppendLine($"Scene: {scene.name}");
-                    foreach (var root in scene.GetRootGameObjects())
+                    // Full hierarchy: every loaded scene, not just the active one.
+                    var activeScene = SceneManager.GetActiveScene();
+                    for (int i = 0; i < SceneManager.sceneCount; i++)
                     {
-                        if (!include_inactive && !root.activeSelf) continue;
-                        PrintNode(sb, root.transform, 0, depth, include_components, include_inactive);
+                        var scene = SceneManager.GetSceneAt(i);
+                        if (!scene.isLoaded) continue;
+                        sb.AppendLine(scene == activeScene ? $"Scene: {scene.name}" : $"Scene: {scene.name} (additive)");
+                        foreach (var root in scene.GetRootGameObjects())
+                        {
+                            if (!include_inactive && !root.activeSelf) continue;
+                            PrintNode(sb, root.transform, 0, depth, include_components, include_inactive);
+                        }
                     }
                 }
 
