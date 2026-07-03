@@ -24,7 +24,6 @@ namespace Funplay.Editor.Tools.Builtins
         {
             try
             {
-                var scene = SceneManager.GetActiveScene();
                 SceneCounters counters = null;
                 if (include_scene_counts)
                     counters = CollectSceneCounters(includeInactive: true, topN: 0);
@@ -32,7 +31,7 @@ namespace Funplay.Editor.Tools.Builtins
                 var sb = new StringBuilder();
                 sb.AppendLine("Performance Snapshot");
                 sb.AppendLine($"Mode: {(EditorApplication.isPlaying ? "Play Mode" : "Edit Mode")}");
-                sb.AppendLine($"Scene: {scene.name}");
+                sb.AppendLine($"Scene(s): {GetLoadedScenesSummary()}");
                 sb.AppendLine($"Target Frame Rate: {Application.targetFrameRate}");
                 sb.AppendLine($"VSync Count: {QualitySettings.vSyncCount}");
                 sb.AppendLine($"Time Scale: {Time.timeScale:F2}");
@@ -76,7 +75,7 @@ namespace Funplay.Editor.Tools.Builtins
 
                 var sb = new StringBuilder();
                 sb.AppendLine("Scene Complexity Analysis");
-                sb.AppendLine($"Scene: {SceneManager.GetActiveScene().name}");
+                sb.AppendLine($"Scene(s): {GetLoadedScenesSummary()}");
                 sb.AppendLine($"Objects: {counters.GameObjectCount} total, {counters.ActiveGameObjectCount} active");
                 sb.AppendLine($"Components: {counters.ComponentCount}, Scripts: {counters.MonoBehaviourCount}");
                 sb.AppendLine($"Renderers: {counters.RendererCount}, Triangles: {counters.TriangleCount:N0}, Material Slots: {counters.MaterialSlotCount}");
@@ -177,12 +176,11 @@ namespace Funplay.Editor.Tools.Builtins
 
         private static SceneCounters CollectSceneCounters(bool includeInactive, int topN)
         {
-            var scene = SceneManager.GetActiveScene();
-            var roots = scene.GetRootGameObjects();
+            var roots = GetAllLoadedSceneRootGameObjects();
             var counters = new SceneCounters();
-            var stack = new Stack<Transform>(roots.Length);
+            var stack = new Stack<Transform>(roots.Count);
 
-            for (int i = roots.Length - 1; i >= 0; i--)
+            for (int i = roots.Count - 1; i >= 0; i--)
             {
                 if (roots[i] != null)
                     stack.Push(roots[i].transform);
@@ -296,6 +294,36 @@ namespace Funplay.Editor.Tools.Builtins
             }
 
             return counters;
+        }
+
+        private static List<GameObject> GetAllLoadedSceneRootGameObjects()
+        {
+            // Multi-scene projects commonly load additional content additively (e.g. a decoration/UI
+            // scene stacked on top of a bootstrap scene). SceneManager.GetActiveScene() only reflects
+            // one of those scenes, so counting just its roots silently misses everything else that's
+            // actually loaded and rendering. Walk every loaded scene instead.
+            var roots = new List<GameObject>();
+            var sceneCount = SceneManager.sceneCount;
+            for (int i = 0; i < sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (scene.isLoaded)
+                    roots.AddRange(scene.GetRootGameObjects());
+            }
+            return roots;
+        }
+
+        private static string GetLoadedScenesSummary()
+        {
+            var names = new List<string>();
+            var sceneCount = SceneManager.sceneCount;
+            for (int i = 0; i < sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (scene.isLoaded)
+                    names.Add(scene.name);
+            }
+            return names.Count > 0 ? string.Join(", ", names) : "<none>";
         }
 
         private static void AppendComplexityWarnings(StringBuilder sb, SceneCounters counters)
