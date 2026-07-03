@@ -170,8 +170,8 @@ namespace Funplay.Editor.Tools.Helpers
                     continue;
 
                 var outputPath = NormalizePath(artifact.OutputPath);
-                var outputExists = !string.IsNullOrEmpty(outputPath) && File.Exists(outputPath);
-                var outputTime = outputExists ? File.GetLastWriteTimeUtc(outputPath) : DateTime.MinValue;
+                var outputTime = artifact.OutputTimeUtc ?? GetFileWriteTimeUtc(outputPath);
+                var outputExists = outputTime != DateTime.MinValue;
                 if (outputTime > newestOutputTime)
                     newestOutputTime = outputTime;
 
@@ -253,11 +253,13 @@ namespace Funplay.Editor.Tools.Helpers
         {
             try
             {
+                var beeOutputTimes = CaptureBeeOutputTimes();
                 var artifacts = CompilationPipeline
                     .GetAssemblies(AssembliesType.Editor)
                     .Select(assembly => new ScriptCompilationArtifact(
                         assembly.outputPath,
-                        assembly.sourceFiles ?? Array.Empty<string>()))
+                        assembly.sourceFiles ?? Array.Empty<string>(),
+                        ResolveLatestOutputTime(assembly.outputPath, beeOutputTimes)))
                     .ToArray();
 
                 var projectScripts = scanForUnknownProjectScripts
@@ -297,8 +299,98 @@ namespace Funplay.Editor.Tools.Helpers
                 }
 
                 foreach (var file in files)
+                {
+                    if (IsUnityIgnoredScriptPath(file))
+                        continue;
+
                     yield return file;
+                }
             }
+        }
+
+        private static Dictionary<string, DateTime> CaptureBeeOutputTimes()
+        {
+            var result = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            var beeRoot = Path.Combine(GetProjectRoot(), "Library", "Bee", "artifacts");
+            if (!Directory.Exists(beeRoot))
+                return result;
+
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(beeRoot, "*.dll", SearchOption.AllDirectories).ToArray();
+            }
+            catch
+            {
+                return result;
+            }
+
+            foreach (var file in files)
+            {
+                var name = Path.GetFileName(file);
+                if (string.IsNullOrEmpty(name))
+                    continue;
+
+                var writeTime = GetFileWriteTimeUtc(file);
+                if (writeTime == DateTime.MinValue)
+                    continue;
+
+                if (!result.TryGetValue(name, out var existing) || writeTime > existing)
+                    result[name] = writeTime;
+            }
+
+            return result;
+        }
+
+        private static DateTime? ResolveLatestOutputTime(string outputPath, Dictionary<string, DateTime> beeOutputTimes)
+        {
+            var latest = GetFileWriteTimeUtc(outputPath);
+            var name = Path.GetFileName(outputPath);
+            if (!string.IsNullOrEmpty(name) &&
+                beeOutputTimes != null &&
+                beeOutputTimes.TryGetValue(name, out var beeOutputTime) &&
+                beeOutputTime > latest)
+            {
+                latest = beeOutputTime;
+            }
+
+            return latest == DateTime.MinValue ? (DateTime?)null : latest;
+        }
+
+        private static DateTime GetFileWriteTimeUtc(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return DateTime.MinValue;
+
+            try
+            {
+                return File.GetLastWriteTimeUtc(path);
+            }
+            catch
+            {
+                return DateTime.MinValue;
+            }
+        }
+
+        private static bool IsUnityIgnoredScriptPath(string path)
+        {
+            var normalized = NormalizePath(path);
+            if (string.IsNullOrEmpty(normalized))
+                return false;
+
+            var parts = normalized.Split('/');
+            for (var i = 0; i < parts.Length - 1; i++)
+            {
+                var part = parts[i];
+                if (string.IsNullOrEmpty(part))
+                    continue;
+
+                if (part[0] == '.' || part.EndsWith("~", StringComparison.Ordinal))
+                    return true;
+            }
+
+            var fileName = parts.Length > 0 ? parts[parts.Length - 1] : string.Empty;
+            return !string.IsNullOrEmpty(fileName) && fileName[0] == '.';
         }
 
         private static string GetProjectRoot()
@@ -482,12 +574,19 @@ namespace Funplay.Editor.Tools.Helpers
     internal sealed class ScriptCompilationArtifact
     {
         public ScriptCompilationArtifact(string outputPath, IEnumerable<string> sourceFiles)
+            : this(outputPath, sourceFiles, null)
+        {
+        }
+
+        public ScriptCompilationArtifact(string outputPath, IEnumerable<string> sourceFiles, DateTime? outputTimeUtc)
         {
             OutputPath = outputPath;
             SourceFiles = sourceFiles?.ToArray() ?? Array.Empty<string>();
+            OutputTimeUtc = outputTimeUtc;
         }
 
         public string OutputPath { get; }
         public string[] SourceFiles { get; }
+        public DateTime? OutputTimeUtc { get; }
     }
 }
