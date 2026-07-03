@@ -33,7 +33,7 @@ namespace Funplay.Editor.Tools.Helpers
         /// Returns every visible serialized property on the component. Skips Unity's "m_Script"
         /// field by default since it's noise for AI consumers.
         /// </summary>
-        public static List<PropertySnapshot> ReadProperties(Component component, bool includeScriptField = false)
+        public static List<PropertySnapshot> ReadProperties(UnityEngine.Object component, bool includeScriptField = false)
         {
             var list = new List<PropertySnapshot>();
             if (component == null) return list;
@@ -119,7 +119,7 @@ namespace Funplay.Editor.Tools.Helpers
         /// Apply a JObject of property→value pairs to a component. Returns a per-field
         /// success report so the caller can surface "set 4 of 5 fields, X failed because Y".
         /// </summary>
-        public static List<FieldResult> WriteProperties(Component component, JObject properties, string undoLabel = null)
+        public static List<FieldResult> WriteProperties(UnityEngine.Object component, JObject properties, string undoLabel = null)
         {
             var results = new List<FieldResult>();
             if (component == null || properties == null) return results;
@@ -362,7 +362,7 @@ namespace Funplay.Editor.Tools.Helpers
 
         // ---------- Reflection fallback ----------
 
-        private static bool TryWriteViaReflection(Component component, string name, JToken value, out string error)
+        private static bool TryWriteViaReflection(UnityEngine.Object component, string name, JToken value, out string error)
         {
             error = null;
             var type = component.GetType();

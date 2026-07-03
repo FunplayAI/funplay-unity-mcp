@@ -42,9 +42,10 @@ namespace Funplay.Editor.Tests
                 additiveScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
                 Assert.IsTrue(additiveScene.IsValid());
                 Assert.IsTrue(EditorSceneManager.SaveScene(additiveScene, additiveScenePath));
-                Assert.IsTrue(SceneManager.SetActiveScene(additiveScene));
-                new GameObject(additiveRootName);
+                var additiveRoot = new GameObject(additiveRootName);
+                SceneManager.MoveGameObjectToScene(additiveRoot, additiveScene);
                 var inactiveRoot = new GameObject(inactiveRootName);
+                SceneManager.MoveGameObjectToScene(inactiveRoot, additiveScene);
                 inactiveRoot.SetActive(false);
 
                 Assert.IsTrue(SceneManager.SetActiveScene(activeScene));
