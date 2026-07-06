@@ -1,12 +1,14 @@
 // Copyright (C) Funplay. Licensed under MIT.
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 
 using DescriptionAttribute = System.ComponentModel.DescriptionAttribute;
 using Funplay.Editor.Tools.Helpers;
+using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
 
@@ -17,12 +19,83 @@ namespace Funplay.Editor.Tools.Builtins
     {
         private const string ImagePrefix = "data:image/png;base64,";
         private const int MultiviewMaxAngles = 36;
+        private const string ScreenshotDirRelative = "Library/FunplayMcp/Screenshots";
 
-        [Description("Capture a screenshot of the Game View (what the main camera sees). Returns a base64-encoded PNG image.")]
+        private const string SaveToFileParamDescription =
+            "Save the PNG to disk and return its file path instead of base64 image data. " +
+            "Use for high-resolution captures whose base64 payload would be too large for the transport.";
+
+        private const string OutputPathParamDescription =
+            "Optional output .png path (absolute, or relative to the project root). " +
+            "Default: " + ScreenshotDirRelative + "/<name>-<timestamp>.png. Only used when save_to_file=true.";
+
+        /// <summary>
+        /// Single exit point for all capture tools: base64 data URI by default, or
+        /// write-to-disk + JSON path result when the caller asked for a file.
+        /// </summary>
+        private static string FinishCapture(byte[] pngBytes, bool saveToFile, string outputPath, string defaultBaseName)
+        {
+            if (!saveToFile)
+                return ImagePrefix + Convert.ToBase64String(pngBytes);
+
+            if (!TrySaveScreenshotBytes(pngBytes, outputPath, defaultBaseName, out var savedPath, out var error))
+                return ToolResultFormatter.Error("SCREENSHOT_SAVE_FAILED", error);
+
+            return JsonConvert.SerializeObject(Response.Success(
+                "Screenshot saved to file.",
+                new { path = savedPath, bytes = pngBytes.Length }));
+        }
+
+        private static bool TrySaveScreenshotBytes(byte[] pngBytes, string outputPath, string baseName, out string savedPath, out object error)
+        {
+            savedPath = null;
+            error = null;
+
+            try
+            {
+                var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Directory.GetCurrentDirectory();
+                string path;
+                if (string.IsNullOrWhiteSpace(outputPath))
+                {
+                    var fileName = baseName + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png";
+                    path = Path.Combine(projectRoot, ScreenshotDirRelative, fileName);
+                }
+                else
+                {
+                    path = outputPath.Trim();
+                    if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    {
+                        error = new { provided = outputPath, hint = "output_path must end with .png" };
+                        return false;
+                    }
+
+                    if (!Path.IsPathRooted(path))
+                        path = Path.Combine(projectRoot, path);
+                    path = Path.GetFullPath(path);
+                }
+
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+                File.WriteAllBytes(path, pngBytes);
+                savedPath = path;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = new { message = ex.Message };
+                return false;
+            }
+        }
+
+        [Description("Capture a screenshot of the Game View (what the main camera sees). Returns a base64-encoded PNG image, " +
+                     "or a saved file path when save_to_file=true.")]
         [ReadOnlyTool]
         public static string CaptureGameView(
             [ToolParam("Width of the screenshot in pixels", Required = false)] int width = 0,
-            [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0)
+            [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0,
+            [ToolParam(SaveToFileParamDescription, Required = false)] bool save_to_file = false,
+            [ToolParam(OutputPathParamDescription, Required = false)] string output_path = null)
         {
             if (!TryResolveGameViewSize(ref width, ref height))
             {
@@ -30,9 +103,9 @@ namespace Funplay.Editor.Tools.Builtins
                 height = Mathf.Clamp(height > 0 ? height : 512, 64, 4096);
             }
 
-            var gameViewCapture = TryCapturePlayModeViewRenderTexture(width, height);
-            if (!string.IsNullOrEmpty(gameViewCapture))
-                return gameViewCapture;
+            var playModePng = TryCapturePlayModeViewPngBytes(width, height);
+            if (playModePng != null)
+                return FinishCapture(playModePng, save_to_file, output_path, "game-view");
 
             var camera = Camera.main;
             if (camera == null)
@@ -41,7 +114,14 @@ namespace Funplay.Editor.Tools.Builtins
             if (camera == null)
                 return ToolResultFormatter.Error("CAMERA_NOT_FOUND", new { hint = "Add a Camera component to capture the Game View." });
 
-            return CaptureWithUI(camera, width, height);
+            try
+            {
+                return FinishCapture(CaptureWithUIPngBytes(camera, width, height), save_to_file, output_path, "game-view");
+            }
+            catch (Exception ex)
+            {
+                return ToolResultFormatter.Error("SCREENSHOT_CAPTURE_FAILED", new { message = ex.Message });
+            }
         }
 
         [Description("Capture the Unity Device Simulator screen. Optionally selects a Simulator device and draws a Safe Area outline over the captured image. " +
@@ -52,7 +132,9 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Height of the screenshot in pixels. Default uses the simulator screen texture size. If only height is provided, width preserves source aspect.", Required = false)] int height = 0,
             [ToolParam("Simulator device name to select before capture, e.g. 'iPhone 12' or 'Apple iPad Pro 12.9 (2018)'.", Required = false)] string device_name = null,
             [ToolParam("Draw a high-contrast Safe Area outline on top of the captured simulator image.", Required = false)] bool safe_area_overlay = false,
-            [ToolParam("Open the Simulator view if no Simulator window is currently open.", Required = false)] bool open_if_needed = true)
+            [ToolParam("Open the Simulator view if no Simulator window is currently open.", Required = false)] bool open_if_needed = true,
+            [ToolParam(SaveToFileParamDescription, Required = false)] bool save_to_file = false,
+            [ToolParam(OutputPathParamDescription, Required = false)] string output_path = null)
         {
             if (!TryGetSimulatorWindow(open_if_needed, out var simulatorWindow, out var simulatorError))
                 return ToolResultFormatter.Error("SIMULATOR_VIEW_NOT_AVAILABLE", simulatorError);
@@ -103,14 +185,18 @@ namespace Funplay.Editor.Tools.Builtins
                 safeArea = ResolveSimulatorSafeArea(deviceView, sourceTexture.width, sourceTexture.height);
             }
 
-            return CaptureTexture(sourceTexture, width, height, safeArea, flipVertically: true);
+            return CaptureTexture(sourceTexture, width, height, safeArea, flipVertically: true,
+                saveToFile: save_to_file, outputPath: output_path, defaultBaseName: "simulator-view");
         }
 
-        [Description("Capture a screenshot of the Scene View (the editor's scene camera perspective). Returns a base64-encoded PNG image.")]
+        [Description("Capture a screenshot of the Scene View (the editor's scene camera perspective). Returns a base64-encoded PNG image, " +
+                     "or a saved file path when save_to_file=true.")]
         [ReadOnlyTool]
         public static string CaptureSceneView(
             [ToolParam("Width of the screenshot in pixels", Required = false)] int width = 0,
-            [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0)
+            [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0,
+            [ToolParam(SaveToFileParamDescription, Required = false)] bool save_to_file = false,
+            [ToolParam(OutputPathParamDescription, Required = false)] string output_path = null)
         {
             var sceneView = SceneView.lastActiveSceneView;
             if (sceneView == null)
@@ -129,7 +215,14 @@ namespace Funplay.Editor.Tools.Builtins
             width = Mathf.Clamp(width, 64, 4096);
             height = Mathf.Clamp(height, 64, 4096);
 
-            return CaptureFromCamera(camera, width, height);
+            try
+            {
+                return FinishCapture(CaptureFromCameraPngBytes(camera, width, height), save_to_file, output_path, "scene-view");
+            }
+            catch (Exception ex)
+            {
+                return ToolResultFormatter.Error("SCREENSHOT_CAPTURE_FAILED", new { message = ex.Message });
+            }
         }
 
         [Description("Capture the scene from multiple synthesized camera angles around a target. " +
@@ -149,7 +242,9 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Orbit only: number of evenly-spaced azimuth samples (1-36). Default 8.", Required = false)] int orbit_angles = 8,
             [ToolParam("Orbit only: comma-separated elevations in degrees (e.g. \"0,30,-15\"). Default \"0,30,-15\".", Required = false)] string orbit_elevations = "0,30,-15",
             [ToolParam("Camera distance from target. 0 = auto-fit based on target bounds. Default 0.", Required = false)] float orbit_distance = 0f,
-            [ToolParam("Camera vertical field of view in degrees. Default 60.", Required = false)] float orbit_fov = 60f)
+            [ToolParam("Camera vertical field of view in degrees. Default 60.", Required = false)] float orbit_fov = 60f,
+            [ToolParam("Save each frame as a PNG under " + ScreenshotDirRelative + " and return file paths instead of base64 image data. " +
+                       "Use for large captures whose combined base64 payload would be too large for the transport.", Required = false)] bool save_to_file = false)
         {
             width = Mathf.Clamp(width, 64, 4096);
             height = Mathf.Clamp(height, 64, 4096);
@@ -207,11 +302,23 @@ namespace Funplay.Editor.Tools.Builtins
                 camera.clearFlags = CameraClearFlags.Skybox;
 
                 var captures = new List<object>(angles.Count);
+                var frameIndex = 0;
                 foreach (var (azimuth, elevation) in angles)
                 {
                     PositionCameraOnSphere(camera, targetCenter, distance, azimuth, elevation);
-                    var image = CaptureFromCamera(camera, width, height);
-                    captures.Add(new { angle = new { azimuth, elevation }, image });
+                    var pngBytes = CaptureFromCameraPngBytes(camera, width, height);
+                    if (save_to_file)
+                    {
+                        var baseName = $"multiview-{frameIndex:D2}-az{azimuth:0}-el{elevation:0}";
+                        if (!TrySaveScreenshotBytes(pngBytes, null, baseName, out var savedPath, out var saveError))
+                            return Response.Error("SCREENSHOT_SAVE_FAILED", saveError);
+                        captures.Add(new { angle = new { azimuth, elevation }, path = savedPath });
+                    }
+                    else
+                    {
+                        captures.Add(new { angle = new { azimuth, elevation }, image = ImagePrefix + Convert.ToBase64String(pngBytes) });
+                    }
+                    frameIndex++;
                 }
 
                 return Response.Success(
@@ -241,6 +348,146 @@ namespace Funplay.Editor.Tools.Builtins
                 if (camera != null) UnityEngine.Object.DestroyImmediate(camera);
                 UnityEngine.Object.DestroyImmediate(cameraHostObject);
             }
+        }
+
+        [Description("Capture a screenshot of any open EditorWindow (Inspector, Console, Project, custom tool windows...) " +
+                     "identified by its title or type name. Captures directly from the window's render surface via the editor's " +
+                     "internal GUIView, so the window does not need to be unoccluded on screen (it does need to be open). " +
+                     "Returns a base64-encoded PNG image, or a saved file path when save_to_file=true.")]
+        [ReadOnlyTool]
+        public static string CaptureEditorWindow(
+            [ToolParam("Window title (e.g. 'Inspector', 'MCP Server') or window type name (e.g. 'ConsoleWindow'). " +
+                       "Case-insensitive. Exact title match wins, then title contains, then type name.")] string window,
+            [ToolParam("Width of the screenshot in pixels. 0 keeps the window's native size.", Required = false)] int width = 0,
+            [ToolParam("Height of the screenshot in pixels. 0 keeps the window's native size.", Required = false)] int height = 0,
+            [ToolParam(SaveToFileParamDescription, Required = false)] bool save_to_file = false,
+            [ToolParam(OutputPathParamDescription, Required = false)] string output_path = null,
+            [ToolParam("Focus the window before capturing (brings its tab to the front of its dock area). Default true.", Required = false)] bool focus = true)
+        {
+            if (string.IsNullOrWhiteSpace(window))
+                return ToolResultFormatter.Error("INVALID_WINDOW", new { hint = "Provide a window title or type name." });
+
+            var allWindows = Resources.FindObjectsOfTypeAll<EditorWindow>()
+                .Where(w => w != null)
+                .ToArray();
+
+            var target = ResolveEditorWindow(allWindows, window);
+            if (target == null)
+            {
+                return ToolResultFormatter.Error("WINDOW_NOT_FOUND", new
+                {
+                    requested = window,
+                    available = allWindows
+                        .Select(w => new { title = w.titleContent.text, type = w.GetType().Name })
+                        .ToArray()
+                });
+            }
+
+            var guiViewType = typeof(EditorWindow).Assembly.GetType("UnityEditor.GUIView");
+            var grabPixels = guiViewType?.GetMethod("GrabPixels", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            var parentField = typeof(EditorWindow).GetField("m_Parent", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (grabPixels == null || parentField == null)
+            {
+                return ToolResultFormatter.Error("EDITOR_WINDOW_CAPTURE_UNSUPPORTED", new
+                {
+                    hint = "UnityEditor.GUIView.GrabPixels is not available in this Unity version."
+                });
+            }
+
+            if (focus)
+            {
+                target.Focus();
+                target.Repaint();
+            }
+
+            var parent = parentField.GetValue(target);
+            if (parent == null || !guiViewType.IsInstanceOfType(parent))
+            {
+                return ToolResultFormatter.Error("EDITOR_WINDOW_NOT_RENDERED", new
+                {
+                    window = target.titleContent.text,
+                    hint = "The window has no host GUIView yet. Make sure it is open and visible, then retry."
+                });
+            }
+
+            var pixelsPerPoint = EditorGUIUtility.pixelsPerPoint;
+            var nativeWidth = Mathf.Clamp(Mathf.RoundToInt(target.position.width * pixelsPerPoint), 16, 8192);
+            var nativeHeight = Mathf.Clamp(Mathf.RoundToInt(target.position.height * pixelsPerPoint), 16, 8192);
+
+            RenderTexture grabTexture = null;
+            Texture2D screenshot = null;
+            try
+            {
+                grabTexture = new RenderTexture(nativeWidth, nativeHeight, 0, RenderTextureFormat.ARGB32);
+                grabTexture.Create();
+                grabPixels.Invoke(parent, new object[] { grabTexture, new Rect(0, 0, nativeWidth, nativeHeight) });
+
+                // GrabPixels output reads back vertically inverted through ReadPixels, same
+                // as PlayModeView's render texture; ReadTextureToTexture2D also handles the
+                // optional resize (aspect preserved when only one dimension is provided).
+                ResolveCaptureSize(ref width, ref height, nativeWidth, nativeHeight);
+                screenshot = ReadTextureToTexture2D(grabTexture, width, height, flipVertically: true);
+
+                var baseName = "window-" + SanitizeFileNameFragment(target.titleContent.text);
+                return FinishCapture(screenshot.EncodeToPNG(), save_to_file, output_path, baseName);
+            }
+            catch (Exception ex)
+            {
+                return ToolResultFormatter.Error("SCREENSHOT_CAPTURE_FAILED", new { window = target.titleContent.text, message = ex.Message });
+            }
+            finally
+            {
+                if (grabTexture != null)
+                {
+                    grabTexture.Release();
+                    UnityEngine.Object.DestroyImmediate(grabTexture);
+                }
+                if (screenshot != null)
+                    UnityEngine.Object.DestroyImmediate(screenshot);
+            }
+        }
+
+        private static EditorWindow ResolveEditorWindow(EditorWindow[] windows, string requested)
+        {
+            var trimmed = requested.Trim();
+
+            EditorWindow PickPreferFocused(IEnumerable<EditorWindow> candidates)
+            {
+                EditorWindow first = null;
+                foreach (var candidate in candidates)
+                {
+                    if (candidate.hasFocus)
+                        return candidate;
+                    if (first == null)
+                        first = candidate;
+                }
+                return first;
+            }
+
+            var exactTitle = PickPreferFocused(windows.Where(w =>
+                string.Equals(w.titleContent.text, trimmed, StringComparison.OrdinalIgnoreCase)));
+            if (exactTitle != null)
+                return exactTitle;
+
+            var containsTitle = PickPreferFocused(windows.Where(w =>
+                w.titleContent.text != null &&
+                w.titleContent.text.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0));
+            if (containsTitle != null)
+                return containsTitle;
+
+            return PickPreferFocused(windows.Where(w =>
+                string.Equals(w.GetType().Name, trimmed, StringComparison.OrdinalIgnoreCase) ||
+                w.GetType().Name.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+
+        private static string SanitizeFileNameFragment(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "window";
+
+            var chars = value.Trim().Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '-').ToArray();
+            var sanitized = new string(chars).Trim('-');
+            return string.IsNullOrEmpty(sanitized) ? "window" : sanitized;
         }
 
         private static void PositionCameraOnSphere(Camera camera, Vector3 center, float distance, float azimuthDegrees, float elevationDegrees)
@@ -337,7 +584,7 @@ namespace Funplay.Editor.Tools.Builtins
             return a;
         }
 
-        private static bool TryResolveGameViewSize(ref int width, ref int height)
+        internal static bool TryResolveGameViewSize(ref int width, ref int height)
         {
             if (width > 0 && height > 0)
             {
@@ -799,7 +1046,8 @@ namespace Funplay.Editor.Tools.Builtins
             return false;
         }
 
-        private static string CaptureTexture(Texture sourceTexture, int width, int height, Rect? safeAreaOverlay, bool flipVertically = false)
+        private static string CaptureTexture(Texture sourceTexture, int width, int height, Rect? safeAreaOverlay,
+            bool flipVertically = false, bool saveToFile = false, string outputPath = null, string defaultBaseName = "capture")
         {
             Texture2D screenshot = null;
 
@@ -814,8 +1062,7 @@ namespace Funplay.Editor.Tools.Builtins
                 if (safeAreaOverlay.HasValue)
                     DrawSafeAreaOverlay(screenshot, safeAreaOverlay.Value, sourceWidth, sourceHeight);
 
-                var pngBytes = screenshot.EncodeToPNG();
-                return ImagePrefix + Convert.ToBase64String(pngBytes);
+                return FinishCapture(screenshot.EncodeToPNG(), saveToFile, outputPath, defaultBaseName);
             }
             catch (Exception ex)
             {
@@ -964,7 +1211,7 @@ namespace Funplay.Editor.Tools.Builtins
                 texture.SetPixel(x, y, color);
         }
 
-        private static string TryCapturePlayModeViewRenderTexture(int width, int height)
+        private static byte[] TryCapturePlayModeViewPngBytes(int width, int height)
         {
             Texture2D screenshot = null;
 
@@ -998,10 +1245,7 @@ namespace Funplay.Editor.Tools.Builtins
                     height,
                     flipVertically: ShouldFlipPlayModeViewRenderTexture());
 
-                var pngBytes = screenshot.EncodeToPNG();
-                var base64 = Convert.ToBase64String(pngBytes);
-
-                return ImagePrefix + base64;
+                return screenshot.EncodeToPNG();
             }
             catch
             {
@@ -1028,7 +1272,7 @@ namespace Funplay.Editor.Tools.Builtins
         /// Captures the game view including ScreenSpaceOverlay UI by temporarily
         /// switching overlay canvases to ScreenSpaceCamera during render.
         /// </summary>
-        private static string CaptureWithUI(Camera camera, int width, int height)
+        private static byte[] CaptureWithUIPngBytes(Camera camera, int width, int height)
         {
             RenderTexture renderTexture = null;
             RenderTexture previousTarget = null;
@@ -1063,14 +1307,7 @@ namespace Funplay.Editor.Tools.Builtins
                 RenderTexture.active = renderTexture;
                 screenshot = ReadActiveRenderTextureToTexture2D(width, height, ShouldFlipCameraRenderTexture());
 
-                var pngBytes = screenshot.EncodeToPNG();
-                var base64 = Convert.ToBase64String(pngBytes);
-
-                return ImagePrefix + base64;
-            }
-            catch (Exception ex)
-            {
-                return ToolResultFormatter.Error("SCREENSHOT_CAPTURE_FAILED", new { message = ex.Message });
+                return screenshot.EncodeToPNG();
             }
             finally
             {
@@ -1099,7 +1336,7 @@ namespace Funplay.Editor.Tools.Builtins
             }
         }
 
-        private static string CaptureFromCamera(Camera camera, int width, int height)
+        private static byte[] CaptureFromCameraPngBytes(Camera camera, int width, int height)
         {
             RenderTexture renderTexture = null;
             RenderTexture previousTarget = null;
@@ -1120,14 +1357,7 @@ namespace Funplay.Editor.Tools.Builtins
                 RenderTexture.active = renderTexture;
                 screenshot = ReadActiveRenderTextureToTexture2D(width, height, ShouldFlipCameraRenderTexture());
 
-                var pngBytes = screenshot.EncodeToPNG();
-                var base64 = Convert.ToBase64String(pngBytes);
-
-                return ImagePrefix + base64;
-            }
-            catch (Exception ex)
-            {
-                return ToolResultFormatter.Error("SCREENSHOT_CAPTURE_FAILED", new { message = ex.Message });
+                return screenshot.EncodeToPNG();
             }
             finally
             {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- `save_to_file` option on all screenshot tools (`capture_game_view`, `capture_scene_view`, `capture_simulator_view`, `capture_multiview`): writes the PNG to disk (default `Library/FunplayMcp/Screenshots/`, or a custom `output_path`) and returns the file path instead of base64 image data. High-resolution captures previously produced multi-megabyte base64 payloads that could break MCP transports; saving to a file and letting the client read it sidesteps the payload entirely.
+- New `capture_editor_window` tool: screenshot any open EditorWindow (Inspector, Console, custom tool windows...) by title or type name. Captures directly from the window's internal GUIView render surface, so the window does not need to be unoccluded on screen.
+- New `raycast_at_point` UI diagnostic tool: runs the live EventSystem's RaycastAll at a screen point and reports the full ordered hit chain (hierarchy path, raycast-receiving Graphic, raycastTarget flag, sorting info) plus the `IPointerClickHandler` that would actually receive a click there -- or the element silently swallowing the click when the topmost hit has no handler anywhere up its parent chain (the classic invisible-raycast-blocker bug). Coordinates can be pixels or normalized, with bottom-left or top-left origin; sizes are resolved against the real Game View render resolution rather than the editor window.
+
 ## [0.4.9] - 2026-07-03
 
 ### Added

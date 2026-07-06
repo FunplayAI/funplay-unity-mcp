@@ -1,9 +1,15 @@
 // Copyright (C) Funplay. Licensed under MIT.
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 using DescriptionAttribute = System.ComponentModel.DescriptionAttribute;
 using Funplay.Editor.Tools.Helpers;
+using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace Funplay.Editor.Tools.Builtins
@@ -32,7 +38,7 @@ namespace Funplay.Editor.Tools.Builtins
             canvasGo.AddComponent<GraphicRaycaster>();
 
             // Ensure EventSystem exists
-            if (Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+            if (UnityEngine.Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
             {
                 var esGo = new GameObject("EventSystem");
                 esGo.AddComponent<UnityEngine.EventSystems.EventSystem>();
@@ -295,6 +301,138 @@ namespace Funplay.Editor.Tools.Builtins
                 return new Color(r, g, b, a);
             }
             return Color.white;
+        }
+
+        [Description("Diagnose what UI (or physics) elements a click/tap at a screen point would hit, using the live " +
+                     "EventSystem's RaycastAll. Returns the full ordered hit chain -- for each hit: hierarchy path, the " +
+                     "raycast-receiving Graphic and its raycastTarget flag, sorting info, and the IPointerClickHandler " +
+                     "that would actually receive the click (resolved by bubbling up the hierarchy, exactly like uGUI does). " +
+                     "The summary names the click receiver, or the element silently swallowing the click when the topmost " +
+                     "hit has no click handler anywhere up its parent chain -- the classic 'invisible raycast blocker' bug. " +
+                     "Requires a live EventSystem (Play Mode).")]
+        [ReadOnlyTool]
+        public static string RaycastAtPoint(
+            [ToolParam("X coordinate of the point to test.")] float x,
+            [ToolParam("Y coordinate of the point to test.")] float y,
+            [ToolParam("Interpret x/y as normalized 0-1 viewport coordinates instead of pixels.", Required = false)] bool normalized = false,
+            [ToolParam("Coordinate origin: 'bottom_left' (Unity screen space, default) or 'top_left' (screenshot/image space).", Required = false)] string origin = "bottom_left",
+            [ToolParam("Maximum number of hits to include in the result. Default 20.", Required = false)] int max_results = 20)
+        {
+            var eventSystem = EventSystem.current;
+            if (eventSystem == null)
+            {
+                return ToolResultFormatter.Error("NO_EVENT_SYSTEM", new
+                {
+                    hint = "No live EventSystem found. Enter Play Mode (or ensure the scene has an enabled EventSystem) first."
+                });
+            }
+
+            // Screen.width/height on the editor main thread report the focused editor
+            // window, not the game render resolution the UI canvases are laid out in.
+            // Resolve the real Game View target size (same reflection the screenshot
+            // tools use) so normalized coordinates and the top_left flip match what
+            // GraphicRaycaster actually raycasts against.
+            var screenWidth = 0;
+            var screenHeight = 0;
+            if (!ScreenshotFunctions.TryResolveGameViewSize(ref screenWidth, ref screenHeight))
+            {
+                screenWidth = Screen.width;
+                screenHeight = Screen.height;
+            }
+
+            var px = normalized ? x * screenWidth : x;
+            var py = normalized ? y * screenHeight : y;
+            if (string.Equals(origin?.Trim(), "top_left", StringComparison.OrdinalIgnoreCase))
+                py = screenHeight - py;
+
+            var pointerData = new PointerEventData(eventSystem) { position = new Vector2(px, py) };
+            var results = new List<RaycastResult>();
+            eventSystem.RaycastAll(pointerData, results);
+
+            max_results = Mathf.Clamp(max_results, 1, 100);
+            var hits = new List<object>(Mathf.Min(results.Count, max_results));
+            foreach (var result in results.Take(max_results))
+            {
+                var go = result.gameObject;
+                if (go == null)
+                    continue;
+
+                var graphic = go.GetComponent<Graphic>();
+                var clickHandlerGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(go);
+                hits.Add(new
+                {
+                    path = ObjectsHelper.GetGameObjectPath(go),
+                    raycast_component = graphic != null ? graphic.GetType().Name : DescribeNonGraphicRaycastReceiver(go),
+                    raycast_target = graphic != null ? (bool?)graphic.raycastTarget : null,
+                    raycaster = result.module != null ? result.module.GetType().Name : null,
+                    sorting_layer = result.sortingLayer,
+                    sorting_order = result.sortingOrder,
+                    depth = result.depth,
+                    distance = result.distance,
+                    click_handler = DescribeClickHandler(clickHandlerGo)
+                });
+            }
+
+            object clickReceiver = null;
+            object swallowedBy = null;
+            if (results.Count > 0 && results[0].gameObject != null)
+            {
+                var topHandlerGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(results[0].gameObject);
+                if (topHandlerGo != null)
+                    clickReceiver = DescribeClickHandler(topHandlerGo);
+                else
+                    swallowedBy = new
+                    {
+                        path = ObjectsHelper.GetGameObjectPath(results[0].gameObject),
+                        hint = "The topmost hit has no IPointerClickHandler anywhere up its parent chain, so a click " +
+                               "here is consumed without reaching anything -- check for a stray raycastTarget Graphic " +
+                               "or a leftover full-screen shield."
+                    };
+            }
+
+            return JsonConvert.SerializeObject(Response.Success(
+                results.Count == 0
+                    ? "No raycast hits at this point."
+                    : $"Raycast hit {results.Count} element(s); showing {hits.Count}.",
+                new
+                {
+                    screen_position = new { x = px, y = py },
+                    screen_size = new { width = screenWidth, height = screenHeight },
+                    hit_count = results.Count,
+                    click_receiver = clickReceiver,
+                    swallowed_by = swallowedBy,
+                    hits
+                }));
+        }
+
+        private static string DescribeNonGraphicRaycastReceiver(GameObject go)
+        {
+            var collider = go.GetComponent<Collider>();
+            if (collider != null)
+                return collider.GetType().Name;
+            var collider2D = go.GetComponent<Collider2D>();
+            if (collider2D != null)
+                return collider2D.GetType().Name;
+            return "<none>";
+        }
+
+        private static object DescribeClickHandler(GameObject handlerGo)
+        {
+            if (handlerGo == null)
+                return null;
+
+            var handlerComponents = handlerGo.GetComponents<Component>()
+                .Where(c => c is IPointerClickHandler)
+                .Select(c => c.GetType().Name)
+                .ToArray();
+
+            var selectable = handlerGo.GetComponent<Selectable>();
+            return new
+            {
+                path = ObjectsHelper.GetGameObjectPath(handlerGo),
+                components = handlerComponents,
+                interactable = selectable != null ? (bool?)selectable.IsInteractable() : null
+            };
         }
     }
 }
