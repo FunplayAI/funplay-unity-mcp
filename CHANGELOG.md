@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+- Real Unity memory snapshot (.snap) tools -- the full-detail captures the Memory Profiler package opens for object-level reference-chain analysis, complementing the existing lightweight aggregate-counter snapshots (`memory_take_snapshot`): `memory_take_full_snapshot` captures via `Unity.Profiling.Memory.MemoryProfiler.TakeSnapshot` (configurable CaptureFlags, async completion, written into the Memory Profiler package's snapshot folder), `memory_list_full_snapshots` lists them, and `memory_open_snapshot_in_profiler` loads one into the Memory Profiler window (com.unity.memoryprofiler package required for that last step only; capture itself is a core-engine API). Combine with `capture_editor_window('Memory Profiler')` to inspect the loaded analysis visually.
+- Two headless structured-query tools for those same .snap files -- no window, no screenshot: `memory_query_top_objects` ranks native objects (Texture2D, Mesh, RenderTexture, etc.) by size with an optional type-name filter, and `memory_query_references` returns what references a given object or what it references (`referenced_by`/`references_to`), resolving the target by name or by the index `memory_query_top_objects` returned. Both load the snapshot via `SnapshotDataService.LoadWithoutLoadingToUI` (the package's crawler, without opening any UI) and reflect into the crawled `CachedSnapshot`'s native object table and connection graph.
+
 ## [0.4.9] - 2026-07-03
 
 ### Added
