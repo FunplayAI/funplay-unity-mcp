@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+- A batch of new capability tools for asset/scene inspection and manipulation an agent otherwise had to hand-roll via `execute_code`. Each returns the standard `{success, ...}` / `{success:false, code}` envelope and resolves scene targets through `ObjectsHelper` (name / path / instance id, inactive included):
+  - **Asset import settings** — `get_asset_import_settings` / `set_asset_import_settings`: read/write Texture/Audio/Model importer fields and `SaveAndReimport`, reading applied values back so import-postprocessor overrides are visible.
+  - **Reference graph** — `find_references` (forward dependencies + a reverse "who references this asset" scan, per-direction `truncated` flags) and `find_broken_references` (missing MonoBehaviour scripts + dangling Object references, over a scene or a prefab/asset).
+  - **`get_mesh_info`** — vertex/triangle/submesh/UV-channel/bounds from a Mesh asset or a scene MeshFilter/SkinnedMeshRenderer.
+  - **Physics queries** (read-only, Edit-Mode-safe — each does a `SyncTransforms` first): `physics_raycast`, `physics_overlap` (sphere/box), `physics2d_overlap_point`.
+  - **`particle_control`** — simulate-to-time / play / pause / stop / restart for deterministic VFX capture; simulate time is clamped and single-stepped so a large value can't hang the editor.
+  - **Material shader properties** — `get_material_properties` / `set_material_property`.
+  - **`get_project_settings`** + **`get_editor_pref`** — Quality/Player/active-build-target snapshot; single EditorPrefs read.
+  - **Undo control** — `undo` / `redo` / `get_undo_state` (operate on the shared editor undo stack).
+  - **Component batch** — `copy_component` / `paste_component_values` / `add_component_to_many` (per-target results; paste-as-new is undo-tracked).
+  - **Lighting** — `get_lighting_settings` / `set_lighting_settings` / `bake_lightmaps`.
+  - **`director_evaluate`** — scrub a PlayableDirector to a time; fully reflection-based, compiles without a `com.unity.timeline` reference.
+  - **Modal dialog** — `list_open_dialogs` / `dismiss_dialog` (floating/utility EditorWindows only; refuses to close docked panels; native OS dialogs still need `simulate_key_press`).
+
 ## [0.5.0] - 2026-07-07
 
 ### Added
