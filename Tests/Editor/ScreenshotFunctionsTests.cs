@@ -209,6 +209,18 @@ namespace Funplay.Editor.Tests
         }
 
         [Test]
+        public void ShouldSpillScreenshotToFile_UsesCombinedRawByteThreshold()
+        {
+            Assert.IsFalse(ScreenshotFunctions.ShouldSpillScreenshotToFile(
+                ScreenshotFunctions.MaxInlineScreenshotBytes,
+                saveToFile: false));
+            Assert.IsTrue(ScreenshotFunctions.ShouldSpillScreenshotToFile(
+                ScreenshotFunctions.MaxInlineScreenshotBytes + 1L,
+                saveToFile: false));
+            Assert.IsTrue(ScreenshotFunctions.ShouldSpillScreenshotToFile(1, saveToFile: true));
+        }
+
+        [Test]
         public void TryResolveScreenshotOutputPath_DefaultsInsideProjectRoot()
         {
             var projectRoot = MakeTempProjectRoot();

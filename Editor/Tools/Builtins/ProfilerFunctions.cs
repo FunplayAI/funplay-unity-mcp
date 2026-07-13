@@ -104,7 +104,8 @@ namespace Funplay.Editor.Tools.Builtins
                 {
                     var fallbackMs = Time.unscaledDeltaTime > 0f ? Time.unscaledDeltaTime * 1000.0 : 0.0;
                     if (fallbackMs <= 0.0)
-                        return "Frame timing not available yet. Try again after the editor has rendered a few frames.";
+                        return ToolResultFormatter.Error("FRAME_TIMING_UNAVAILABLE",
+                            new { hint = "Try again after the editor has rendered a few frames." });
                     return $"CPU Frame (fallback from Time.unscaledDeltaTime): {fallbackMs:F2} ms, Approx FPS: {1000.0 / fallbackMs:F1}";
                 }
 
@@ -243,7 +244,7 @@ namespace Funplay.Editor.Tools.Builtins
             try
             {
                 if (string.IsNullOrEmpty(target))
-                    return "target is required.";
+                    return ToolResultFormatter.Error("TARGET_REQUIRED");
 
                 UnityEngine.Object obj = null;
 
@@ -506,11 +507,13 @@ namespace Funplay.Editor.Tools.Builtins
             {
                 var dir = System.IO.Path.Combine(Application.dataPath, "..", SnapshotDirRelative);
                 if (!System.IO.Directory.Exists(dir))
-                    return "No snapshots directory yet. Call memory_take_snapshot first.";
+                    return ToolResultFormatter.Error("NO_SNAPSHOTS",
+                        new { hint = "Call memory_take_snapshot first." });
 
                 var files = System.IO.Directory.GetFiles(dir, "*.json");
                 if (files.Length == 0)
-                    return "No snapshots found.";
+                    return ToolResultFormatter.Error("NO_SNAPSHOTS",
+                        new { hint = "Call memory_take_snapshot first." });
 
                 var sb = new StringBuilder();
                 foreach (var f in files)
@@ -720,7 +723,8 @@ namespace Funplay.Editor.Tools.Builtins
 
                 var events = _fdGetFrameEvents.Invoke(null, null) as Array;
                 if (events == null || events.Length == 0)
-                    return "No frame debugger events captured yet. Make sure frame_debugger_enable was called, then wait a moment for a frame to render before calling this again.";
+                    return ToolResultFormatter.Error("NO_FRAME_DEBUGGER_EVENTS",
+                        new { hint = "Ensure frame_debugger_enable was called, then wait a moment for a frame to render before calling this again." });
 
                 max_events = Mathf.Clamp(max_events, 1, 500);
                 var count = Mathf.Min(max_events, events.Length);

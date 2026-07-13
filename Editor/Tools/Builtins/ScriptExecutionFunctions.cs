@@ -34,7 +34,8 @@ namespace Funplay.Editor.Tools.Builtins
                      "Log/LogWarning/LogError (returned in the response).\n" +
                      "  2) Legacy: any class with `public static string Run()` — return value becomes the response message.\n" +
                      "Before compiling, the editor's AssetDatabase is refreshed and pending compilation is awaited, " +
-                     "so external file edits are picked up automatically without a separate request_recompile. " +
+                     "so external file edits are picked up automatically without a separate request_recompile " +
+                     "(pass skip_refresh=true to bypass this for read-only snippets or a live Play Mode session you must not disturb). " +
                      "When a full-class snippet implements IFunplayCommand, the required Funplay.Editor.Tools.Scripting using is added automatically if omitted. " +
                      "safety_checks blocks a small set of obviously dangerous patterns " +
                      "(File.Delete, Process.Start, while(true), Environment.Exit, AssetDatabase.DeleteAsset, etc) " +
@@ -46,7 +47,8 @@ namespace Funplay.Editor.Tools.Builtins
         [SceneEditingTool]
         public static async Task<object> ExecuteCode(
             [ToolParam("C# code to execute. See description for IFunplayCommand vs legacy Run() templates.")] string code,
-            [ToolParam("If true, reject the call before compile when the code contains obviously dangerous patterns. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null)
+            [ToolParam("If true, reject the call before compile when the code contains obviously dangerous patterns. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null,
+            [ToolParam("If true, skip the pre-compile AssetDatabase.Refresh + wait-for-ready. Use only when the editor is already up to date -- e.g. a read-only inspection snippet, or during a live Play Mode session you must not disturb. The default refresh can trigger an import/domain reload (from your own OR another actor's pending changes in a shared editor) that wipes Play Mode runtime state. When skipped, external file edits made since the last compile are NOT picked up.", Required = false)] bool skip_refresh = false)
         {
             var effectiveSafetyChecks = ResolveSafetyChecks(safety_checks);
             if (effectiveSafetyChecks)
@@ -67,15 +69,18 @@ namespace Funplay.Editor.Tools.Builtins
                 }
             }
 
-            try
+            if (!skip_refresh)
             {
-                await EditorReadyHelper.RefreshAndWaitForReady();
-            }
-            catch (TimeoutException)
-            {
-                AppendHistory(code, false, "EDITOR_BUSY");
-                return Response.Error("EDITOR_BUSY",
-                    new { hint = "Unity is still compiling/importing. Retry in a moment." });
+                try
+                {
+                    await EditorReadyHelper.RefreshAndWaitForReady();
+                }
+                catch (TimeoutException)
+                {
+                    AppendHistory(code, false, "EDITOR_BUSY");
+                    return Response.Error("EDITOR_BUSY",
+                        new { hint = "Unity is still compiling/importing. Retry in a moment, or pass skip_refresh=true if you know the editor is up to date." });
+                }
             }
 
             var className = "TempScript_" + Guid.NewGuid().ToString("N").Substring(0, 8);

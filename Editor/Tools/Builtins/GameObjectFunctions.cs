@@ -53,11 +53,16 @@ namespace Funplay.Editor.Tools.Builtins
                 default: return Response.Error("UNKNOWN_PRIMITIVE", new { primitive_type });
             }
 
+            if (!TryParseVector3(position, out var primPos, out var primPosErr))
+                return Response.Error("INVALID_PARAM", new { param = "position", provided = position, expected = "Vector3 'x,y,z'", detail = primPosErr });
+            if (!TryParseVector3(scale, out var primScale, out var primScaleErr))
+                return Response.Error("INVALID_PARAM", new { param = "scale", provided = scale, expected = "Vector3 'x,y,z'", detail = primScaleErr });
+
             var go = GameObject.CreatePrimitive(type);
             go.name = name;
             Undo.RegisterCreatedObjectUndo(go, $"Create {name}");
-            go.transform.position = ParseVector3(position);
-            go.transform.localScale = ParseVector3(scale);
+            go.transform.position = primPos;
+            go.transform.localScale = primScale;
             Selection.activeGameObject = go;
 
             return Response.Success($"Created {primitive_type} '{name}'.", GameObjectSerializer.Describe(go, includeComponents: false));
@@ -129,11 +134,24 @@ namespace Funplay.Editor.Tools.Builtins
             if (go == null)
                 return Response.Error("TARGET_NOT_FOUND", new { target, find_method });
 
+            // Validate every provided vector BEFORE touching the transform, so a malformed value
+            // returns a clear INVALID_PARAM instead of silently writing (0,0,0).
+            var hasPos = !string.IsNullOrEmpty(position);
+            var hasRot = !string.IsNullOrEmpty(rotation);
+            var hasScl = !string.IsNullOrEmpty(scale);
+            Vector3 pos = default, rot = default, scl = default;
+            if (hasPos && !TryParseVector3(position, out pos, out var posErr))
+                return Response.Error("INVALID_PARAM", new { param = "position", provided = position, expected = "Vector3 'x,y,z'", detail = posErr });
+            if (hasRot && !TryParseVector3(rotation, out rot, out var rotErr))
+                return Response.Error("INVALID_PARAM", new { param = "rotation", provided = rotation, expected = "Vector3 'x,y,z'", detail = rotErr });
+            if (hasScl && !TryParseVector3(scale, out scl, out var sclErr))
+                return Response.Error("INVALID_PARAM", new { param = "scale", provided = scale, expected = "Vector3 'x,y,z'", detail = sclErr });
+
             Undo.RecordObject(go.transform, $"Set transform of {go.name}");
 
-            if (!string.IsNullOrEmpty(position)) go.transform.position = ParseVector3(position);
-            if (!string.IsNullOrEmpty(rotation)) go.transform.eulerAngles = ParseVector3(rotation);
-            if (!string.IsNullOrEmpty(scale)) go.transform.localScale = ParseVector3(scale);
+            if (hasPos) go.transform.position = pos;
+            if (hasRot) go.transform.eulerAngles = rot;
+            if (hasScl) go.transform.localScale = scl;
 
             return Response.Success($"Updated transform of '{go.name}'.", new
             {
@@ -306,19 +324,29 @@ namespace Funplay.Editor.Tools.Builtins
 
         // -------- Helpers --------
 
-        private static Vector3 ParseVector3(string value)
+        // Parse an 'x,y,z' vector, reporting malformed input instead of silently returning
+        // Vector3.zero (which used to produce a wrong write with a success response, e.g.
+        // set_transform(position:'1,2') moving the object to the origin).
+        private static bool TryParseVector3(string value, out Vector3 result, out string error)
         {
-            if (string.IsNullOrEmpty(value)) return Vector3.zero;
-            value = value.Trim('(', ')', ' ');
-            var parts = value.Split(',');
-            if (parts.Length >= 3)
+            result = Vector3.zero;
+            error = null;
+            var trimmed = (value ?? string.Empty).Trim('(', ')', ' ');
+            var parts = trimmed.Split(',');
+            if (parts.Length != 3)
             {
-                return new Vector3(
-                    float.Parse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture),
-                    float.Parse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture),
-                    float.Parse(parts[2].Trim(), System.Globalization.CultureInfo.InvariantCulture));
+                error = $"expected 3 comma-separated numbers 'x,y,z', got {parts.Length}";
+                return false;
             }
-            return Vector3.zero;
+            if (float.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x) &&
+                float.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var y) &&
+                float.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var z))
+            {
+                result = new Vector3(x, y, z);
+                return true;
+            }
+            error = $"'{value}' has a non-numeric component";
+            return false;
         }
     }
 }

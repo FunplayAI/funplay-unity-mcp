@@ -13,6 +13,15 @@ namespace Funplay.Editor.Tests
     public sealed class ProfilerFunctionsTests
     {
         [Test]
+        public void GetObjectMemory_MissingTargetReturnsStructuredError()
+        {
+            var result = ProfilerFunctions.GetObjectMemory(string.Empty);
+
+            StringAssert.Contains("\"success\":false", result);
+            StringAssert.Contains("\"code\":\"TARGET_REQUIRED\"", result);
+        }
+
+        [Test]
         public void ProfilerTools_ReturnUsableSessionTimingAndMemoryResults()
         {
             var originalProfilerEnabled = Profiler.enabled;

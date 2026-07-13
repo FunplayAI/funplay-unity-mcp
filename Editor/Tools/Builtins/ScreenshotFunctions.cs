@@ -29,21 +29,38 @@ namespace Funplay.Editor.Tools.Builtins
             "Optional output .png path under the Unity project root (absolute, or relative to the project root). " +
             "Default: " + ScreenshotDirRelative + "/<name>-<timestamp>.png. Only used when save_to_file=true.";
 
+        // Threshold on RAW PNG bytes for spilling a capture to disk instead of inlining it.
+        // The transmitted payload is base64 (~1.33x the raw bytes) and a base64 payload around
+        // ~1MB reliably drops the client-side MCP socket, so this raw limit is set well below
+        // that: 512KB raw -> ~683KB base64, leaving headroom under the drop point.
+        internal const int MaxInlineScreenshotBytes = 512 * 1024;
+
+        internal static bool ShouldSpillScreenshotToFile(long pngBytes, bool saveToFile)
+        {
+            return saveToFile || pngBytes > MaxInlineScreenshotBytes;
+        }
+
         /// <summary>
         /// Single exit point for all capture tools: base64 data URI by default, or
-        /// write-to-disk + JSON path result when the caller asked for a file.
+        /// write-to-disk + JSON path result when the caller asked for a file (or when the
+        /// payload is too large to send inline, in which case it auto-falls back to a file).
         /// </summary>
         private static string FinishCapture(byte[] pngBytes, bool saveToFile, string outputPath, string defaultBaseName)
         {
-            if (!saveToFile)
+            var spillToFile = ShouldSpillScreenshotToFile(pngBytes.Length, saveToFile);
+            var autoFallback = spillToFile && !saveToFile;
+
+            if (!spillToFile)
                 return ImagePrefix + Convert.ToBase64String(pngBytes);
 
             if (!TrySaveScreenshotBytes(pngBytes, outputPath, defaultBaseName, out var savedPath, out var error))
                 return ToolResultFormatter.Error("SCREENSHOT_SAVE_FAILED", error);
 
             return JsonConvert.SerializeObject(Response.Success(
-                "Screenshot saved to file.",
-                new { path = savedPath, bytes = pngBytes.Length }));
+                autoFallback
+                    ? $"Screenshot ({pngBytes.Length} bytes) exceeded the inline transport limit and was saved to a file instead. Read the file to view it."
+                    : "Screenshot saved to file.",
+                new { path = savedPath, bytes = pngBytes.Length, fell_back_to_file = autoFallback }));
         }
 
         private static bool TrySaveScreenshotBytes(byte[] pngBytes, string outputPath, string baseName, out string savedPath, out object error)
@@ -357,13 +374,28 @@ namespace Funplay.Editor.Tools.Builtins
                 camera.farClipPlane = Mathf.Max(distance * 10f, 1000f);
                 camera.clearFlags = CameraClearFlags.Skybox;
 
-                var captures = new List<object>(angles.Count);
-                var frameIndex = 0;
+                // Capture all frames first, then decide inline-vs-file from the COMBINED size.
+                // The default (save_to_file=false) path previously concatenated every frame's
+                // base64 with no size check -- a 6-36 frame multiview easily exceeds the inline
+                // transport limit and drops the socket. Spill all frames to files when the total
+                // would be too large (mirrors FinishCapture's single-capture auto-fallback).
+                var frames = new List<(float az, float el, byte[] png)>(angles.Count);
                 foreach (var (azimuth, elevation) in angles)
                 {
                     PositionCameraOnSphere(camera, targetCenter, distance, azimuth, elevation);
-                    var pngBytes = CaptureFromCameraPngBytes(camera, width, height);
-                    if (save_to_file)
+                    frames.Add((azimuth, elevation, CaptureFromCameraPngBytes(camera, width, height)));
+                }
+
+                long totalBytes = 0;
+                foreach (var f in frames) totalBytes += f.png.Length;
+                var spillToFiles = ShouldSpillScreenshotToFile(totalBytes, save_to_file);
+                var autoFallback = spillToFiles && !save_to_file;
+
+                var captures = new List<object>(frames.Count);
+                var frameIndex = 0;
+                foreach (var (azimuth, elevation, pngBytes) in frames)
+                {
+                    if (spillToFiles)
                     {
                         var baseName = $"multiview-{frameIndex:D2}-az{azimuth:0}-el{elevation:0}";
                         if (!TrySaveScreenshotBytes(pngBytes, null, baseName, out var savedPath, out var saveError))
@@ -377,8 +409,11 @@ namespace Funplay.Editor.Tools.Builtins
                     frameIndex++;
                 }
 
-                return Response.Success(
-                    $"Captured {captures.Count} multiview frame(s) of '{targetName}' in {modeNormalized} mode.",
+                var msg = autoFallback
+                    ? $"Captured {captures.Count} multiview frame(s) of '{targetName}' ({modeNormalized}); combined {totalBytes} bytes exceeded the inline limit so frames were saved to files. Read them to view."
+                    : $"Captured {captures.Count} multiview frame(s) of '{targetName}' in {modeNormalized} mode.";
+
+                return Response.Success(msg,
                     new
                     {
                         target = new
@@ -392,6 +427,9 @@ namespace Funplay.Editor.Tools.Builtins
                         fov = orbit_fov,
                         per_frame = new { width, height },
                         count = captures.Count,
+                        total_bytes = totalBytes,
+                        saved_to_files = spillToFiles,
+                        fell_back_to_file = autoFallback,
                         captures
                     });
             }

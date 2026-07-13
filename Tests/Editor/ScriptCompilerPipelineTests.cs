@@ -60,6 +60,21 @@ namespace Funplay.Editor.Tests
         }
 
         [UnityTest]
+        public IEnumerator ExecuteCode_SkipRefresh_RunsWithRoslyn()
+        {
+            return ExecuteCodeAndAssert(
+                "public class SkipRefreshSyntax { public static string Run() { return \"skip-refresh-ok\"; } }",
+                result =>
+                {
+                    AssertSuccess(result);
+                    var data = GetProperty<object>(result, "data");
+                    Assert.AreEqual("skip-refresh-ok", GetProperty<string>(data, "result"));
+                    Assert.AreEqual("Roslyn", GetProperty<string>(data, "compiler"));
+                },
+                skipRefresh: true);
+        }
+
+        [UnityTest]
         public IEnumerator ExecuteCode_TargetTypedNew_RunsWithRoslyn()
         {
             return ExecuteCodeAndAssert(
@@ -182,9 +197,9 @@ public class CommandSyntax : IFunplayCommand
                 });
         }
 
-        private static IEnumerator ExecuteCodeAndAssert(string code, Action<object> assert)
+        private static IEnumerator ExecuteCodeAndAssert(string code, Action<object> assert, bool skipRefresh = false)
         {
-            var task = ScriptExecutionFunctions.ExecuteCode(code, false);
+            var task = ScriptExecutionFunctions.ExecuteCode(code, false, skipRefresh);
             while (!task.IsCompleted)
                 yield return null;
 
