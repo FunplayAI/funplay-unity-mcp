@@ -4,6 +4,7 @@
 
 ### Added
 - The MCP Server window's **Tool Exposure** row now includes a settings button that opens the full Tool Exposure window with the active `core` or `full` profile pre-selected.
+- `get_test_job` now reports `possiblyStuck`, the stalled phase, inactivity duration, and current test when Test Runner callbacks stop. Runner startup uses a 30-second threshold while a known running test gets 120 seconds to avoid premature warnings for normal long tests.
 
 ### Changed
 - Project Skills now manage only a delimited Funplay block inside shared `AGENTS.md` and `CLAUDE.md` files, preserving all hand-authored content outside it. Exact legacy generated files migrate automatically; edited legacy single-marker files are left unchanged with an explicit migration error instead of being overwritten.

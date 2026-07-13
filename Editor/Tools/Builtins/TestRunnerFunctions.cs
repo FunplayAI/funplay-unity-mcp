@@ -72,12 +72,14 @@ namespace Funplay.Editor.Tools.Builtins
                 return ToolResultFormatter.Exception(ex);
             }
 
+            var now = FormatTimestamp(DateTime.Now);
             var job = new JObject
             {
                 ["jobId"] = guid,
                 ["status"] = "running",
                 ["mode"] = testMode.ToString(),
-                ["startedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                ["startedAt"] = now,
+                ["lastActivityAt"] = now,
                 ["testsCompleted"] = 0,
                 ["hasFilters"] = hasFilters
             };
@@ -89,7 +91,10 @@ namespace Funplay.Editor.Tools.Builtins
         }
 
         [Description("Get the status and results of a test run started by run_tests. While running, reports progress; " +
-                     "when finished, reports pass/fail/skip counts and details for failed tests.")]
+                     "when finished, reports pass/fail/skip counts and details for failed tests. If no test-runner " +
+                     "callback has fired for a while, the response includes possiblyStuck=true with the current phase, " +
+                     "current test (when known), and a diagnostic hint. Runner start/transition uses a 30-second threshold; " +
+                     "a known in-progress test uses 120 seconds to avoid flagging ordinary long-running tests too early.")]
         [ReadOnlyTool]
         public static object GetTestJob(
             [ToolParam("Job id returned by run_tests. Omit to query the most recent run.", Required = false)] string job_id = null)
@@ -102,7 +107,75 @@ namespace Funplay.Editor.Tools.Builtins
             if (!string.IsNullOrEmpty(job_id) && !string.Equals(job_id, storedId, StringComparison.Ordinal))
                 return Response.Error("JOB_NOT_FOUND", new { job_id, activeJobId = storedId, hint = "Only the most recent run is tracked." });
 
+            AnnotateIfPossiblyStuck(job);
             return Response.Success($"Test job {job.Value<string>("status")}.", job);
+        }
+
+        // Unity's Test Runner only supports one active run at a time, engine-wide, and this
+        // package has no way to see runs started by other tools/sessions/processes against the
+        // same Editor -- a concurrent caller (or a stale run left over from one) can silently
+        // occupy the engine with no exception and no error surfaced here, leaving a run stuck at
+        // "running" forever. Rather than reflect into Unity's private, version-fragile internal
+        // run-tracking singleton to detect that directly, use a much simpler and more robust
+        // signal we already own: if no ICallbacks activity (RunStarted/TestStarted/TestFinished)
+        // has touched this job in a while, something has stopped progressing.
+        internal const int RunnerStuckThresholdSeconds = 30;
+        internal const int ActiveTestStuckThresholdSeconds = 120;
+
+        internal static void AnnotateIfPossiblyStuck(JObject job, DateTime? now = null)
+        {
+            job?.Remove("possiblyStuck");
+            job?.Remove("stuckPhase");
+            job?.Remove("secondsSinceActivity");
+            job?.Remove("stuckHint");
+            if (job == null || job.Value<string>("status") != "running") return;
+
+            var referenceTime = job.Value<string>("lastActivityAt") ?? job.Value<string>("startedAt");
+            if (!TryParseTimestamp(referenceTime, out var reference))
+                return;
+
+            var currentTime = now ?? DateTime.Now;
+            var currentTest = job.Value<string>("currentTest");
+            var assessment = AssessStuckState(reference, currentTest, currentTime);
+            if (assessment == null) return;
+
+            job["possiblyStuck"] = true;
+            job["stuckPhase"] = assessment.Phase;
+            job["secondsSinceActivity"] = assessment.SecondsSinceActivity;
+            job["stuckHint"] = assessment.Hint;
+        }
+
+        internal static TestRunnerStuckAssessment AssessStuckState(
+            DateTime lastActivity,
+            string currentTest,
+            DateTime now)
+        {
+            var elapsedSeconds = Math.Max(0, (int)(now - lastActivity).TotalSeconds);
+            var hasCurrentTest = !string.IsNullOrWhiteSpace(currentTest);
+            var threshold = hasCurrentTest ? ActiveTestStuckThresholdSeconds : RunnerStuckThresholdSeconds;
+            if (elapsedSeconds < threshold)
+                return null;
+
+            var phase = hasCurrentTest ? "test_execution" : "runner_start_or_transition";
+            var hint = hasCurrentTest
+                ? $"Test '{currentTest}' has produced no completion callback for {elapsedSeconds}s. It may be a legitimate long-running test, so inspect the Editor and Console before cancelling. If its expected duration is shorter, cancel and retry once the Editor is idle."
+                : $"No test-runner callback has fired for {elapsedSeconds}s before or between tests. Unity supports one active run engine-wide; another caller or a stale run may be occupying it. Check get_editor_state and get_console_logs, then cancel and retry only after the Editor is idle.";
+            return new TestRunnerStuckAssessment(phase, elapsedSeconds, hint);
+        }
+
+        internal static string FormatTimestamp(DateTime value)
+        {
+            return value.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParseTimestamp(string value, out DateTime timestamp)
+        {
+            return DateTime.TryParseExact(
+                value,
+                "yyyy-MM-dd HH:mm:ss",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out timestamp);
         }
 
         [Description("Cancel a running test run. Use when a run appears stuck (e.g. a PlayMode run that never finishes).")]
@@ -140,6 +213,8 @@ namespace Funplay.Editor.Tools.Builtins
             if (cancelled && job.Value<string>("jobId") == guid)
             {
                 job["status"] = "cancelled";
+                job.Remove("currentTest");
+                job.Remove("currentTestStartedAt");
                 SaveJob(job);
             }
 
@@ -173,6 +248,20 @@ namespace Funplay.Editor.Tools.Builtins
                 if (trimmed.Length > 0) list.Add(trimmed);
             }
             return list.ToArray();
+        }
+
+        internal sealed class TestRunnerStuckAssessment
+        {
+            public TestRunnerStuckAssessment(string phase, int secondsSinceActivity, string hint)
+            {
+                Phase = phase;
+                SecondsSinceActivity = secondsSinceActivity;
+                Hint = hint;
+            }
+
+            public string Phase { get; }
+            public int SecondsSinceActivity { get; }
+            public string Hint { get; }
         }
     }
 
@@ -214,10 +303,23 @@ namespace Funplay.Editor.Tools.Builtins
                 {
                     job["totalTests"] = CountLeafTests(testsToRun);
                 }
+                job["lastActivityAt"] = TestRunnerFunctions.FormatTimestamp(DateTime.Now);
+                job.Remove("currentTest");
+                job.Remove("currentTestStartedAt");
                 TestRunnerFunctions.SaveJob(job);
             }
 
-            public void TestStarted(ITestAdaptor test) { }
+            public void TestStarted(ITestAdaptor test)
+            {
+                if (test == null || test.IsSuite) return;
+                var job = TestRunnerFunctions.LoadJob();
+                if (job == null || job.Value<string>("status") != "running") return;
+                var now = TestRunnerFunctions.FormatTimestamp(DateTime.Now);
+                job["lastActivityAt"] = now;
+                job["currentTestStartedAt"] = now;
+                job["currentTest"] = test.FullName;
+                TestRunnerFunctions.SaveJob(job);
+            }
 
             public void TestFinished(ITestResultAdaptor result)
             {
@@ -225,6 +327,9 @@ namespace Funplay.Editor.Tools.Builtins
                 var job = TestRunnerFunctions.LoadJob();
                 if (job == null || job.Value<string>("status") != "running") return;
                 job["testsCompleted"] = (job.Value<int?>("testsCompleted") ?? 0) + 1;
+                job["lastActivityAt"] = TestRunnerFunctions.FormatTimestamp(DateTime.Now);
+                job.Remove("currentTest");
+                job.Remove("currentTestStartedAt");
                 TestRunnerFunctions.SaveJob(job);
             }
 
@@ -237,7 +342,10 @@ namespace Funplay.Editor.Tools.Builtins
                 CollectFailures(result, failures, maxFailures: 20);
 
                 job["status"] = "finished";
-                job["finishedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                job["finishedAt"] = TestRunnerFunctions.FormatTimestamp(DateTime.Now);
+                job["lastActivityAt"] = job["finishedAt"];
+                job.Remove("currentTest");
+                job.Remove("currentTestStartedAt");
                 job["resultState"] = result.ResultState;
                 job["passCount"] = result.PassCount;
                 job["failCount"] = result.FailCount;
