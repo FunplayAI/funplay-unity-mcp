@@ -17,6 +17,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
+using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace Funplay.Editor
 {
@@ -461,10 +462,10 @@ namespace Funplay.Editor
         [Test]
         public void BrokerSource_IsVisibleToAssetDatabaseForUnityPackageExport()
         {
-            var source = AssetDatabase.LoadAssetAtPath<TextAsset>(
-                "Assets/unity-mcp/Editor/MCP/Server/Broker/keepalive-broker.cs.txt");
+            var assetPath = ResolveBrokerSourceAssetPath();
+            var source = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
 
-            Assert.NotNull(source);
+            Assert.NotNull(source, "Broker source TextAsset not found at " + assetPath);
             Assert.That(source.text, Does.Contain("funplay-unity-mcp-broker"));
         }
 
@@ -539,18 +540,30 @@ namespace Funplay.Editor
                 ResolveBrokerSourcePath());
         }
 
+        // These tests read the broker source straight off disk (and via AssetDatabase) so a
+        // running broker/exported package can be verified against the exact same script. The
+        // repo checks this package out at Assets/unity-mcp, but consumers install it as a real
+        // UPM package (embedded, git, or registry) rooted at Packages/<name> or
+        // Library/PackageCache/<name>@version -- resolve through PackageInfo first and only fall
+        // back to the repo's own dev layout.
+        private const string BrokerSourceRelativePath = "Editor/MCP/Server/Broker/keepalive-broker.cs.txt";
+
         private static string ResolveBrokerSourcePath()
         {
-            var path = Path.Combine(
-                Application.dataPath,
-                "unity-mcp",
-                "Editor",
-                "MCP",
-                "Server",
-                "Broker",
-                "keepalive-broker.cs.txt");
+            var packageInfo = PackageInfo.FindForAssembly(typeof(MCPBrokerProcessManager).Assembly);
+            var path = packageInfo != null
+                ? Path.Combine(packageInfo.resolvedPath, BrokerSourceRelativePath.Replace('/', Path.DirectorySeparatorChar))
+                : Path.Combine(Application.dataPath, "unity-mcp", BrokerSourceRelativePath.Replace('/', Path.DirectorySeparatorChar));
             Assert.IsTrue(File.Exists(path), "Broker source was not found at " + path);
             return path;
+        }
+
+        private static string ResolveBrokerSourceAssetPath()
+        {
+            var packageInfo = PackageInfo.FindForAssembly(typeof(MCPBrokerProcessManager).Assembly);
+            return packageInfo != null
+                ? packageInfo.assetPath + "/" + BrokerSourceRelativePath
+                : "Assets/unity-mcp/" + BrokerSourceRelativePath;
         }
 
         private static void WriteBrokerState(
