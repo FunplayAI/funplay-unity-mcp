@@ -60,6 +60,26 @@ namespace Funplay.Editor.Tests
             }
         }
 
+        // Recursively collect property names and leaf values from a structured (anonymous-object) tool
+        // result into one string, so assertions can verify the payload without a JSON dependency.
+        private static string DumpValues(object o)
+        {
+            if (o == null) return "";
+            if (o is string s) return s + " ";
+            if (o is System.Collections.IEnumerable en)
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var item in en) sb.Append(DumpValues(item));
+                return sb.ToString();
+            }
+            var t = o.GetType();
+            if (t.IsPrimitive) return o + " ";
+            var sb2 = new System.Text.StringBuilder();
+            foreach (var p in t.GetProperties())
+                sb2.Append(p.Name).Append('=').Append(DumpValues(p.GetValue(o)));
+            return sb2.ToString();
+        }
+
         [Test]
         public void HierarchyAndSceneInfo_IncludeLoadedAdditiveScenes()
         {
@@ -117,12 +137,17 @@ namespace Funplay.Editor.Tests
                 Assert.That(rootLookup, Does.Contain(inactiveRootName + " [INACTIVE]"));
                 Assert.That(rootLookup, Does.Not.Contain("GAME_OBJECT_NOT_FOUND"));
 
+                // GetSceneInfo now returns a structured object ({success,message,data:{count,scenes:[{name,path,active,isDirty,rootObjects}]}}).
+                // Flatten it (no JSON dependency in the test assembly) and assert the scene names, the
+                // active flag, and the root object names are all present in the payload.
                 var sceneInfo = SceneFunctions.GetSceneInfo();
-                Assert.That(sceneInfo, Does.Contain("Scene: " + activeScene.name + " (active)"));
-                Assert.That(sceneInfo, Does.Contain(activeRootName));
-                Assert.That(sceneInfo, Does.Contain("Scene: " + additiveScene.name + " (additive)"));
-                Assert.That(sceneInfo, Does.Contain(additiveRootName));
-                Assert.That(sceneInfo, Does.Contain(inactiveRootName));
+                var sceneInfoDump = DumpValues(sceneInfo);
+                Assert.That(sceneInfoDump, Does.Contain(activeScene.name));
+                Assert.That(sceneInfoDump, Does.Contain("active=True"));
+                Assert.That(sceneInfoDump, Does.Contain(activeRootName));
+                Assert.That(sceneInfoDump, Does.Contain(additiveScene.name));
+                Assert.That(sceneInfoDump, Does.Contain(additiveRootName));
+                Assert.That(sceneInfoDump, Does.Contain(inactiveRootName));
             }
             finally
             {
