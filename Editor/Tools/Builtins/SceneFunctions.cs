@@ -54,10 +54,10 @@ namespace Funplay.Editor.Tools.Builtins
         [Description("Get information about every loaded scene (the active scene plus any additively loaded ones), " +
                      "including path, dirty state, and a shallow root-object hierarchy per scene.")]
         [ReadOnlyTool]
-        public static string GetSceneInfo()
+        public static object GetSceneInfo()
         {
             var activeScene = EditorSceneManager.GetActiveScene();
-            var sb = new System.Text.StringBuilder();
+            var scenes = new System.Collections.Generic.List<object>();
 
             for (int i = 0; i < SceneManager.sceneCount; i++)
             {
@@ -65,57 +65,163 @@ namespace Funplay.Editor.Tools.Builtins
                 if (!scene.isLoaded) continue;
 
                 var rootObjects = scene.GetRootGameObjects();
-                sb.AppendLine(scene == activeScene ? $"Scene: {scene.name} (active)" : $"Scene: {scene.name} (additive)");
-                sb.AppendLine($"Path: {scene.path}");
-                sb.AppendLine($"Is Dirty: {scene.isDirty}");
-                sb.AppendLine($"Root Objects ({rootObjects.Length}):");
-
+                var rootTree = new System.Collections.Generic.List<object>();
                 foreach (var go in rootObjects)
                 {
-                    AppendHierarchy(sb, go.transform, 1, 3);
+                    rootTree.Add(BuildHierarchy(go.transform, 1, 3));
                 }
+
+                scenes.Add(new
+                {
+                    name = scene.name,
+                    path = scene.path,
+                    active = scene == activeScene,
+                    isDirty = scene.isDirty,
+                    rootObjects = rootTree
+                });
             }
 
-            return sb.ToString();
+            return Response.Success($"{scenes.Count} loaded scene(s)", new { count = scenes.Count, scenes });
         }
 
         [Description("List all scenes in the project")]
         [ReadOnlyTool]
-        public static string ListScenes()
+        public static object ListScenes()
         {
             var guids = AssetDatabase.FindAssets("t:Scene");
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Found {guids.Length} scenes:");
+            var scenes = new System.Collections.Generic.List<string>();
 
             foreach (var guid in guids)
             {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                sb.AppendLine($"  - {path}");
+                scenes.Add(AssetDatabase.GUIDToAssetPath(guid));
             }
 
-            return sb.ToString();
+            return Response.Success($"Found {scenes.Count} scenes", new { count = scenes.Count, scenes });
+        }
+
+        [Description("Additively load a scene alongside the currently loaded scene(s) without unloading them.")]
+        [SceneEditingTool]
+        public static object LoadSceneAdditive(
+            [ToolParam("Path to the scene asset (e.g. 'Assets/Scenes/Main.unity')")] string path)
+        {
+            if (!System.IO.File.Exists(path))
+                return Response.Error("SCENE_FILE_NOT_FOUND", new { path });
+
+            var scene = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
+            return Response.Success($"Additively loaded scene '{scene.name}'", new
+            {
+                loaded = new { name = scene.name, path = scene.path },
+                loadedSceneCount = SceneManager.sceneCount
+            });
+        }
+
+        [Description("Unload (close and remove) an additively loaded scene by name or path. " +
+                     "Refuses to unload the last remaining loaded scene. Refuses to unload a scene with " +
+                     "unsaved changes unless force='true' (which permanently discards them).")]
+        [SceneEditingTool]
+        public static object UnloadScene(
+            [ToolParam("Name or path of the loaded scene to unload")] string name_or_path,
+            [ToolParam("Set 'true' to discard unsaved changes and unload anyway (default false)", Required = false)] string force = null)
+        {
+            // Count only LOADED scenes: SceneManager.sceneCount also includes scenes present in the
+            // Hierarchy but unloaded (isLoaded=false, e.g. right-click "Unload Scene"). Guarding on the
+            // raw count would let this pass while only one loaded scene remains and then close it.
+            int loadedCount = 0;
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+                if (SceneManager.GetSceneAt(i).isLoaded) loadedCount++;
+            if (loadedCount <= 1)
+                return Response.Error("CANNOT_UNLOAD_LAST_SCENE", new { loadedSceneCount = loadedCount });
+
+            Scene target = default;
+            bool found = false;
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue; // only a currently-loaded scene can be unloaded
+                if (scene.name == name_or_path || scene.path == name_or_path)
+                {
+                    target = scene;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+                return Response.Error("SCENE_NOT_LOADED", new { name_or_path });
+
+            // Guard against silently discarding unsaved edits: CloseScene(scene, true) drops them with
+            // no prompt, unlike the editor UI. Require an explicit force to proceed on a dirty scene.
+            bool forced = force != null && (force.ToLowerInvariant() == "true" || force == "1");
+            bool wasDirty = target.isDirty;
+            if (wasDirty && !forced)
+                return Response.Error("SCENE_HAS_UNSAVED_CHANGES", new
+                {
+                    name_or_path,
+                    hint = "Scene has unsaved changes. Save first (save_all_scenes) or pass force='true' to discard them and unload."
+                });
+
+            var unloadedName = target.name;
+            var unloadedPath = target.path;
+            EditorSceneManager.CloseScene(target, true);
+            return Response.Success($"Unloaded scene '{unloadedName}'", new
+            {
+                unloaded = new { name = unloadedName, path = unloadedPath },
+                discardedUnsavedChanges = wasDirty,
+                loadedSceneCount = loadedCount - 1
+            });
+        }
+
+        [Description("List all loaded scenes that have unsaved changes (isDirty).")]
+        [ReadOnlyTool]
+        public static object ListDirtyScenes()
+        {
+            var dirty = CollectDirtyScenes();
+            return Response.Success($"{dirty.Count} dirty scene(s)", new { count = dirty.Count, scenes = dirty });
+        }
+
+        [Description("Save all open (loaded) scenes that have unsaved changes.")]
+        [SceneEditingTool]
+        public static object SaveAllScenes()
+        {
+            var toSave = CollectDirtyScenes();
+
+            bool saved = EditorSceneManager.SaveOpenScenes();
+            if (!saved)
+                return Response.Error("SAVE_OPEN_SCENES_FAILED", new { attempted = toSave });
+
+            return Response.Success($"Saved {toSave.Count} scene(s)", new { count = toSave.Count, scenes = toSave });
         }
 
         [Description("Enter play mode in the editor")]
         [SceneEditingTool]
-        public static string EnterPlayMode()
+        public static object EnterPlayMode()
         {
             if (EditorApplication.isPlaying)
-                return "Already in play mode";
+                return Response.Success("Already in play mode", new { wasPlaying = true, domain_reload_expected = false });
 
             EditorApplication.isPlaying = true;
-            return "Entering play mode";
+            return Response.Success("Entering play mode", new
+            {
+                wasPlaying = false,
+                domain_reload_expected = true,
+                next = "poll get_reload_recovery_status until ready"
+            });
         }
 
         [Description("Exit play mode in the editor")]
         [SceneEditingTool]
-        public static string ExitPlayMode()
+        public static object ExitPlayMode()
         {
             if (!EditorApplication.isPlaying)
-                return "Not in play mode";
+                return Response.Success("Not in play mode", new { wasPlaying = false, domain_reload_expected = false });
 
             EditorApplication.isPlaying = false;
-            return "Exiting play mode";
+            return Response.Success("Exiting play mode", new
+            {
+                wasPlaying = true,
+                domain_reload_expected = true,
+                next = "poll get_reload_recovery_status until ready"
+            });
         }
 
         [Description("Set the game time scale. Use 0 to pause, 1 for normal speed, " +
@@ -142,10 +248,21 @@ namespace Funplay.Editor.Tools.Builtins
                    $"Time.deltaTime={UnityEngine.Time.deltaTime:F4}, Time.fixedDeltaTime={UnityEngine.Time.fixedDeltaTime:F4}";
         }
 
-        private static void AppendHierarchy(System.Text.StringBuilder sb, Transform t, int depth, int maxDepth)
+        private static System.Collections.Generic.List<object> CollectDirtyScenes()
         {
-            if (depth > maxDepth) return;
-            var indent = new string(' ', depth * 2);
+            var dirty = new System.Collections.Generic.List<object>();
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue;
+                if (scene.isDirty)
+                    dirty.Add(new { name = scene.name, path = scene.path });
+            }
+            return dirty;
+        }
+
+        private static object BuildHierarchy(Transform t, int depth, int maxDepth)
+        {
             var components = t.GetComponents<Component>();
             var compNames = new System.Collections.Generic.List<string>();
             foreach (var c in components)
@@ -153,13 +270,17 @@ namespace Funplay.Editor.Tools.Builtins
                 if (c != null && !(c is Transform))
                     compNames.Add(c.GetType().Name);
             }
-            var compStr = compNames.Count > 0 ? $" [{string.Join(", ", compNames)}]" : "";
-            sb.AppendLine($"{indent}- {t.name}{compStr}");
 
-            for (int i = 0; i < t.childCount; i++)
+            var children = new System.Collections.Generic.List<object>();
+            if (depth < maxDepth)
             {
-                AppendHierarchy(sb, t.GetChild(i), depth + 1, maxDepth);
+                for (int i = 0; i < t.childCount; i++)
+                {
+                    children.Add(BuildHierarchy(t.GetChild(i), depth + 1, maxDepth));
+                }
             }
+
+            return new { name = t.name, instanceId = ObjectIdHelper.GetSerializableId(t.gameObject), components = compNames, children };
         }
     }
 }
