@@ -247,7 +247,12 @@ namespace Funplay.Editor.Tools.Builtins
                     {
                         if (sp.propertyType != SerializedPropertyType.ObjectReference)
                             continue;
-                        if (sp.objectReferenceInstanceIDValue != 0 && sp.objectReferenceValue == null)
+#if UNITY_6000_3_OR_NEWER
+                        var hasObjectReferenceId = sp.objectReferenceEntityIdValue.IsValid();
+#else
+                        var hasObjectReferenceId = sp.objectReferenceInstanceIDValue != 0;
+#endif
+                        if (hasObjectReferenceId && sp.objectReferenceValue == null)
                         {
                             if (!AddFinding(findings, maxResults, ref truncated,
                                     new { object_path = objectPath, kind = "broken_reference", component = componentName, field = sp.propertyPath }))

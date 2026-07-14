@@ -123,11 +123,15 @@ namespace Funplay.Editor.Tools.Builtins
             }
 
             var b = mesh.bounds;
-
+#if UNITY_6000_3_OR_NEWER
+            var serializedObjectId = ObjectIdHelper.GetSerializableId(mesh);
+#else
+            var serializedObjectId = mesh.GetInstanceID();
+#endif
             return new
             {
                 name = mesh.name,
-                instanceId = mesh.GetInstanceID(),
+                instanceId = serializedObjectId,
                 vertexCount = mesh.vertexCount,
                 triangleCount,
                 triangleNote,
