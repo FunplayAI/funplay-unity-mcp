@@ -37,18 +37,21 @@ namespace Funplay.Editor.Tools.Builtins
                      "so external file edits are picked up automatically without a separate request_recompile " +
                      "(pass skip_refresh=true to bypass this for read-only snippets or a live Play Mode session you must not disturb). " +
                      "When a full-class snippet implements IFunplayCommand, the required Funplay.Editor.Tools.Scripting using is added automatically if omitted. " +
+                     "The snippet is compiled into a SEPARATE assembly, so funplay package internal types (e.g. ToolRegistry) cannot be referenced directly from the snippet -- reach them via reflection. " +
                      "safety_checks blocks a small set of obviously dangerous patterns " +
                      "(File.Delete, Process.Start, while(true), Environment.Exit, AssetDatabase.DeleteAsset, etc) " +
                      "and, when strict filesystem safety is enabled, broad System.IO writes plus obvious absolute/system/traversal paths. " +
                      "This is a defensive layer, not a full sandbox. If omitted, the MCP Settings window's default safety-check setting is used " +
                      "(enabled by default); explicitly passing true or false overrides that default. Project namespaces are not auto-injected " +
                      "by default; add `using` directives in the snippet, or enable the ScriptAssemblies-based convenience toggle in the MCP Settings window. " +
+                     "If a compile fails with CS0104 (a type name ambiguous between two imported namespaces, e.g. System.Random vs UnityEngine.Random) or CS0433 (a type provided by multiple loaded assemblies) the error carries a structured `ambiguous` list; for CS0104 pass preferred_namespaces (comma-separated) to auto-insert a using-alias binding the name to that namespace and recompile once. CS0433 (same fully-qualified type in two assemblies) can't be fixed by an alias — use extern alias / drop a reference / reflection. " +
                      "Every invocation is appended to a session-scoped history (see get_execute_code_history / replay_execute_code).")]
         [SceneEditingTool]
         public static async Task<object> ExecuteCode(
             [ToolParam("C# code to execute. See description for IFunplayCommand vs legacy Run() templates.")] string code,
             [ToolParam("If true, reject the call before compile when the code contains obviously dangerous patterns. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null,
-            [ToolParam("If true, skip the pre-compile AssetDatabase.Refresh + wait-for-ready. Use only when the editor is already up to date -- e.g. a read-only inspection snippet, or during a live Play Mode session you must not disturb. The default refresh can trigger an import/domain reload (from your own OR another actor's pending changes in a shared editor) that wipes Play Mode runtime state. When skipped, external file edits made since the last compile are NOT picked up.", Required = false)] bool skip_refresh = false)
+            [ToolParam("If true, skip the pre-compile AssetDatabase.Refresh + wait-for-ready. Use only when the editor is already up to date -- e.g. a read-only inspection snippet, or during a live Play Mode session you must not disturb. The default refresh can trigger an import/domain reload (from your own OR another actor's pending changes in a shared editor) that wipes Play Mode runtime state. When skipped, external file edits made since the last compile are NOT picked up.", Required = false)] bool skip_refresh = false,
+            [ToolParam("Optional comma-separated namespaces used to auto-resolve CS0104 ambiguity: when an unqualified type name is ambiguous between two imported namespaces, a using-alias binding that name to the candidate in the listed (winning) namespace is inserted and the snippet is recompiled once. Does NOT fix CS0433 (same fully-qualified type in two assemblies). If it stays ambiguous, a structured COMPILATION_FAILED error with an `ambiguous` array is returned.", Required = false)] string preferred_namespaces = null)
         {
             var effectiveSafetyChecks = ResolveSafetyChecks(safety_checks);
             if (effectiveSafetyChecks)
@@ -92,8 +95,8 @@ namespace Funplay.Editor.Tools.Builtins
 
             try
             {
-                var result = CompileAndExecute(fullCode, actualClassName);
-                AppendHistory(code, IsSuccess(result), SummarizeResult(result));
+                var result = CompileAndExecute(fullCode, actualClassName, preferred_namespaces);
+                AppendHistory(code, IsSuccess(result), SummarizeResult(result), preferred_namespaces);
                 return result;
             }
             catch (Exception ex)
@@ -172,7 +175,9 @@ namespace Funplay.Editor.Tools.Builtins
             if (string.IsNullOrEmpty(entry.code))
                 return Response.Error("HISTORY_ENTRY_EMPTY", new { index });
 
-            return await ExecuteCode(entry.code, safety_checks);
+            // Forward the stored preferred_namespaces so a snippet that only compiled via CS0104
+            // alias auto-resolution replays faithfully instead of failing with the original ambiguity.
+            return await ExecuteCode(entry.code, safety_checks, preferred_namespaces: entry.preferredNamespaces);
         }
 
         [Description("Erase the entire execute_code history for the current Editor session. " +
@@ -214,6 +219,7 @@ namespace Funplay.Editor.Tools.Builtins
         {
             public string timestamp;
             public string code;
+            public string preferredNamespaces;
             public bool success;
             public string summary;
         }
@@ -239,7 +245,7 @@ namespace Funplay.Editor.Tools.Builtins
             }
         }
 
-        private static void AppendHistory(string code, bool success, string summary)
+        private static void AppendHistory(string code, bool success, string summary, string preferredNamespaces = null)
         {
             try
             {
@@ -248,6 +254,7 @@ namespace Funplay.Editor.Tools.Builtins
                 {
                     timestamp = DateTime.UtcNow.ToString("o"),
                     code = code ?? string.Empty,
+                    preferredNamespaces = preferredNamespaces,
                     success = success,
                     summary = Preview(summary, 200)
                 });
@@ -287,11 +294,48 @@ namespace Funplay.Editor.Tools.Builtins
             return s.Substring(0, max) + "…";
         }
 
-        private static object CompileAndExecute(string code, string className)
+        private static object CompileAndExecute(string code, string className, string preferredNamespaces)
         {
             var compilation = ScriptCompilerPipeline.Compile(code);
+
             if (compilation.Status == ScriptCompilationStatus.CompilationFailed)
             {
+                // CS0433: the same type name is provided by multiple loaded assemblies.
+                // Surface a structured disambiguation payload and, when preferred_namespaces is
+                // supplied, attempt a single alias-based recompile before giving up.
+                if (TryGetTypeAmbiguities(compilation.Errors, out var ambiguities))
+                {
+                    var preferred = ParsePreferredNamespaces(preferredNamespaces);
+                    if (preferred.Count > 0)
+                    {
+                        var aliasBlock = BuildDisambiguationAliases(ambiguities, preferred, code);
+                        if (!string.IsNullOrEmpty(aliasBlock))
+                        {
+                            var retry = ScriptCompilerPipeline.Compile(aliasBlock + code);
+                            if (retry.Status == ScriptCompilationStatus.Success && retry.Assembly != null)
+                                return ExecuteCompiledAssembly(retry.Assembly, className, retry.CompilerName, retry.Attempts);
+
+                            if (retry.Status == ScriptCompilationStatus.CompilationFailed)
+                            {
+                                compilation = retry;
+                                // The alias resolved the CS0104/CS0433, but the retry surfaced OTHER
+                                // (non-ambiguity) errors. Report them plainly instead of a misleading
+                                // "ambiguity" payload with an empty candidates list.
+                                if (!TryGetTypeAmbiguities(compilation.Errors, out ambiguities) || ambiguities.Count == 0)
+                                    return Response.Error("COMPILATION_FAILED", new
+                                    {
+                                        compiler = compilation.CompilerName,
+                                        errors = compilation.Errors,
+                                        compiler_attempts = compilation.Attempts,
+                                        hint = "A using-alias for the ambiguous name was applied and recompiled, but other compilation errors remain. Error line numbers are offset by the injected alias line(s) prepended to your snippet."
+                                    });
+                            }
+                        }
+                    }
+
+                    return BuildAmbiguousCompilationError(compilation, ambiguities);
+                }
+
                 return Response.Error("COMPILATION_FAILED", new
                 {
                     compiler = compilation.CompilerName,
@@ -312,6 +356,166 @@ namespace Funplay.Editor.Tools.Builtins
             }
 
             return ExecuteCompiledAssembly(compilation.Assembly, className, compilation.CompilerName, compilation.Attempts);
+        }
+
+        private sealed class AmbiguousType
+        {
+            public string Kind;      // "CS0433" (same FQN in multiple assemblies) or "CS0104" (name ambiguous across namespaces)
+            public string Type;      // CS0433: the full type name; CS0104: the ambiguous simple name as written
+            public List<string> Candidates = new List<string>(); // CS0433: assembly short names; CS0104: candidate full type names
+        }
+
+        // Parse both ambiguity diagnostics into a structured list:
+        //  - CS0433 "the type 'X' exists in both 'AsmA' and 'AsmB'" → Type=X (full), Candidates=assembly short names.
+        //  - CS0104 "'Name' is an ambiguous reference between 'Ns1.Name' and 'Ns2.Name'" → Type=Name (simple), Candidates=full type names.
+        // Robust to localized compiler output by extracting the single-quoted tokens (first = identifier, rest = candidates).
+        private static bool TryGetTypeAmbiguities(List<ScriptCompilationError> errors, out List<AmbiguousType> ambiguities)
+        {
+            ambiguities = new List<AmbiguousType>();
+            if (errors == null)
+                return false;
+
+            foreach (var error in errors)
+            {
+                if (error == null)
+                    continue;
+                bool is433 = string.Equals(error.code, "CS0433", StringComparison.OrdinalIgnoreCase);
+                bool is104 = string.Equals(error.code, "CS0104", StringComparison.OrdinalIgnoreCase);
+                if (!is433 && !is104)
+                    continue;
+
+                var quoted = Regex.Matches(error.text ?? string.Empty, "'([^']+)'");
+                if (quoted.Count < 2)
+                    continue;
+
+                var kind = is433 ? "CS0433" : "CS0104";
+                var type = quoted[0].Groups[1].Value;
+                var existing = ambiguities.FirstOrDefault(a =>
+                    a.Kind == kind && string.Equals(a.Type, type, StringComparison.Ordinal));
+                if (existing == null)
+                {
+                    existing = new AmbiguousType { Kind = kind, Type = type };
+                    ambiguities.Add(existing);
+                }
+
+                for (int i = 1; i < quoted.Count; i++)
+                {
+                    // CS0433 candidate token is an assembly identity ("Name, Version=..."); keep the short name.
+                    // CS0104 candidate token is a full type name ("Namespace.Type"); keep it verbatim.
+                    var raw = quoted[i].Groups[1].Value;
+                    var candidate = is433 ? raw.Split(',')[0].Trim() : raw.Trim();
+                    if (!string.IsNullOrEmpty(candidate) && !existing.Candidates.Contains(candidate))
+                        existing.Candidates.Add(candidate);
+                }
+            }
+
+            return ambiguities.Count > 0;
+        }
+
+        private static List<string> ParsePreferredNamespaces(string preferredNamespaces)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrWhiteSpace(preferredNamespaces))
+                return result;
+
+            foreach (var raw in preferredNamespaces.Split(','))
+            {
+                var ns = raw.Trim();
+                if (ns.Length > 0 && !result.Contains(ns))
+                    result.Add(ns);
+            }
+
+            return result;
+        }
+
+        // Build `using <simple> = <fullType>;` alias directives that resolve CS0104 ("ambiguous
+        // reference between two namespaces") by binding the ambiguous simple name to the candidate
+        // whose namespace the caller listed in preferred_namespaces. CS0433 (the SAME fully-qualified
+        // type provided by two assemblies) is intentionally skipped: both candidates are the identical
+        // name, so a using-alias cannot disambiguate it — that needs extern alias / dropping a reference.
+        private static string BuildDisambiguationAliases(
+            List<AmbiguousType> ambiguities,
+            List<string> preferred,
+            string code)
+        {
+            var sb = new StringBuilder();
+            var added = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var ambiguity in ambiguities)
+            {
+                if (!string.Equals(ambiguity.Kind, "CS0104", StringComparison.Ordinal))
+                    continue;
+
+                var simple = ambiguity.Type; // for CS0104 this is the ambiguous simple name as written
+                if (string.IsNullOrEmpty(simple) || !IsValidNamespace(simple) || added.Contains(simple))
+                    continue;
+                if (Regex.IsMatch(code, $@"using\s+{Regex.Escape(simple)}\s*="))
+                    continue;
+
+                // Pick the candidate full type whose namespace the caller preferred.
+                string target = null;
+                foreach (var candidate in ambiguity.Candidates)
+                {
+                    var candNs = NamespaceOfType(candidate);
+                    if (preferred.Any(p => string.Equals(p, candNs, StringComparison.Ordinal)))
+                    {
+                        target = candidate;
+                        break;
+                    }
+                }
+
+                if (target == null)
+                    continue; // no preferred namespace matches a candidate → leave it for the structured error
+
+                sb.AppendLine($"using {simple} = {target};");
+                added.Add(simple);
+            }
+
+            return sb.ToString();
+        }
+
+        private static object BuildAmbiguousCompilationError(ScriptCompilationResult compilation, List<AmbiguousType> ambiguities)
+        {
+            var list = ambiguities ?? new List<AmbiguousType>();
+            var ambiguousView = list
+                .Select(a => new
+                {
+                    kind = a.Kind,
+                    type = a.Type,
+                    // CS0433 candidates are assemblies → present as assembly-qualified names;
+                    // CS0104 candidates are already full type names → present verbatim.
+                    candidates = string.Equals(a.Kind, "CS0433", StringComparison.Ordinal)
+                        ? a.Candidates.Select(asm => $"{a.Type}, {asm}").ToArray()
+                        : a.Candidates.ToArray()
+                })
+                .ToArray();
+
+            bool has104 = list.Any(a => string.Equals(a.Kind, "CS0104", StringComparison.Ordinal));
+            bool has433 = list.Any(a => string.Equals(a.Kind, "CS0433", StringComparison.Ordinal));
+            string hint;
+            if (has104 && !has433)
+                hint = "CS0104: an unqualified type name is ambiguous between two imported namespaces (e.g. System.Random vs UnityEngine.Random). Pass preferred_namespaces=<namespace> to bind the name to that namespace's type and recompile once, or fully-qualify the name in the snippet.";
+            else if (has433 && !has104)
+                hint = "CS0433: the SAME fully-qualified type is provided by multiple loaded assemblies (e.g. a HybridCLR hot-update assembly vs the editor assembly). A using-alias or fully-qualified name CANNOT disambiguate this — use `extern alias`, drop one assembly reference, or reach the type via reflection. funplay package internal types are not directly referenceable from the compiled snippet assembly.";
+            else
+                hint = "Mixed ambiguity. CS0104 (name ambiguous across namespaces) is resolvable via preferred_namespaces or fully-qualifying the name; CS0433 (same fully-qualified type in two assemblies) needs `extern alias`, dropping a reference, or reflection.";
+
+            return Response.Error("COMPILATION_FAILED", new
+            {
+                compiler = compilation.CompilerName,
+                errors = compilation.Errors,
+                compiler_attempts = compilation.Attempts,
+                ambiguous = ambiguousView,
+                hint
+            });
+        }
+
+        private static string NamespaceOfType(string type)
+        {
+            if (string.IsNullOrEmpty(type))
+                return string.Empty;
+            var idx = type.LastIndexOf('.');
+            return idx > 0 ? type.Substring(0, idx) : string.Empty;
         }
 
         private static object ExecuteCompiledAssembly(
