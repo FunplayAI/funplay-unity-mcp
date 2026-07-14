@@ -247,7 +247,7 @@ namespace Funplay.Editor.Tools.Builtins
                     {
                         if (sp.propertyType != SerializedPropertyType.ObjectReference)
                             continue;
-#if UNITY_6000_3_OR_NEWER
+#if UNITY_6000_4_OR_NEWER
                         var hasObjectReferenceId = sp.objectReferenceEntityIdValue.IsValid();
 #else
                         var hasObjectReferenceId = sp.objectReferenceInstanceIDValue != 0;
