@@ -45,7 +45,7 @@ namespace Funplay.Editor.Tools.Builtins
             if (go == null)
                 return Response.Error("SOURCE_NOT_FOUND", new { source_target, find_method });
 
-            var comp = ResolveComponentOnGo(go, component_type);
+            var comp = ObjectsHelper.ResolveComponentOnGo(go, component_type);
             if (comp == null)
             {
                 var available = string.Join(", ", go.GetComponents<Component>()
@@ -97,7 +97,7 @@ namespace Funplay.Editor.Tools.Builtins
                 return Response.Error("COMPONENT_TYPE_REQUIRED",
                     new { hint = "Provide component_type to locate the existing component, or set as_new=true." });
 
-            var gos = ResolveManyTargets(targets, find_method);
+            var gos = ObjectsHelper.ResolveMany(targets, find_method);
             if (gos.Count == 0)
                 return Response.Error("NO_TARGETS_RESOLVED", new { targets, find_method });
 
@@ -127,7 +127,7 @@ namespace Funplay.Editor.Tools.Builtins
                     }
                     else
                     {
-                        var comp = ResolveComponentOnGo(go, component_type);
+                        var comp = ObjectsHelper.ResolveComponentOnGo(go, component_type);
                         if (comp == null)
                         {
                             results.Add(new { target = go.name, instanceId = ObjectIdHelper.GetSerializableId(go), ok = false, error = "COMPONENT_NOT_ON_TARGET" });
@@ -168,7 +168,7 @@ namespace Funplay.Editor.Tools.Builtins
             if (type == null)
                 return Response.Error("COMPONENT_TYPE_NOT_FOUND", new { component_type });
 
-            var gos = ResolveManyTargets(targets, find_method);
+            var gos = ObjectsHelper.ResolveMany(targets, find_method);
             if (gos.Count == 0)
                 return Response.Error("NO_TARGETS_RESOLVED", new { targets, find_method });
 
@@ -202,58 +202,5 @@ namespace Funplay.Editor.Tools.Builtins
 
         // -------- Helpers --------
 
-        /// <summary>
-        /// Resolve the given component type on a GameObject: TypeResolver first (handles full/namespaced
-        /// names), then a case-insensitive fallback across attached components (matches ComponentProperty).
-        /// Returns null if none match.
-        /// </summary>
-        private static Component ResolveComponentOnGo(GameObject go, string typeName)
-        {
-            if (go == null || string.IsNullOrEmpty(typeName))
-                return null;
-
-            var type = TypeResolver.ResolveComponent(typeName);
-            if (type != null)
-            {
-                var c = go.GetComponent(type);
-                if (c != null) return c;
-            }
-
-            foreach (var c in go.GetComponents<Component>())
-            {
-                if (c == null) continue;
-                if (string.Equals(c.GetType().Name, typeName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.GetType().FullName, typeName, StringComparison.OrdinalIgnoreCase))
-                    return c;
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// Resolve MANY GameObjects from a comma-separated list OR a single find spec. Each token is
-        /// resolved via <see cref="ObjectsHelper.FindObjects"/> with findAll, so one token can expand to
-        /// many (e.g. a tag/name shared by several objects). Results are de-duplicated, order preserved.
-        /// </summary>
-        private static List<GameObject> ResolveManyTargets(string targets, string findMethod)
-        {
-            var results = new List<GameObject>();
-            if (string.IsNullOrWhiteSpace(targets))
-                return results;
-
-            foreach (var raw in targets.Split(','))
-            {
-                var token = raw.Trim();
-                if (token.Length == 0)
-                    continue;
-
-                var found = ObjectsHelper.FindObjects(token, findMethod, findAll: true, searchInactive: true);
-                foreach (var go in found)
-                {
-                    if (go != null && !results.Contains(go))
-                        results.Add(go);
-                }
-            }
-            return results;
-        }
     }
 }

@@ -121,21 +121,21 @@ namespace Funplay.Editor.Tools.Builtins
                 new { instanceId = ObjectIdHelper.GetSerializableId(go), name = go.name });
         }
 
-        [Description("Set position, rotation, and/or scale on a GameObject's transform.")]
+        [Description("Set position, rotation, and/or scale on a GameObject's transform. " +
+                     "Pass `target` for one object, or `targets` (comma-separated identifiers, or a single " +
+                     "find spec that resolves to many) to apply the SAME values to many objects at once — " +
+                     "the batch form returns per-target results.")]
         [SceneEditingTool]
         public static object SetTransform(
-            [ToolParam("Identifier of the GameObject")] string target,
+            [ToolParam("Identifier of a single GameObject (omit if using targets)", Required = false)] string target = null,
             [ToolParam("Position as 'x,y,z'", Required = false)] string position = null,
             [ToolParam("Euler rotation as 'x,y,z'", Required = false)] string rotation = null,
             [ToolParam("Scale as 'x,y,z'", Required = false)] string scale = null,
-            [ToolParam("How to resolve target", Required = false)] string find_method = null)
+            [ToolParam("How to resolve target(s)", Required = false)] string find_method = null,
+            [ToolParam("Comma-separated identifiers, or a single find spec resolving to many (alternative to target)", Required = false)] string targets = null)
         {
-            var go = ObjectsHelper.FindObject(target, find_method);
-            if (go == null)
-                return Response.Error("TARGET_NOT_FOUND", new { target, find_method });
-
-            // Validate every provided vector BEFORE touching the transform, so a malformed value
-            // returns a clear INVALID_PARAM instead of silently writing (0,0,0).
+            // Validate every provided vector BEFORE touching any transform, so a malformed value
+            // returns a clear INVALID_PARAM instead of silently writing (0,0,0) to one or many objects.
             var hasPos = !string.IsNullOrEmpty(position);
             var hasRot = !string.IsNullOrEmpty(rotation);
             var hasScl = !string.IsNullOrEmpty(scale);
@@ -147,19 +147,34 @@ namespace Funplay.Editor.Tools.Builtins
             if (hasScl && !TryParseVector3(scale, out scl, out var sclErr))
                 return Response.Error("INVALID_PARAM", new { param = "scale", provided = scale, expected = "Vector3 'x,y,z'", detail = sclErr });
 
-            Undo.RecordObject(go.transform, $"Set transform of {go.name}");
-
-            if (hasPos) go.transform.position = pos;
-            if (hasRot) go.transform.eulerAngles = rot;
-            if (hasScl) go.transform.localScale = scl;
-
-            return Response.Success($"Updated transform of '{go.name}'.", new
+            // Multi-target batch path
+            if (!string.IsNullOrWhiteSpace(targets))
             {
-                instanceId = ObjectIdHelper.GetSerializableId(go),
-                position = new { x = go.transform.position.x, y = go.transform.position.y, z = go.transform.position.z },
-                rotation = new { x = go.transform.eulerAngles.x, y = go.transform.eulerAngles.y, z = go.transform.eulerAngles.z },
-                scale = new { x = go.transform.localScale.x, y = go.transform.localScale.y, z = go.transform.localScale.z }
-            });
+                var gos = ObjectsHelper.ResolveMany(targets, find_method);
+                if (gos.Count == 0)
+                    return Response.Error("NO_TARGETS_RESOLVED", new { targets, find_method });
+
+                var results = new List<object>();
+                foreach (var g in gos)
+                    results.Add(ApplyTransformAndDescribe(g, hasPos, pos, hasRot, rot, hasScl, scl));
+
+                return Response.Success($"Updated transform of {gos.Count} object(s).",
+                    new { successCount = gos.Count, results });
+            }
+
+            // Single-target path (response shape unchanged for backward compatibility)
+            if (string.IsNullOrEmpty(target))
+                return Response.Error("TARGET_OR_TARGETS_REQUIRED",
+                    new { hint = "Pass `target` for one object or `targets` for many." });
+
+            // searchInactive:true so this matches the multi-target ResolveMany path (which searches
+            // inactive) — a single inactive target should resolve the same way whether via target or targets.
+            var go = ObjectsHelper.FindObject(target, find_method, searchInactive: true);
+            if (go == null)
+                return Response.Error("TARGET_NOT_FOUND", new { target, find_method });
+
+            return Response.Success($"Updated transform of '{go.name}'.",
+                ApplyTransformAndDescribe(go, hasPos, pos, hasRot, rot, hasScl, scl));
         }
 
         [Description("Reparent a GameObject. Pass empty parent to unparent.")]
@@ -259,18 +274,49 @@ namespace Funplay.Editor.Tools.Builtins
             });
         }
 
-        [Description("Activate or deactivate a GameObject.")]
+        [Description("Activate or deactivate a GameObject. Pass `target` for one object, or `targets` " +
+                     "(comma-separated identifiers, or a single find spec resolving to many) for a batch — " +
+                     "the batch form returns per-target results.")]
         [SceneEditingTool]
         public static object SetActive(
-            [ToolParam("Identifier of the GameObject")] string target,
-            [ToolParam("true to activate, false to deactivate")] string active,
-            [ToolParam("How to resolve target", Required = false)] string find_method = null)
+            [ToolParam("Identifier of a single GameObject (omit if using targets)", Required = false)] string target = null,
+            [ToolParam("true to activate, false to deactivate")] string active = null,
+            [ToolParam("How to resolve target(s)", Required = false)] string find_method = null,
+            [ToolParam("Comma-separated identifiers, or a single find spec resolving to many (alternative to target)", Required = false)] string targets = null)
         {
-            var go = ObjectsHelper.FindObject(target, find_method);
+            if (string.IsNullOrEmpty(active))
+                return Response.Error("ACTIVE_REQUIRED", new { hint = "Pass active='true' or active='false'." });
+            bool isActive = active.ToLowerInvariant() == "true" || active == "1";
+
+            // Multi-target batch path
+            if (!string.IsNullOrWhiteSpace(targets))
+            {
+                var gos = ObjectsHelper.ResolveMany(targets, find_method);
+                if (gos.Count == 0)
+                    return Response.Error("NO_TARGETS_RESOLVED", new { targets, find_method });
+
+                var results = new List<object>();
+                foreach (var g in gos)
+                {
+                    Undo.RecordObject(g, $"Set active {g.name}");
+                    g.SetActive(isActive);
+                    results.Add(new { instanceId = ObjectIdHelper.GetSerializableId(g), name = g.name, activeSelf = g.activeSelf });
+                }
+                return Response.Success($"Set active = {isActive} on {gos.Count} object(s).",
+                    new { active = isActive, successCount = gos.Count, results });
+            }
+
+            // Single-target path (response shape unchanged for backward compatibility)
+            if (string.IsNullOrEmpty(target))
+                return Response.Error("TARGET_OR_TARGETS_REQUIRED",
+                    new { hint = "Pass `target` for one object or `targets` for many." });
+
+            // searchInactive:true so an inactive object can be resolved and activated — you can't
+            // activate what you can't find (and this matches the multi-target ResolveMany path).
+            var go = ObjectsHelper.FindObject(target, find_method, searchInactive: true);
             if (go == null)
                 return Response.Error("TARGET_NOT_FOUND", new { target, find_method });
 
-            bool isActive = active == "true" || active == "1";
             Undo.RecordObject(go, $"Set active {go.name}");
             go.SetActive(isActive);
             return Response.Success($"Set '{go.name}' active = {isActive}.",
@@ -323,6 +369,24 @@ namespace Funplay.Editor.Tools.Builtins
         }
 
         // -------- Helpers --------
+
+        // Record undo, apply the provided transform components, and return the structured echo
+        // used by both the single- and multi-target paths of SetTransform.
+        private static object ApplyTransformAndDescribe(GameObject go, bool hasPos, Vector3 pos, bool hasRot, Vector3 rot, bool hasScl, Vector3 scl)
+        {
+            Undo.RecordObject(go.transform, $"Set transform of {go.name}");
+            if (hasPos) go.transform.position = pos;
+            if (hasRot) go.transform.eulerAngles = rot;
+            if (hasScl) go.transform.localScale = scl;
+            return new
+            {
+                instanceId = ObjectIdHelper.GetSerializableId(go),
+                name = go.name,
+                position = new { x = go.transform.position.x, y = go.transform.position.y, z = go.transform.position.z },
+                rotation = new { x = go.transform.eulerAngles.x, y = go.transform.eulerAngles.y, z = go.transform.eulerAngles.z },
+                scale = new { x = go.transform.localScale.x, y = go.transform.localScale.y, z = go.transform.localScale.z }
+            };
+        }
 
         // Parse an 'x,y,z' vector, reporting malformed input instead of silently returning
         // Vector3.zero (which used to produce a wrong write with a success response, e.g.

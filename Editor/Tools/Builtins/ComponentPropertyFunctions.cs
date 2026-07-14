@@ -1,5 +1,6 @@
 // Copyright (C) Funplay. Licensed under MIT.
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using DescriptionAttribute = System.ComponentModel.DescriptionAttribute;
 using Funplay.Editor.Tools.Helpers;
@@ -67,29 +68,39 @@ namespace Funplay.Editor.Tools.Builtins
 
         [Description("Set a single property or field on a component. " +
                      "Use simple JSON for value (e.g. '5', 'true', '\"text\"', '[1,2,3]'). " +
-                     "For Object references pass {\"fileID\": <instanceId>} or {\"assetPath\": \"Assets/...\"}.")]
+                     "For Object references pass {\"fileID\": <instanceId>} or {\"assetPath\": \"Assets/...\"}. " +
+                     "The success response echoes the post-write serialized value ('newValue'). " +
+                     "Pass `targets` (comma-separated identifiers, or a find spec resolving to many) with a " +
+                     "`component` type name to apply the SAME field to many objects (returns per-target results).")]
         [SceneEditingTool]
         public static object SetComponentProperty(
-            [ToolParam("GameObject identifier (omit if using component_instance_id)", Required = false)] string target = null,
+            [ToolParam("GameObject identifier (omit if using component_instance_id or targets)", Required = false)] string target = null,
             [ToolParam("Component type name (omit if using component_instance_id)", Required = false)] string component = null,
             [ToolParam("Property/field name to set")] string property = null,
             [ToolParam("New value as JSON literal")] string value = null,
             [ToolParam("Component instanceId (alternative to target+component)", Required = false)] string component_instance_id = null,
-            [ToolParam("How to resolve target", Required = false)] string find_method = null)
+            [ToolParam("How to resolve target(s)", Required = false)] string find_method = null,
+            [ToolParam("Comma-separated identifiers, or a find spec resolving to many (batch; requires `component`)", Required = false)] string targets = null)
         {
             if (string.IsNullOrEmpty(property))
                 return Response.Error("PROPERTY_REQUIRED");
             if (value == null)
                 return Response.Error("VALUE_REQUIRED");
 
-            var resolved = ResolveComponent(target, component, component_instance_id, find_method);
-            if (resolved.Error != null) return resolved.Error;
-
             JToken token;
             try { token = ParseJsonValue(value); }
             catch (Exception ex) { return Response.Error("INVALID_VALUE_JSON", new { message = ex.Message }); }
 
             var props = new JObject { [property] = token };
+
+            // Multi-target batch path
+            if (!string.IsNullOrWhiteSpace(targets))
+                return ApplyPropertiesToMany(targets, component, component_instance_id, props, find_method);
+
+            // Single-target path
+            var resolved = ResolveComponent(target, component, component_instance_id, find_method);
+            if (resolved.Error != null) return resolved.Error;
+
             var results = ComponentSerializer.WriteProperties(resolved.Component, props,
                 $"Set {property} on {resolved.Component.GetType().Name}");
 
@@ -100,36 +111,52 @@ namespace Funplay.Editor.Tools.Builtins
                     new { property, error = first?.Error ?? "unknown" });
             }
 
+            var readBack = ReadBackFields(resolved.Component, new[] { property });
             return Response.Success($"Set {resolved.Component.GetType().Name}.{property}.",
-                new { componentInstanceId = ObjectIdHelper.GetSerializableId(resolved.Component), property });
+                new
+                {
+                    componentInstanceId = ObjectIdHelper.GetSerializableId(resolved.Component),
+                    property,
+                    newValue = readBack.TryGetValue(property, out var nv) ? nv : null
+                });
         }
 
         [Description("Set multiple properties on a component in one call. " +
                      "Pass `properties` as a JSON object: {\"mass\": 5, \"isKinematic\": true, \"material\": {\"fileID\": 12345}}. " +
-                     "Returns per-field success so partial failures are diagnosable.")]
+                     "Returns per-field success so partial failures are diagnosable, plus the post-write serialized " +
+                     "values of the fields that applied ('applied'). " +
+                     "Pass `targets` (comma-separated identifiers, or a find spec resolving to many) with a " +
+                     "`component` type name to apply the SAME properties to many objects (returns per-target results).")]
         [SceneEditingTool]
         public static object SetComponentProperties(
-            [ToolParam("GameObject identifier (omit if using component_instance_id)", Required = false)] string target = null,
+            [ToolParam("GameObject identifier (omit if using component_instance_id or targets)", Required = false)] string target = null,
             [ToolParam("Component type name (omit if using component_instance_id)", Required = false)] string component = null,
             [ToolParam("JSON object of property→value pairs")] string properties = null,
             [ToolParam("Component instanceId (alternative to target+component)", Required = false)] string component_instance_id = null,
-            [ToolParam("How to resolve target", Required = false)] string find_method = null)
+            [ToolParam("How to resolve target(s)", Required = false)] string find_method = null,
+            [ToolParam("Comma-separated identifiers, or a find spec resolving to many (batch; requires `component`)", Required = false)] string targets = null)
         {
             if (string.IsNullOrWhiteSpace(properties))
                 return Response.Error("PROPERTIES_REQUIRED");
 
-            var resolved = ResolveComponent(target, component, component_instance_id, find_method);
-            if (resolved.Error != null) return resolved.Error;
-
             JObject jobj;
             try { jobj = JObject.Parse(properties); }
             catch (Exception ex) { return Response.Error("INVALID_PROPERTIES_JSON", new { message = ex.Message }); }
+
+            // Multi-target batch path
+            if (!string.IsNullOrWhiteSpace(targets))
+                return ApplyPropertiesToMany(targets, component, component_instance_id, jobj, find_method);
+
+            // Single-target path
+            var resolved = ResolveComponent(target, component, component_instance_id, find_method);
+            if (resolved.Error != null) return resolved.Error;
 
             var results = ComponentSerializer.WriteProperties(resolved.Component, jobj,
                 $"Set properties on {resolved.Component.GetType().Name}");
 
             int success = results.Count(r => r.Success);
             int fail = results.Count - success;
+            var applied = ReadBackFields(resolved.Component, results.Where(r => r.Success).Select(r => r.Field));
             return Response.Success(
                 $"Applied {success} of {results.Count} field(s) on {resolved.Component.GetType().Name}.",
                 new
@@ -137,11 +164,95 @@ namespace Funplay.Editor.Tools.Builtins
                     componentInstanceId = ObjectIdHelper.GetSerializableId(resolved.Component),
                     successCount = success,
                     failCount = fail,
-                    fields = results
+                    fields = results,
+                    applied
                 });
         }
 
         // -------- Helpers --------
+
+        /// <summary>
+        /// Apply a property set to the same-named component on MANY GameObjects. Addressing by a
+        /// single component instance id is rejected here (an id is one component); the batch form
+        /// requires a `component` type name so it can be located on each resolved target.
+        /// </summary>
+        private static object ApplyPropertiesToMany(string targets, string componentName, string componentInstanceId, JObject props, string findMethod)
+        {
+            if (!string.IsNullOrEmpty(componentInstanceId))
+                return Response.Error("INVALID_PARAM",
+                    new { param = "component_instance_id", hint = "An instance id addresses a single component; use `component` (type name) together with `targets`." });
+            if (string.IsNullOrEmpty(componentName))
+                return Response.Error("COMPONENT_REQUIRED",
+                    new { hint = "Provide `component` type name so it can be located on each target." });
+            // An empty properties object would write 0 fields to every target yet count each as a
+            // success (failCount==0), falsely reporting "Applied properties on N of N target(s)".
+            if (props == null || !props.HasValues)
+                return Response.Error("PROPERTIES_REQUIRED",
+                    new { hint = "The properties JSON object has no fields to set." });
+
+            var gos = ObjectsHelper.ResolveMany(targets, findMethod);
+            if (gos.Count == 0)
+                return Response.Error("NO_TARGETS_RESOLVED", new { targets, find_method = findMethod });
+
+            var perTarget = new List<object>();
+            int okTargets = 0;
+            foreach (var g in gos)
+            {
+                var comp = ObjectsHelper.ResolveComponentOnGo(g, componentName);
+                if (comp == null)
+                {
+                    perTarget.Add(new { target = g.name, instanceId = ObjectIdHelper.GetSerializableId(g), ok = false, error = "COMPONENT_NOT_ON_TARGET" });
+                    continue;
+                }
+
+                var res = ComponentSerializer.WriteProperties(comp, props, $"Set properties on {comp.GetType().Name}");
+                int s = res.Count(r => r.Success);
+                int f = res.Count - s;
+                if (f == 0) okTargets++;
+                perTarget.Add(new
+                {
+                    target = g.name,
+                    instanceId = ObjectIdHelper.GetSerializableId(g),
+                    componentInstanceId = ObjectIdHelper.GetSerializableId(comp),
+                    ok = f == 0,
+                    successCount = s,
+                    failCount = f,
+                    fields = res
+                });
+            }
+
+            return Response.Success(
+                $"Applied properties on {okTargets} of {gos.Count} target(s).",
+                new { successCount = okTargets, failCount = gos.Count - okTargets, results = perTarget });
+        }
+
+        /// <summary>
+        /// Re-read the given field names off a component after a write and return {name → {type,value}}.
+        /// Reflection-only (non-serialized) fields may not round-trip through SerializedObject and come
+        /// back null; that is expected and simply means "not read back", not "write failed".
+        /// </summary>
+        private static Dictionary<string, object> ReadBackFields(Component comp, IEnumerable<string> fieldNames)
+        {
+            var result = new Dictionary<string, object>();
+            var names = fieldNames as IList<string> ?? fieldNames?.ToList();
+            if (names == null || names.Count == 0)
+                return result; // nothing written (e.g. all fields failed) — skip the full-component snapshot
+            var snapshots = ComponentSerializer.ReadProperties(comp);
+            foreach (var name in names)
+            {
+                if (result.ContainsKey(name)) continue;
+                // Prefer an exact serialized-Name match (the authoritative write key via FindProperty),
+                // then exact DisplayName, then case-insensitive on both. WriteProperties' reflection
+                // fallback resolves member names case-insensitively (e.g. 'mass' -> Rigidbody.mass), so an
+                // exact-case miss must not report newValue:null for a write that actually landed.
+                var snap = snapshots.FirstOrDefault(sp => sp.Name == name)
+                           ?? snapshots.FirstOrDefault(sp => sp.DisplayName == name)
+                           ?? snapshots.FirstOrDefault(sp => string.Equals(sp.Name, name, StringComparison.OrdinalIgnoreCase))
+                           ?? snapshots.FirstOrDefault(sp => string.Equals(sp.DisplayName, name, StringComparison.OrdinalIgnoreCase));
+                result[name] = snap != null ? (object)new { type = snap.Type, value = snap.Value } : null;
+            }
+            return result;
+        }
 
         private struct ResolvedComponent
         {
