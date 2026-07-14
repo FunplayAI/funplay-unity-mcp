@@ -13,32 +13,40 @@ namespace Funplay.Editor.Tools.Builtins
     {
         [Description("Get all camera properties including type, FOV, clipping planes, background, and culling mask")]
         [ReadOnlyTool]
-        public static string GetCameraProperties(
+        public static object GetCameraProperties(
             [ToolParam("Camera GameObject name, hierarchy path, or instance ID (default: Main Camera). Finds inactive objects too.", Required = false)] string game_object_name = null)
         {
             var camera = FindCamera(game_object_name);
             if (camera == null)
-                return ToolResultFormatter.Error("CAMERA_NOT_FOUND", new { game_object_name });
+                return Response.Error("CAMERA_NOT_FOUND", new { game_object_name });
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"Camera: {camera.gameObject.name}");
-            sb.AppendLine($"  orthographic: {camera.orthographic}");
-            if (camera.orthographic)
-                sb.AppendLine($"  orthographicSize: {camera.orthographicSize}");
-            else
-                sb.AppendLine($"  fieldOfView: {camera.fieldOfView}");
-            sb.AppendLine($"  nearClipPlane: {camera.nearClipPlane}");
-            sb.AppendLine($"  farClipPlane: {camera.farClipPlane}");
-            sb.AppendLine($"  backgroundColor: {camera.backgroundColor}");
-            sb.AppendLine($"  clearFlags: {camera.clearFlags}");
-            sb.AppendLine($"  depth: {camera.depth}");
-            sb.AppendLine($"  cullingMask: {CullingMaskToString(camera.cullingMask)}");
-            sb.AppendLine($"  rect: {camera.rect}");
-            sb.AppendLine($"  renderingPath: {camera.renderingPath}");
-            sb.AppendLine($"  targetDisplay: {camera.targetDisplay}");
-            sb.AppendLine($"  position: {camera.transform.position}");
-            sb.AppendLine($"  rotation: {camera.transform.eulerAngles}");
-            return sb.ToString();
+            var pos = camera.transform.position;
+            var rot = camera.transform.eulerAngles;
+            var bg = camera.backgroundColor;
+            var rect = camera.rect;
+            var rt = camera.targetTexture;
+
+            return Response.Success($"Camera '{camera.gameObject.name}' properties", new
+            {
+                instanceId = ObjectIdHelper.GetSerializableId(camera.gameObject),
+                name = camera.gameObject.name,
+                orthographic = camera.orthographic,
+                orthographicSize = camera.orthographicSize,
+                fieldOfView = camera.fieldOfView,
+                nearClipPlane = camera.nearClipPlane,
+                farClipPlane = camera.farClipPlane,
+                backgroundColor = new { r = bg.r, g = bg.g, b = bg.b, a = bg.a, hex = "#" + ColorUtility.ToHtmlStringRGBA(bg) },
+                clearFlags = camera.clearFlags.ToString(),
+                depth = camera.depth,
+                cullingMask = camera.cullingMask,
+                cullingMaskLayers = CullingMaskToLayerNames(camera.cullingMask),
+                rect = new { x = rect.x, y = rect.y, width = rect.width, height = rect.height },
+                renderingPath = camera.renderingPath.ToString(),
+                targetDisplay = camera.targetDisplay,
+                targetTexture = rt != null ? rt.name : null,
+                position = new { x = pos.x, y = pos.y, z = pos.z },
+                rotation = new { x = rot.x, y = rot.y, z = rot.z }
+            });
         }
 
         [Description("Set camera projection to orthographic or perspective with size/FOV")]
@@ -177,21 +185,23 @@ namespace Funplay.Editor.Tools.Builtins
         {
             if (mask == -1) return "Everything";
             if (mask == 0) return "Nothing";
+            return string.Join(", ", CullingMaskToLayerNames(mask));
+        }
 
-            var sb = new StringBuilder();
+        private static System.Collections.Generic.List<string> CullingMaskToLayerNames(int mask)
+        {
+            var names = new System.Collections.Generic.List<string>();
+            if (mask == 0) return names;
             for (int i = 0; i < 32; i++)
             {
                 if ((mask & (1 << i)) != 0)
                 {
                     var layerName = LayerMask.LayerToName(i);
                     if (!string.IsNullOrEmpty(layerName))
-                    {
-                        if (sb.Length > 0) sb.Append(", ");
-                        sb.Append(layerName);
-                    }
+                        names.Add(layerName);
                 }
             }
-            return sb.ToString();
+            return names;
         }
 
         private static Color ParseColor(string value)

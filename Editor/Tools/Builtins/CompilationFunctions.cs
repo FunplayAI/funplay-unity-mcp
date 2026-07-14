@@ -170,18 +170,25 @@ namespace Funplay.Editor.Tools.Builtins
 
         [Description("Get the latest domain reload recovery event, if any. Useful after Unity recompiles scripts and an MCP request gets interrupted.")]
         [ReadOnlyTool]
-        public static string GetReloadRecoveryStatus(
+        public static object GetReloadRecoveryStatus(
             [ToolParam("Consume and clear the stored recovery event after reading", Required = false)] bool consume = false)
         {
             var info = DomainReloadHandler.GetLastRecoveryInfo(consume);
             if (info == null)
-                return "No reload recovery event recorded.";
+            {
+                return Response.Success("No reload recovery event recorded.", new
+                {
+                    status = "none"
+                });
+            }
 
-            return $"Recovery event:\n" +
-                   $"- Tool: {info.ToolName}\n" +
-                   $"- Status: {info.Status}\n" +
-                   $"- Time: {info.Timestamp:O}\n" +
-                   $"- Summary: {info.Summary}";
+            return Response.Success($"Recovery event: {info.Status}", new
+            {
+                status = info.Status,
+                tool = info.ToolName,
+                timestamp = info.Timestamp.ToString("O"),
+                summary = info.Summary
+            });
         }
 
         private static ICompilationService GetCompilationService()

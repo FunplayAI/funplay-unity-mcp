@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Reflection;
-using System.Text;
 using Funplay.Editor.Tools.Helpers;
 using UnityEditor;
 using UnityEngine;
@@ -16,36 +15,82 @@ namespace Funplay.Editor.Tools.Builtins
     [ToolProvider("InputSimulation")]
     internal static class InputInteractionFunctions
     {
-        [Description("Simulate a mouse click at a screen position in Play Mode. Coordinates are in screen pixels with 0,0 at the bottom-left. Works without the Input System by dispatching UI and physics events.")]
+        [Description("Simulate a mouse click at a screen position in Play Mode. Coordinates are in screen pixels with 0,0 at the bottom-left. Works without the Input System by dispatching UI and physics events. Returns a structured result reporting whether a target was actually hit, by which strategy, and the object that was clicked (or null when nothing was hit).")]
         [ReadOnlyTool]
-        public static string SimulateMouseClick(
+        public static object SimulateMouseClick(
             [ToolParam("Screen X coordinate in pixels")] int x,
             [ToolParam("Screen Y coordinate in pixels")] int y,
             [ToolParam("Mouse button: left, right, or middle", Required = false)] string button = "left")
         {
             if (!EditorApplication.isPlaying)
-                return ToolResultFormatter.ErrorMessage("PLAY_MODE_REQUIRED", "SimulateMouseClick only works in Play Mode.");
+                return Response.Error("PLAY_MODE_REQUIRED", new { message = "SimulateMouseClick only works in Play Mode." });
 
             try
             {
-                var results = new StringBuilder();
                 var inputButton = ParseButton(button);
                 var uiPosition = ResolveUiClickPosition(x, y, out var uiMessage);
                 var viewportPosition = ResolveViewportClickPosition(x, y, out var viewportMessage);
 
-                if (!string.IsNullOrEmpty(uiMessage))
-                    results.AppendLine(uiMessage);
-                if (!string.IsNullOrEmpty(viewportMessage))
-                    results.AppendLine(viewportMessage);
+                // The click behavior is unchanged: the UI path (EventSystem raycast, then a
+                // direct-Button fallback) and the physics path both run. Each strategy now
+                // reports honestly whether it actually landed on a target.
+                var attempts = new List<ClickOutcome>();
+                var uiOutcome = PerformUiClick(Mathf.RoundToInt(uiPosition.x), Mathf.RoundToInt(uiPosition.y), inputButton, attempts);
+                var physicsOutcome = PerformPhysicsClick(viewportPosition, attempts);
 
-                AppendUiClickResult(results, Mathf.RoundToInt(uiPosition.x), Mathf.RoundToInt(uiPosition.y), inputButton);
-                AppendPhysicsClickResult(results, viewportPosition);
+                var winner = uiOutcome.Hit ? uiOutcome : (physicsOutcome.Hit ? physicsOutcome : null);
+                var hit = winner != null;
 
-                return $"Mouse {button} click at ({x}, {y}) -> UI({uiPosition.x:F1}, {uiPosition.y:F1}) viewport({viewportPosition.x:F3}, {viewportPosition.y:F3}):\n{results}";
+                object target = null;
+                string hitName = null;
+                if (hit && winner.Target != null)
+                {
+                    hitName = winner.Target.name;
+                    target = new { name = hitName, instanceId = ObjectIdHelper.GetSerializableId(winner.Target) };
+                }
+
+                var requested = $"screen({x}, {y}) {inputButton.ToString().ToLowerInvariant()}";
+
+                var attempted = new List<object>();
+                foreach (var attempt in attempts)
+                    attempted.Add(new { strategy = attempt.Strategy, hit = attempt.Hit, detail = attempt.Detail });
+
+                var data = new
+                {
+                    hit,
+                    strategy = hit ? winner.Strategy : null,
+                    target,
+                    requested,
+                    attempted,
+                    mapping = new
+                    {
+                        ui = uiMessage,
+                        viewport = viewportMessage
+                    }
+                };
+
+                var message = hit
+                    ? $"Mouse {button} click at ({x}, {y}) hit '{hitName}' via {winner.Strategy}"
+                    : $"Mouse {button} click at ({x}, {y}) hit no target ({attempts.Count} strategies tried)";
+
+                return Response.Success(message, data);
             }
             catch (Exception ex)
             {
                 return ToolResultFormatter.Exception(ex);
+            }
+        }
+
+        private sealed class ClickOutcome
+        {
+            public string Strategy;
+            public bool Hit;
+            public GameObject Target;
+            public string Detail;
+
+            public static ClickOutcome Miss(string strategy, string detail)
+            {
+                return new ClickOutcome { Strategy = strategy, Hit = false, Target = null, Detail = detail };
             }
         }
 
@@ -79,24 +124,22 @@ namespace Funplay.Editor.Tools.Builtins
             return viewport;
         }
 
-        private static void AppendUiClickResult(StringBuilder results, int x, int y, PointerEventData.InputButton inputButton)
+        private static ClickOutcome PerformUiClick(int x, int y, PointerEventData.InputButton inputButton, List<ClickOutcome> attempts)
         {
             Canvas.ForceUpdateCanvases();
 
             var eventSystem = EventSystem.current ?? UnityEngine.Object.FindFirstObjectByType<EventSystem>();
             if (eventSystem == null)
             {
-                results.AppendLine("  EventSystem: skipped (no EventSystem found)");
-                AppendDirectButtonFallback(results, new Vector2(x, y));
-                return;
+                attempts.Add(ClickOutcome.Miss("ui-eventsystem", "no EventSystem found"));
+                return PerformDirectButtonFallback(new Vector2(x, y), attempts);
             }
 
             var pointerData = CreatePointerData(eventSystem, new Vector2(x, y), inputButton);
             if (!TryGetTopUiTarget(eventSystem, pointerData, out var target, out var raycast))
             {
-                results.AppendLine("  EventSystem: no UI element at position");
-                AppendDirectButtonFallback(results, new Vector2(x, y));
-                return;
+                attempts.Add(ClickOutcome.Miss("ui-eventsystem", "no UI element at position"));
+                return PerformDirectButtonFallback(new Vector2(x, y), attempts);
             }
 
             pointerData.pointerCurrentRaycast = raycast;
@@ -105,13 +148,22 @@ namespace Funplay.Editor.Tools.Builtins
             ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerDownHandler);
             ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerUpHandler);
             ExecuteEvents.ExecuteHierarchy(target, pointerData, ExecuteEvents.pointerClickHandler);
-            results.AppendLine($"  EventSystem: clicked on '{target.name}'");
 
             if (target.TryGetComponent<Button>(out var button))
                 button.onClick?.Invoke();
+
+            var outcome = new ClickOutcome
+            {
+                Strategy = "ui-eventsystem",
+                Hit = true,
+                Target = target,
+                Detail = $"clicked on '{target.name}'"
+            };
+            attempts.Add(outcome);
+            return outcome;
         }
 
-        private static void AppendDirectButtonFallback(StringBuilder results, Vector2 position)
+        private static ClickOutcome PerformDirectButtonFallback(Vector2 position, List<ClickOutcome> attempts)
         {
             foreach (var button in UnityEngine.Object.FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
@@ -126,18 +178,30 @@ namespace Funplay.Editor.Tools.Builtins
                     continue;
 
                 button.onClick?.Invoke();
-                results.AppendLine($"  Direct button hit: invoked '{button.name}'");
-                return;
+                var outcome = new ClickOutcome
+                {
+                    Strategy = "ui-direct-button",
+                    Hit = true,
+                    Target = button.gameObject,
+                    Detail = $"invoked onClick on '{button.name}'"
+                };
+                attempts.Add(outcome);
+                return outcome;
             }
+
+            var miss = ClickOutcome.Miss("ui-direct-button", "no active Button contains the point");
+            attempts.Add(miss);
+            return miss;
         }
 
-        private static void AppendPhysicsClickResult(StringBuilder results, Vector2 viewportPosition)
+        private static ClickOutcome PerformPhysicsClick(Vector2 viewportPosition, List<ClickOutcome> attempts)
         {
             var mainCamera = Camera.main;
             if (mainCamera == null)
             {
-                results.AppendLine("  Physics raycast: skipped (no Main Camera found)");
-                return;
+                var miss = ClickOutcome.Miss("physics-raycast", "no Main Camera found");
+                attempts.Add(miss);
+                return miss;
             }
 
             Physics.SyncTransforms();
@@ -146,12 +210,20 @@ namespace Funplay.Editor.Tools.Builtins
             {
                 hit.collider.gameObject.SendMessage("OnMouseDown", SendMessageOptions.DontRequireReceiver);
                 hit.collider.gameObject.SendMessage("OnMouseUp", SendMessageOptions.DontRequireReceiver);
-                results.AppendLine($"  Physics raycast: OnMouseDown on '{hit.collider.gameObject.name}'");
+                var outcome = new ClickOutcome
+                {
+                    Strategy = "physics-raycast",
+                    Hit = true,
+                    Target = hit.collider.gameObject,
+                    Detail = $"OnMouseDown/OnMouseUp on '{hit.collider.gameObject.name}'"
+                };
+                attempts.Add(outcome);
+                return outcome;
             }
-            else
-            {
-                results.AppendLine("  Physics raycast: no 3D object hit");
-            }
+
+            var noHit = ClickOutcome.Miss("physics-raycast", "no 3D object hit");
+            attempts.Add(noHit);
+            return noHit;
         }
 
         private static PointerEventData CreatePointerData(EventSystem eventSystem, Vector2 position, PointerEventData.InputButton inputButton)
