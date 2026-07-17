@@ -33,6 +33,9 @@ namespace Funplay.Editor.Tests
                 var firstLoaded = GetProperty<object>(firstData, "loaded");
                 Assert.IsFalse(GetProperty<bool>(firstLoaded, "alreadyLoaded"));
                 Assert.AreEqual(targetPath, GetProperty<string>(firstLoaded, "path"));
+                Assert.IsTrue(
+                    IsIntegralValue(GetProperty<object>(firstLoaded, "handle")),
+                    "Scene handles must be returned as JSON-safe integral values.");
                 Assert.AreEqual(2, GetProperty<int>(firstData, "loadedSceneCount"));
                 Assert.AreEqual(2, CountLoadedScenes());
                 Assert.AreEqual(2, SceneManager.sceneCount, "The unloaded placeholder should be removed.");
@@ -245,6 +248,18 @@ namespace Funplay.Editor.Tests
         private static List<object> ToObjects(object value)
         {
             return ((IEnumerable)value).Cast<object>().ToList();
+        }
+
+        private static bool IsIntegralValue(object value)
+        {
+            return value is byte ||
+                   value is sbyte ||
+                   value is short ||
+                   value is ushort ||
+                   value is int ||
+                   value is uint ||
+                   value is long ||
+                   value is ulong;
         }
 
         private static int CountLoadedScenes()

@@ -9,6 +9,11 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+#if UNITY_6000_4_OR_NEWER
+using SerializableSceneHandle = System.UInt64;
+#else
+using SerializableSceneHandle = System.Int32;
+#endif
 
 namespace Funplay.Editor.Tools.Builtins
 {
@@ -81,7 +86,7 @@ namespace Funplay.Editor.Tools.Builtins
                     active = scene == activeScene,
                     isDirty = scene.isDirty,
                     isLoaded = scene.isLoaded,
-                    handle = scene.handle,
+                    handle = GetSerializableSceneHandle(scene),
                     buildIndex = scene.buildIndex,
                     rootCount = rootObjects.Length,
                     rootObjects = rootTree
@@ -194,7 +199,7 @@ namespace Funplay.Editor.Tools.Builtins
 
             var unloadedName = target.name;
             var unloadedPath = target.path;
-            var unloadedHandle = target.handle;
+            var unloadedHandle = GetSerializableSceneHandle(target);
             bool closed;
             try
             {
@@ -222,7 +227,12 @@ namespace Funplay.Editor.Tools.Builtins
                 discardedUnsavedChanges = wasDirty,
                 loadedSceneCount = remainingCount,
                 activeScene = activeScene.IsValid()
-                    ? new { name = activeScene.name, path = activeScene.path, handle = activeScene.handle }
+                    ? new
+                    {
+                        name = activeScene.name,
+                        path = activeScene.path,
+                        handle = GetSerializableSceneHandle(activeScene)
+                    }
                     : null
             });
         }
@@ -506,7 +516,7 @@ namespace Funplay.Editor.Tools.Builtins
                     {
                         name = scene.name,
                         path = scene.path,
-                        handle = scene.handle,
+                        handle = GetSerializableSceneHandle(scene),
                         active = scene == activeScene,
                         alreadyLoaded
                     },
@@ -582,12 +592,21 @@ namespace Funplay.Editor.Tools.Builtins
             return count;
         }
 
-        private static bool IsLoadedSceneHandle(int handle)
+        private static SerializableSceneHandle GetSerializableSceneHandle(Scene scene)
+        {
+#if UNITY_6000_4_OR_NEWER
+            return scene.handle.GetRawData();
+#else
+            return scene.handle;
+#endif
+        }
+
+        private static bool IsLoadedSceneHandle(SerializableSceneHandle handle)
         {
             for (int i = 0; i < SceneManager.sceneCount; i++)
             {
                 var scene = SceneManager.GetSceneAt(i);
-                if (scene.isLoaded && scene.handle == handle)
+                if (scene.isLoaded && GetSerializableSceneHandle(scene) == handle)
                     return true;
             }
             return false;
@@ -625,7 +644,7 @@ namespace Funplay.Editor.Tools.Builtins
             {
                 name = scene.name,
                 path = scene.path,
-                handle = scene.handle,
+                handle = GetSerializableSceneHandle(scene),
                 active = scene == activeScene,
                 isDirty = scene.isDirty
             };

@@ -12,6 +12,7 @@
 - All mutating batch tools, including component paste/add operations, now share the same target resolver and reject more than 100 targets before making changes.
 
 ### Fixed
+- Scene lifecycle tools now compile on Unity 6.5 and expose the editor's strongly typed scene handles as stable numeric values in tool responses.
 - Auto-detected purely numeric GameObject targets now try instance ID first and fall back to an exact object-name lookup, so objects named `2048`, `512`, and similar values remain reachable without weakening explicit `find_method=by_id` calls.
 - Component property writes now return authoritative post-write values for serialized and reflection-backed members, including per-target `newValue`/`applied` data in batch responses. Mutating tools also reject conflicting target selectors, malformed boolean values, and empty property maps without modifying scene objects.
 
