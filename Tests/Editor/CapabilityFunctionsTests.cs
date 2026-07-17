@@ -2,9 +2,11 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using Funplay.Editor.Tools;
 using Funplay.Editor.Tools.Builtins;
+using Funplay.Editor.Tools.Helpers;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -86,7 +88,14 @@ namespace Funplay.Editor.Tests
             try
             {
                 cube.name = "CapabilityCube_" + Guid.NewGuid().ToString("N");
-                AssertSuccess(MeshFunctions.GetMeshInfo(cube.name));
+                var meshResult = MeshFunctions.GetMeshInfo(cube.name);
+                AssertSuccess(meshResult);
+                var meshData = GetProperty<object>(meshResult, "data");
+                var meshes = GetProperty<List<object>>(meshData, "meshes");
+                var mesh = cube.GetComponent<MeshFilter>().sharedMesh;
+                var meshId = GetProperty<string>(meshes[0], "instanceId");
+                Assert.That(meshId, Is.EqualTo(ObjectIdHelper.GetSerializableId(mesh)));
+                Assert.That(ObjectIdHelper.ToObject(meshId), Is.SameAs(mesh));
                 AssertSuccess(PhysicsQueryFunctions.PhysicsRaycast("0,0,-5", "0,0,1", 20f));
                 AssertSuccess(PhysicsQueryFunctions.PhysicsOverlap("0,0,0", "box", size: "2,2,2"));
                 AssertError(PhysicsQueryFunctions.PhysicsRaycast("NaN,0,0", "0,0,1"), "INVALID_PARAM");

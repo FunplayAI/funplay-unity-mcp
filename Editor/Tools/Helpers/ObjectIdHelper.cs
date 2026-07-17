@@ -17,7 +17,7 @@ namespace Funplay.Editor.Tools.Helpers
     /// </summary>
     internal static class ObjectIdHelper
     {
-#if UNITY_6000_3_OR_NEWER
+#if UNITY_6000_4_OR_NEWER
         private const int CacheCompactThreshold = 1024;
 
         private static readonly Dictionary<string, WeakReference<UnityObject>> EntityIdCache =
@@ -51,7 +51,7 @@ namespace Funplay.Editor.Tools.Helpers
             if (obj == null)
                 return "0";
 
-#if UNITY_6000_3_OR_NEWER
+#if UNITY_6000_4_OR_NEWER
             var id = obj.GetEntityId().ToString();
             CacheEntityId(id, obj);
             return id;
@@ -67,7 +67,7 @@ namespace Funplay.Editor.Tools.Helpers
 
             objectId = objectId.Trim();
 
-#if UNITY_6000_3_OR_NEWER
+#if UNITY_6000_4_OR_NEWER
             if (EntityIdCache.TryGetValue(objectId, out var cached) &&
                 cached.TryGetTarget(out var cachedObject) &&
                 cachedObject != null)
@@ -93,7 +93,7 @@ namespace Funplay.Editor.Tools.Helpers
 #endif
         }
 
-#if UNITY_6000_3_OR_NEWER
+#if UNITY_6000_4_OR_NEWER
         private static void CacheEntityId(string id, UnityObject obj)
         {
             EntityIdCache[id] = new WeakReference<UnityObject>(obj);

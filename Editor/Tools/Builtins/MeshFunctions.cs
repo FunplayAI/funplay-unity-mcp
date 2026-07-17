@@ -127,7 +127,7 @@ namespace Funplay.Editor.Tools.Builtins
             return new
             {
                 name = mesh.name,
-                instanceId = mesh.GetInstanceID(),
+                instanceId = ObjectIdHelper.GetSerializableId(mesh),
                 vertexCount = mesh.vertexCount,
                 triangleCount,
                 triangleNote,

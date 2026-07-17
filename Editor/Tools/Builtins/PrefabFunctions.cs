@@ -120,7 +120,7 @@ namespace Funplay.Editor.Tools.Builtins
         {
             var root = stage.prefabContentsRoot;
             return $"Prefab stage {status}: {stage.assetPath}\n" +
-                   $"Root: {root.name} (instanceId={root.GetInstanceID()}), children: {root.transform.childCount}";
+                   $"Root: {root.name} (instanceId={ObjectIdHelper.GetSerializableId(root)}), children: {root.transform.childCount}";
         }
 
         [Description("Save the currently open prefab stage back to its .prefab asset, without closing the stage. " +

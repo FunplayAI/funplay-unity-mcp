@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.5.2] - 2026-07-16
+
+### Fixed
+- Restored compilation on Unity 6.5+ by routing the remaining Mesh and Prefab object IDs and broken-reference scans through Unity's 64-bit `EntityId` APIs. The compatibility boundary now correctly starts at Unity 6.4; Unity 2022.3 and Unity 6.3 continue to use the legacy APIs. (#43, #44)
+
+### Contributors
+- Thanks @JOY for the EntityId compatibility fix in #43.
+
 ## [0.5.1] - 2026-07-12
 
 ### Added
@@ -223,11 +231,11 @@
 ## [0.3.1] - 2026-05-17
 
 ### Fixed
-- Compile errors on Unity 6000.3+ where `Object.GetInstanceID()` and `EditorUtility.InstanceIDToObject(int)` are obsolete-as-error (CS0619). Object IDs handed to MCP clients now go through a new internal `ObjectIdHelper` that uses `GetEntityId` / `EditorUtility.EntityIdToObject` on Unity 6000.3+ and the legacy `InstanceID` API on older Unity. (#3)
+- Compile errors on Unity 6000.4+ where `Object.GetInstanceID()` and `EditorUtility.InstanceIDToObject(int)` are deprecated ahead of becoming obsolete-as-error in Unity 6000.5. Object IDs handed to MCP clients now go through a new internal `ObjectIdHelper` that uses `GetEntityId` / `EditorUtility.EntityIdToObject` on Unity 6000.4+ and the legacy `InstanceID` API on older Unity. (#3)
 - HTTP transport could fail to restart after a Unity domain reload with `通常每个套接字地址(协议/网络地址/端口)只允许使用一次。` / `Address already in use`. Root cause was a fire-and-forget `StopAsync` in `beforeAssemblyReload` — Unity unloaded the AppDomain before the listener actually released the port. `MCPServerService` now exposes a synchronous `StopSync` used by both `Dispose` and the domain-reload handler, and `RootScopeServices.Initialize` skips its auto-start during a post-reload restart so only one start path runs. (#1)
 
 ### Changed (potentially breaking for downstream clients)
-- `instanceId`, `componentInstanceId`, and `fileID` fields in tool responses are now always JSON strings instead of numbers. On Unity 6000.3+ they are `EntityId` text; on older Unity they are decimal `InstanceID` strings. Clients that parsed these fields as integers must accept strings.
+- `instanceId`, `componentInstanceId`, and `fileID` fields in tool responses are now always JSON strings instead of numbers. On Unity 6000.4+ they are `EntityId` text; on older Unity they are decimal `InstanceID` strings. Clients that parsed these fields as integers must accept strings.
 
 ## [0.3.0] - 2026-05-06
 

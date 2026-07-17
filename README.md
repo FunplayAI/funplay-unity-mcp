@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.5.1"
+    "com.gamebooom.unity.mcp": "0.5.2"
   }
 }
 ```
