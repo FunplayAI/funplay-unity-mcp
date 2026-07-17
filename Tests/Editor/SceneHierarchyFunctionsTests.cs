@@ -1,6 +1,8 @@
 // Copyright (C) Funplay. Licensed under MIT.
 
 using System;
+using System.Collections;
+using System.Linq;
 using System.IO;
 using Funplay.Editor.Tools.Builtins;
 using Funplay.Editor.Tools.Helpers;
@@ -60,24 +62,12 @@ namespace Funplay.Editor.Tests
             }
         }
 
-        // Recursively collect property names and leaf values from a structured (anonymous-object) tool
-        // result into one string, so assertions can verify the payload without a JSON dependency.
-        private static string DumpValues(object o)
+        private static T GetProperty<T>(object obj, string name)
         {
-            if (o == null) return "";
-            if (o is string s) return s + " ";
-            if (o is System.Collections.IEnumerable en)
-            {
-                var sb = new System.Text.StringBuilder();
-                foreach (var item in en) sb.Append(DumpValues(item));
-                return sb.ToString();
-            }
-            var t = o.GetType();
-            if (t.IsPrimitive) return o + " ";
-            var sb2 = new System.Text.StringBuilder();
-            foreach (var p in t.GetProperties())
-                sb2.Append(p.Name).Append('=').Append(DumpValues(p.GetValue(o)));
-            return sb2.ToString();
+            Assert.NotNull(obj);
+            var property = obj.GetType().GetProperty(name);
+            Assert.NotNull(property, $"Missing property '{name}' on {obj.GetType().FullName}.");
+            return (T)property.GetValue(obj);
         }
 
         [Test]
@@ -104,7 +94,7 @@ namespace Funplay.Editor.Tests
 
                 var activeScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
                 Assert.IsTrue(EditorSceneManager.SaveScene(activeScene, activeScenePath));
-                new GameObject(activeRootName);
+                var activeRoot = new GameObject(activeRootName);
 
                 additiveScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
                 Assert.IsTrue(additiveScene.IsValid());
@@ -137,17 +127,34 @@ namespace Funplay.Editor.Tests
                 Assert.That(rootLookup, Does.Contain(inactiveRootName + " [INACTIVE]"));
                 Assert.That(rootLookup, Does.Not.Contain("GAME_OBJECT_NOT_FOUND"));
 
-                // GetSceneInfo now returns a structured object ({success,message,data:{count,scenes:[{name,path,active,isDirty,rootObjects}]}}).
-                // Flatten it (no JSON dependency in the test assembly) and assert the scene names, the
-                // active flag, and the root object names are all present in the payload.
                 var sceneInfo = SceneFunctions.GetSceneInfo();
-                var sceneInfoDump = DumpValues(sceneInfo);
-                Assert.That(sceneInfoDump, Does.Contain(activeScene.name));
-                Assert.That(sceneInfoDump, Does.Contain("active=True"));
-                Assert.That(sceneInfoDump, Does.Contain(activeRootName));
-                Assert.That(sceneInfoDump, Does.Contain(additiveScene.name));
-                Assert.That(sceneInfoDump, Does.Contain(additiveRootName));
-                Assert.That(sceneInfoDump, Does.Contain(inactiveRootName));
+                Assert.IsTrue(GetProperty<bool>(sceneInfo, "success"));
+                var data = GetProperty<object>(sceneInfo, "data");
+                Assert.AreEqual(2, GetProperty<int>(data, "count"));
+                var scenes = ((IEnumerable)GetProperty<object>(data, "scenes")).Cast<object>().ToList();
+
+                var activeInfo = scenes.Single(item => GetProperty<string>(item, "name") == activeScene.name);
+                Assert.IsTrue(GetProperty<bool>(activeInfo, "active"));
+                Assert.IsTrue(GetProperty<bool>(activeInfo, "isLoaded"));
+                Assert.AreEqual(activeScenePath, GetProperty<string>(activeInfo, "path"));
+                var activeRoots = ((IEnumerable)GetProperty<object>(activeInfo, "rootObjects")).Cast<object>().ToList();
+                var activeRootInfo = activeRoots.Single(item => GetProperty<string>(item, "name") == activeRootName);
+                Assert.AreEqual(
+                    ObjectIdHelper.GetSerializableId(activeRoot),
+                    GetProperty<string>(activeRootInfo, "instanceId"));
+
+                var additiveInfo = scenes.Single(item => GetProperty<string>(item, "name") == additiveScene.name);
+                Assert.IsFalse(GetProperty<bool>(additiveInfo, "active"));
+                Assert.IsTrue(GetProperty<bool>(additiveInfo, "isLoaded"));
+                Assert.AreEqual(additiveScenePath, GetProperty<string>(additiveInfo, "path"));
+                var additiveRoots = ((IEnumerable)GetProperty<object>(additiveInfo, "rootObjects")).Cast<object>().ToList();
+                CollectionAssert.AreEquivalent(
+                    new[] { additiveRootName, inactiveRootName },
+                    additiveRoots.Select(item => GetProperty<string>(item, "name")).ToArray());
+                var additiveRootInfo = additiveRoots.Single(item => GetProperty<string>(item, "name") == additiveRootName);
+                Assert.AreEqual(
+                    ObjectIdHelper.GetSerializableId(additiveRoot),
+                    GetProperty<string>(additiveRootInfo, "instanceId"));
             }
             finally
             {
@@ -167,6 +174,13 @@ namespace Funplay.Editor.Tests
 
         private static bool CanRestoreSceneSetup(SceneSetup[] setup)
         {
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (scene.isLoaded && scene.isDirty)
+                    return false;
+            }
+
             foreach (var scene in setup)
             {
                 if (string.IsNullOrEmpty(scene.path) || !File.Exists(scene.path))
