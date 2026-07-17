@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.0",
+                "1.0.1",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects.",
                 true,
@@ -50,8 +50,8 @@ namespace Funplay.Editor.MCP.Server
                     "Locate the real Unity project root and active scene before editing.",
                     "Inspect hierarchy, prefab paths, selected objects, and relevant component references through MCP before changing user-named objects. Treat user-provided object names as hints, not paths.",
                     "Tool returns are structured JSON: `{success, message, data}` for success and `{success: false, code, error, data}` for errors. Parse `data` and check `code` (UPPERCASE_SNAKE_CASE) for branching — do not pattern-match free-form text.",
-                    "Prefer `instanceId` returned by tools for follow-up calls. Pass it back via the `find_method=by_id` (or auto-detect when the value parses as an integer). This is more reliable than re-resolving by `name` when scenes contain duplicates.",
-                    "Use the `find_method` parameter on GameObject/Component tools to choose how a target is resolved: `by_id`, `by_name`, `by_path`, `by_tag`, `by_layer`, `by_component`, or `by_id_or_name_or_path`. Default auto-detect picks `by_id` for integers, `by_path` for slashed strings, otherwise `by_name`.",
+                    "Prefer `instanceId` returned by tools for follow-up calls and pass it back with explicit `find_method=by_id`. This is more reliable than re-resolving by `name` when scenes contain duplicates.",
+                    "Use the `find_method` parameter on GameObject/Component tools to choose how a target is resolved: `by_id`, `by_name`, `by_path`, `by_tag`, `by_layer`, `by_component`, or `by_id_or_name_or_path`. Default auto-detect routes integers through `by_id_or_name_or_path` (ID first, then exact name), slashed strings through `by_path`, and other strings through `by_name`. Pass explicit `by_id` when a stale or invalid ID must fail instead of falling back.",
                     "When a GameObject has multiple components of the same type, target a specific one with `component_instance_id` instead of the type name to avoid hitting the wrong component.",
                     "Set component fields with `set_component_property(ies)`: it now writes through SerializedObject, so `[SerializeField] private` fields are reachable. Pass Object references as JSON `{\"fileID\": <instanceId>}` (preferred) or `{\"assetPath\": \"Assets/...\"}`. The response reports per-field success/failure.",
                     "Inspect editor-level state through dedicated tools: `get_selection`, `set_selection`, `get_prefab_stage`, `get_active_tool`, `get_windows`, `get_tags`, `get_layers`, `get_build_settings`. Do not write `execute_code` snippets just to read this.",

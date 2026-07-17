@@ -12,10 +12,11 @@
 - All mutating batch tools, including component paste/add operations, now share the same target resolver and reject more than 100 targets before making changes.
 
 ### Fixed
+- Auto-detected purely numeric GameObject targets now try instance ID first and fall back to an exact object-name lookup, so objects named `2048`, `512`, and similar values remain reachable without weakening explicit `find_method=by_id` calls.
 - Component property writes now return authoritative post-write values for serialized and reflection-backed members, including per-target `newValue`/`applied` data in batch responses. Mutating tools also reject conflicting target selectors, malformed boolean values, and empty property maps without modifying scene objects.
 
 ### Contributors
-- Thanks @dehuaichendragonplus for the type-ambiguity diagnostics in #40, additive scene lifecycle work in #41, and multi-target editing and component write-back work in #42.
+- Thanks @dehuaichendragonplus for numeric target routing in #38, type-ambiguity diagnostics in #40, additive scene lifecycle work in #41, and multi-target editing and component write-back work in #42.
 
 ## [0.5.2] - 2026-07-16
 

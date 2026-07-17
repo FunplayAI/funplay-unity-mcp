@@ -29,16 +29,16 @@ namespace Funplay.Editor.Tests
                 Assert.IsFalse(status.HasUpdates);
                 Assert.IsTrue(File.Exists(agentsPath));
                 Assert.IsTrue(File.Exists(skillPath));
-                StringAssert.Contains("unity-mcp-workflow@1.0.0", File.ReadAllText(agentsPath));
+                StringAssert.Contains("unity-mcp-workflow@1.0.1", File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
-                StringAssert.Contains("version: 1.0.0", File.ReadAllText(skillPath));
-                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.0 -->", File.ReadAllText(skillPath));
+                StringAssert.Contains("version: 1.0.1", File.ReadAllText(skillPath));
+                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.1 -->", File.ReadAllText(skillPath));
 
                 var manifestJson = File.ReadAllText(ProjectSkillsManager.GetManifestPath(projectRoot));
                 StringAssert.Contains("\"skillVersions\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-mcp-workflow\"", manifestJson);
-                StringAssert.Contains("\"version\": \"1.0.0\"", manifestJson);
+                StringAssert.Contains("\"version\": \"1.0.1\"", manifestJson);
             }
             finally
             {
@@ -178,7 +178,7 @@ namespace Funplay.Editor.Tests
                 ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
                 var skillPath = GetCodexWorkflowSkillPath(projectRoot);
                 RemoveLinesContaining(skillPath, "Funplay Unity MCP skill version:");
-                RemoveLinesContaining(skillPath, "version: 1.0.0");
+                RemoveLinesContaining(skillPath, "version: 1.0.1");
 
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
                 var status = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, "codex");
@@ -187,7 +187,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(status.HasUpdates);
                 Assert.IsTrue(skillStatus.RequiresUpgrade);
                 Assert.AreEqual("unknown", skillStatus.InstalledVersion);
-                Assert.AreEqual("1.0.0", skillStatus.ExpectedVersion);
+                Assert.AreEqual("1.0.1", skillStatus.ExpectedVersion);
             }
             finally
             {
@@ -213,7 +213,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(status.HasUpdates);
                 Assert.IsTrue(skillStatus.Missing);
                 Assert.AreEqual("missing", skillStatus.InstalledVersion);
-                Assert.AreEqual("1.0.0", skillStatus.ExpectedVersion);
+                Assert.AreEqual("1.0.1", skillStatus.ExpectedVersion);
             }
             finally
             {
