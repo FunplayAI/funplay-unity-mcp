@@ -65,6 +65,47 @@ namespace Funplay.Editor.Tests
         }
 
         [Test]
+        public void GetCounters_AutoStartsRecordersAndUsesEditorRenderStats()
+        {
+            var originalProfilerEnabled = Profiler.enabled;
+
+            try
+            {
+                ProfilerFunctions.ProfilerStop();
+
+                var counters = ProfilerFunctions.GetCounters("Draw Calls Count,GC Used Memory");
+                Assert.That(counters, Does.Contain("WARNING: profiler_start was not called"));
+                Assert.That(counters, Does.Contain("Render/Draw Calls Count:"));
+                Assert.That(counters, Does.Contain("source=UnityEditor.UnityStats"));
+                Assert.That(counters, Does.Contain("profiler_recorder_unavailable_in_editor=true"));
+                Assert.That(counters, Does.Contain("Memory/GC Used Memory:"));
+                Assert.That(counters, Does.Contain("source=ProfilerRecorder"));
+                Assert.That(counters, Does.Not.Contain("Render/Batches Count:"));
+
+                var batches = ProfilerFunctions.GetCounters("Batches Count");
+#if UNITY_6000_4_OR_NEWER
+                Assert.That(batches, Does.Contain("reason=editor_render_counter_unavailable"));
+#else
+                Assert.That(batches, Does.Contain("source=UnityEditor.UnityStats"));
+#endif
+
+                var status = ProfilerFunctions.ProfilerStatus();
+                var validRecorderLines = status
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(line => line.Contains("valid=True"))
+                    .ToArray();
+
+                Assert.That(validRecorderLines, Is.Not.Empty);
+                Assert.That(validRecorderLines, Has.All.Contains("running=True"));
+            }
+            finally
+            {
+                ProfilerFunctions.ProfilerStop();
+                Profiler.enabled = originalProfilerEnabled;
+            }
+        }
+
+        [Test]
         public void MemorySnapshotTools_CreateListCompareAndCleanUpJsonSnapshots()
         {
             var prefix = "FunplayProfilerSnapshot_" + Guid.NewGuid().ToString("N");

@@ -139,11 +139,9 @@ namespace Funplay.Editor.Tools.Builtins
 
         [Description("Read current values of high-signal rendering/memory counters (Draw Calls, Batches, Triangles, " +
                      "SetPass Calls, GC/Gfx memory, etc). Requires profiler_start to have been called at least a few frames earlier; " +
-                     "if not running, starts recorders automatically and returns zero/stale values with a warning. " +
-                     "KNOWN LIMITATION: Render-category counters (Draw Calls/Batches/SetPass Calls/Triangles/Vertices Count) " +
-                     "have been observed to read 0 in the Unity Editor even during confirmed active rendering (verified via " +
-                     "frame_debugger_get_events showing real events at the same time); Memory-category counters are unaffected. " +
-                     "Not verified whether this limitation also applies to a Standalone Player build.")]
+                     "if not running, starts recorders automatically and reports warming-up values explicitly. " +
+                     "In the Unity Editor, rendering counters use the Game View's UnityStats values because the equivalent " +
+                     "ProfilerRecorder counters can remain 0 during confirmed active rendering. Memory counters continue to use ProfilerRecorder.")]
         [ReadOnlyTool]
         public static string GetCounters(
             [ToolParam("Comma-separated list of specific counter names to query (e.g. 'Draw Calls Count,Triangles Count'). Omit for the default set.", Required = false)] string names = null)
@@ -180,19 +178,43 @@ namespace Funplay.Editor.Tools.Builtins
                     }
                 }
 
+                var editorRenderCounters = CaptureEditorRenderCounters();
                 foreach (var key in keysToShow)
                 {
                     var recorder = _recorders[key];
-                    if (IsUnavailableInEditor(key))
+                    if (editorRenderCounters != null && editorRenderCounters.TryGetValue(key, out var editorValue))
                     {
-                        // KNOWN LIMITATION: Render-category ProfilerRecorder counters read a constant 0 in the
-                        // Unity Editor even during confirmed active rendering. Report null + unavailable_in_editor
-                        // rather than a bare 0, which would masquerade as a real measurement.
-                        sb.AppendLine($"{key}: value=null, unavailable_in_editor=true (Render-category counters read 0 in the Editor; use a Standalone Player build for real values)");
+                        sb.AppendLine(
+                            $"{key}: last={editorValue:F0}, current={editorValue:F0}, unit=Count, " +
+                            "source=UnityEditor.UnityStats, profiler_recorder_unavailable_in_editor=true");
+                    }
+                    else if (IsEditorRenderCounter(key))
+                    {
+                        sb.AppendLine(
+                            $"{key}: value=null, available=false, reason=editor_render_counter_unavailable, " +
+                            "source=ProfilerRecorder, profiler_recorder_unavailable_in_editor=true");
+                    }
+                    else if (!recorder.Valid)
+                    {
+                        sb.AppendLine(
+                            $"{key}: value=null, available=false, reason=counter_not_supported, source=ProfilerRecorder");
+                    }
+                    else if (!recorder.IsRunning)
+                    {
+                        sb.AppendLine(
+                            $"{key}: value=null, available=false, reason=recorder_not_running, source=ProfilerRecorder");
+                    }
+                    else if (recorder.Count == 0)
+                    {
+                        sb.AppendLine(
+                            $"{key}: last=null, current={recorder.CurrentValueAsDouble:F0}, unit={recorder.UnitType}, " +
+                            "available=false, reason=warming_up, source=ProfilerRecorder");
                     }
                     else
                     {
-                        sb.AppendLine($"{key}: last={recorder.LastValueAsDouble:F0}, current={recorder.CurrentValueAsDouble:F0}, unit={recorder.UnitType}");
+                        sb.AppendLine(
+                            $"{key}: last={recorder.LastValueAsDouble:F0}, current={recorder.CurrentValueAsDouble:F0}, " +
+                            $"unit={recorder.UnitType}, samples={recorder.Count}, source=ProfilerRecorder");
                     }
                 }
                 return sb.ToString();
@@ -203,17 +225,27 @@ namespace Funplay.Editor.Tools.Builtins
             }
         }
 
-        // Categories whose ProfilerRecorder counters are known to read a constant 0 in the Unity Editor
-        // (verified: Render-category — Draw Calls/Batches/SetPass Calls/Triangles/Vertices — read 0 in the
-        // Editor even while frame_debugger_get_events shows real draw events; Memory-category is unaffected).
-        // Keyed off the "Category/Name" recorder key prefix.
-        private static bool IsUnavailableInEditor(string recorderKey)
+        private static Dictionary<string, double> CaptureEditorRenderCounters()
         {
             if (!Application.isEditor)
-                return false;
-            int slash = recorderKey.IndexOf('/');
-            var category = slash > 0 ? recorderKey.Substring(0, slash) : recorderKey;
-            return category.Equals("Render", StringComparison.OrdinalIgnoreCase);
+                return null;
+
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Render/Draw Calls Count"] = UnityStats.drawCalls,
+#if !UNITY_6000_4_OR_NEWER
+                ["Render/Batches Count"] = UnityStats.batches,
+#endif
+                ["Render/SetPass Calls Count"] = UnityStats.setPassCalls,
+                ["Render/Triangles Count"] = UnityStats.triangles,
+                ["Render/Vertices Count"] = UnityStats.vertices,
+            };
+        }
+
+        private static bool IsEditorRenderCounter(string recorderKey)
+        {
+            return Application.isEditor &&
+                   recorderKey.StartsWith("Render/", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void StartRecorders()
@@ -225,13 +257,19 @@ namespace Funplay.Editor.Tools.Builtins
             foreach (var (category, name) in DefaultCounters)
             {
                 var key = category + "/" + name;
+                var recorder = default(ProfilerRecorder);
+                bool recorderCreated = false;
                 try
                 {
-                    var recorder = new ProfilerRecorder(category, name, 15);
+                    recorder = new ProfilerRecorder(category, name, 15);
+                    recorderCreated = true;
+                    recorder.Start();
                     _recorders[key] = recorder;
                 }
                 catch (Exception ex)
                 {
+                    if (recorderCreated)
+                        recorder.Dispose();
                     Debug.LogWarning($"[Funplay.Profiler] Failed to start recorder '{key}': {ex.Message}");
                 }
             }
