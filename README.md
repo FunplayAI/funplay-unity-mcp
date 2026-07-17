@@ -23,7 +23,7 @@
 
 Funplay MCP for Unity is an MIT-licensed Unity Editor MCP server that lets AI assistants like Claude Code, Cursor, LM Studio, Windsurf, Codex, and VS Code Copilot operate directly inside your running Unity project.
 
-Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's 150 built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
+Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's 154 built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
 
 > *"Build a snake game with a 10x10 grid, food spawning, score UI, and game-over screen"*
 >
@@ -238,7 +238,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - This package is **Editor-only**. It does not add runtime components to your built game.
 - The MCP server starts on `http://127.0.0.1:8765/` by default.
 - Local MCP server settings are stored in `UserSettings/FunplayMcpSettings.json`.
-- The package defaults to the `core` MCP tool profile to reduce tool-list noise for AI clients. `core` currently exposes 32 high-signal tools centered on `execute_code`, play mode control, input simulation, screenshots, performance inspection, logs, compilation checks, structured object location and component editing, editor selection / prefab-stage state, and `execute_menu_item` as a low-friction fallback. Switch to `full` in the MCP Server window if you want all 150 tools exposed.
+- The package defaults to the `core` MCP tool profile to reduce tool-list noise for AI clients. `core` currently exposes 32 high-signal tools centered on `execute_code`, play mode control, input simulation, screenshots, performance inspection, logs, compilation checks, structured object location and component editing, editor selection / prefab-stage state, and `execute_menu_item` as a low-friction fallback. Switch to `full` in the MCP Server window if you want all 154 tools exposed.
 - `execute_code` safety checks and the stricter filesystem guard are enabled by default from **Funplay > MCP Settings**. The guard blocks obvious destructive snippets, broad `System.IO` writes, raw file streams, and absolute/user/system/traversal paths, but it is not a complete sandbox. Clients may still override the default per call with the optional `safety_checks` argument.
 - Plugin debug logging is off by default and can also be enabled from **Funplay > MCP Settings**. Warnings and errors are always written to the Unity Console.
 - All exposed MCP tools run directly. There is no extra approval toggle.
@@ -250,13 +250,13 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Default Safety Checks** — `execute_code` now has persistent default-on safety toggles, including a stricter filesystem guard for clients that do not expose per-call arguments clearly
 - **Play Mode Automation** — Enter play mode, simulate keyboard/mouse input, capture screenshots, inspect logs, and validate behavior from the same MCP session
 - **Project Context Built In** — Exposes live resources for project state, active scene, selection, compilation, console output, and MCP interaction history
-- **Focused by Default, Full When Needed** — `core` exposes a compact high-signal toolset; `full` exposes all 150 tools
+- **Focused by Default, Full When Needed** — `core` exposes a compact high-signal toolset; `full` exposes all 154 tools
 - **Single Unity Package** — No extra approval UI, no external daemon to click through, and no Python requirement for the Unity-side plugin itself
 - **Extensible** — Add custom tools with attribute-based discovery, or connect Unity to external MCP services when needed
 
 ## Highlights
 
-- **150 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 35 modules
+- **154 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 35 modules
 - **Structured Returns + `instanceId` Chaining** — Tools return `{success, message, data}` JSON with stable `instanceId` fields so agents can chain `by_id` calls reliably instead of re-resolving by name
 - **`IFunplayCommand` for `execute_code`** — New snippet template with auto-Undo (`ctx.RegisterObjectCreation/Modification/DestroyObject`), structured logs (`ctx.Log/LogWarning/LogError`), and a tracked changelog returned to the agent
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
@@ -326,7 +326,7 @@ The table below compares this repository with Unity Technologies' official `com.
 | License | MIT, open source | Unity Terms of Service, proprietary |
 | Deployment | Local HTTP MCP server in Editor, no cloud | Editor + native Relay subprocess + Unity Cloud backend |
 | Billing | Free, user brings their own AI client | Credits-based (Unity Dashboard) |
-| Tool exposure | 150 tools across 35 modules, `core` (32) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
+| Tool exposure | 154 tools across 35 modules, `core` (32) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
 | Generic escape hatch | `execute_code` — Roslyn-first in-memory compile, `IFunplayCommand` + Undo, no sandbox (client-side approval) | `RunCommand` — namespace blacklist sandbox |
 | Play mode validation | Full loop: enter / simulate input / capture / read logs / exit | Enter/Exit only; no input simulation |
 | Asset generators | Not built-in (compose external APIs via `execute_code`) | Native Image / Mesh / PBR / Sound / Animation generators |
@@ -339,14 +339,14 @@ For a long-form comparison of the two approaches see [Funplay Unity MCP vs Unity
 
 The current open-source package exposes four high-value capability layers:
 
-- **Tools** — 150 total tools in `full`, 32 focused tools in `core`
+- **Tools** — 154 total tools in `full`, 32 focused tools in `core`
 - **Primary execution** — `execute_code` for rich editor/runtime orchestration
 - **Prompts** — workflow prompts like `fix_compile_errors`, `runtime_validation`, and `create_playable_prototype`
 - **Resources** — project context, scene summaries, selection state, compile errors, console errors, MCP interaction history, plus resource templates for scene objects, components, and asset paths
 
 ## Built-in Tools
 
-Funplay MCP for Unity currently ships with **150 tool functions** across 35 modules:
+Funplay MCP for Unity currently ships with **154 tool functions** across 35 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -361,7 +361,7 @@ Funplay MCP for Unity currently ships with **150 tool functions** across 35 modu
 | **Mesh** | `get_mesh_info` |
 | **Materials** | `get_material_properties`, `set_material_property` |
 | **Files** | `read_file`, `write_file`, `search_files`, `list_directory`, `exists` |
-| **Scene** | `get_scene_info`, `list_scenes`, `save_scene`, `open_scene`, `create_new_scene`, `enter_play_mode`, `exit_play_mode`, `set_time_scale`, `get_time_scale` |
+| **Scene** | `get_scene_info`, `list_scenes`, `load_scene_additive`, `unload_scene`, `list_dirty_scenes`, `save_all_scenes`, `save_scene`, `open_scene`, `create_new_scene`, `enter_play_mode`, `exit_play_mode`, `set_time_scale`, `get_time_scale` |
 | **Physics** | `physics_raycast`, `physics_overlap`, `physics2d_overlap_point` |
 | **Particles** | `particle_control` |
 | **Lighting** | `get_lighting_settings`, `set_lighting_settings`, `bake_lightmaps` |
@@ -418,7 +418,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (protocol handling)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (reflection-based invocation)
-                └─ Tool Functions (150 built-in tools across 35 modules)
+                └─ Tool Functions (154 built-in tools across 35 modules)
 ```
 
 ```

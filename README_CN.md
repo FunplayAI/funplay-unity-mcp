@@ -23,7 +23,7 @@
 
 Funplay MCP for Unity 是一个采用 MIT 协议的 Unity 编辑器 MCP 服务器，让 Claude Code、Cursor、LM Studio、Windsurf、Codex、VS Code Copilot 等 AI 助手直接操作正在运行的 Unity 项目。
 
-一句话描述你的游戏 — AI 助手通过 Funplay MCP for Unity 的 150 个内置工具自动创建场景、编写脚本、验证运行态、模拟输入、分析性能并完成编辑器自动化，把所有逻辑串联起来。
+一句话描述你的游戏 — AI 助手通过 Funplay MCP for Unity 的 154 个内置工具自动创建场景、编写脚本、验证运行态、模拟输入、分析性能并完成编辑器自动化，把所有逻辑串联起来。
 
 > *"做一个贪吃蛇游戏，10x10 网格，食物随机生成，计分 UI，游戏结束界面"*
 >
@@ -240,7 +240,7 @@ url = "http://127.0.0.1:8765/"
 - 这是一个 **仅限 Editor** 的包，不会向最终构建产物添加运行时代码。
 - MCP Server 默认从 `http://127.0.0.1:8765/` 启动。
 - 本地 MCP Server 配置保存在 `UserSettings/FunplayMcpSettings.json`。
-- 插件默认使用 `core` MCP 工具暴露配置，减少 AI 客户端的工具噪音；`core` 当前暴露 32 个高频工具，覆盖 `execute_code`、运行模式控制、输入模拟、截图、性能检查、日志、编译检查、结构化对象定位与组件编辑、编辑器选中与 prefab stage 状态读写，以及 `execute_menu_item` 兜底入口。如果你需要完整工具集，可在 MCP Server 窗口切换到 `full`，暴露全部 150 个工具。
+- 插件默认使用 `core` MCP 工具暴露配置，减少 AI 客户端的工具噪音；`core` 当前暴露 32 个高频工具，覆盖 `execute_code`、运行模式控制、输入模拟、截图、性能检查、日志、编译检查、结构化对象定位与组件编辑、编辑器选中与 prefab stage 状态读写，以及 `execute_menu_item` 兜底入口。如果你需要完整工具集，可在 MCP Server 窗口切换到 `full`，暴露全部 154 个工具。
 - `execute_code` safety checks 和更严格的文件系统 guard 现在可在 **Funplay > MCP Settings** 设置默认值，默认开启；它会阻止明显破坏性片段、宽泛的 `System.IO` 写入、原始文件流、绝对路径、用户/系统目录路径和 `../` 穿越路径，但它不是完整沙箱。客户端仍可在单次调用中用可选 `safety_checks` 参数显式覆盖。
 - 插件 debug 日志默认关闭，也可在 **Funplay > MCP Settings** 中开启；Warning 和 Error 始终会输出到 Unity Console。
 - 所有已暴露的 MCP 工具都会直接执行，不再提供额外的 approval 开关。
@@ -252,13 +252,13 @@ url = "http://127.0.0.1:8765/"
 - **默认安全检查** — `execute_code` 现在有持久化、默认开启的 safety toggle，并包含更严格的文件系统 guard，适合 LM Studio 这类不明显暴露单次参数的客户端
 - **Play Mode 自动化闭环** — 进入运行模式、模拟键鼠输入、截图、查看日志、验证行为都能在同一 MCP 会话里完成
 - **内建项目上下文** — 直接提供项目状态、当前场景、选择对象、编译错误、控制台输出和 MCP 交互记录资源
-- **默认聚焦，必要时全量** — 默认 `core` 工具集更利于 AI 选工具，需要时可切到 `full` 暴露全部 150 个工具
+- **默认聚焦，必要时全量** — 默认 `core` 工具集更利于 AI 选工具，需要时可切到 `full` 暴露全部 154 个工具
 - **单 Unity 包落地** — 不需要额外 approval 开关，Unity 侧也不依赖单独 Python 守护进程
 - **可扩展** — 支持 Attribute 发现自定义工具，也支持连接外部 MCP 服务
 
 ## 核心特性
 
-- **150 个内置工具** — 覆盖场景编辑、脚本、资产、运行态控制、截图、性能分析、Prompts、Resources、结构化对象定位、SerializedObject 组件编辑、编辑器状态读写、菜单项兜底以及编辑器自动化，共 35 个模块
+- **154 个内置工具** — 覆盖场景编辑、脚本、资产、运行态控制、截图、性能分析、Prompts、Resources、结构化对象定位、SerializedObject 组件编辑、编辑器状态读写、菜单项兜底以及编辑器自动化，共 35 个模块
 - **结构化返回 + `instanceId` 链式调用** — 工具返回 `{success, message, data}` JSON 并附带稳定的 `instanceId`，agent 后续直接 `by_id` 调用，不再受重名困扰
 - **`execute_code` 的 `IFunplayCommand` 模板** — 新模板自动 Undo（`ctx.RegisterObjectCreation/Modification/DestroyObject`）、结构化日志（`ctx.Log/LogWarning/LogError`），并把改动列表回传给 agent
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
@@ -328,7 +328,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 | 协议 / License | MIT 开源 | Unity Terms of Service，私有 |
 | 部署 | Editor 内嵌 HTTP MCP server，纯本地 | Editor + 原生 Relay 子进程 + Unity Cloud 后端 |
 | 计费 | 免费，用户自带 AI 客户端 | Credits 点数制（Unity Dashboard）|
-| 工具暴露 | 150 工具 / 35 模块，`core` (32) / `full` profile | ~15 个 MCP 工具（多数为 `Manage*` 大粒度族）|
+| 工具暴露 | 154 工具 / 35 模块，`core` (32) / `full` profile | ~15 个 MCP 工具（多数为 `Manage*` 大粒度族）|
 | 通用逃生口 | `execute_code` — Roslyn 优先内存编译、`IFunplayCommand` + Undo、无沙箱（客户端层审批）| `RunCommand` — 命名空间黑名单沙箱 |
 | Play Mode 验证 | 完整闭环：进入 / 模拟输入 / 截图 / 读日志 / 退出 | 仅进入/退出，无输入模拟 |
 | 资产生成器 | 不内建（通过 `execute_code` 组合外部 API）| 内建 Image / Mesh / PBR / Sound / Animation 五类生成器 |
@@ -341,14 +341,14 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 
 当前开源包有四层高价值能力：
 
-- **Tools** — `full` 下共 150 个工具，`core` 下 32 个高频工具
+- **Tools** — `full` 下共 154 个工具，`core` 下 32 个高频工具
 - **Primary execution** — `execute_code` 用于复杂编辑器/运行态编排
 - **Prompts** — 包括 `fix_compile_errors`、`runtime_validation`、`create_playable_prototype` 等工作流 Prompt
 - **Resources** — 项目上下文、场景摘要、选择状态、编译错误、控制台错误、MCP 交互记录，以及按对象/组件/资源路径展开的模板资源
 
 ## 内置工具
 
-Funplay MCP for Unity 当前提供 **150 个工具函数**，覆盖 35 个模块：
+Funplay MCP for Unity 当前提供 **154 个工具函数**，覆盖 35 个模块：
 
 | 分类 | 工具 |
 |------|------|
@@ -363,7 +363,7 @@ Funplay MCP for Unity 当前提供 **150 个工具函数**，覆盖 35 个模块
 | **网格** | `get_mesh_info` |
 | **材质属性** | `get_material_properties`, `set_material_property` |
 | **文件** | `read_file`, `write_file`, `search_files`, `list_directory`, `exists` |
-| **场景** | `get_scene_info`, `list_scenes`, `save_scene`, `open_scene`, `create_new_scene`, `enter_play_mode`, `exit_play_mode`, `set_time_scale`, `get_time_scale` |
+| **场景** | `get_scene_info`, `list_scenes`, `load_scene_additive`, `unload_scene`, `list_dirty_scenes`, `save_all_scenes`, `save_scene`, `open_scene`, `create_new_scene`, `enter_play_mode`, `exit_play_mode`, `set_time_scale`, `get_time_scale` |
 | **物理查询** | `physics_raycast`, `physics_overlap`, `physics2d_overlap_point` |
 | **粒子系统** | `particle_control` |
 | **灯光** | `get_lighting_settings`, `set_lighting_settings`, `bake_lightmaps` |
@@ -420,7 +420,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (协议处理)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (反射式调用)
-                └─ Tool Functions (150 个内置工具，35 个模块)
+                └─ Tool Functions (154 个内置工具，35 个模块)
 ```
 
 ```
