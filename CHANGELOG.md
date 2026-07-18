@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.3] - 2026-07-18
+
 ### Added
 - Added additive scene lifecycle tools: `load_scene_additive`, `unload_scene`, `list_dirty_scenes`, and `save_all_scenes`. They validate project scene paths, avoid duplicate loads and save dialogs, protect dirty/last-loaded scenes, require explicit confirmation before saving multiple dirty scenes, reject ambiguous scene names, and return post-operation scene state.
 - `execute_code` now returns structured CS0104/CS0433 ambiguity details. CS0104 calls can pass ordered `preferred_namespaces` to apply a type alias and retry once, with the original diagnostic line mapping preserved.
@@ -16,9 +18,10 @@
 - Scene lifecycle tools now compile on Unity 6.5 and expose the editor's strongly typed scene handles as stable numeric values in tool responses.
 - Auto-detected purely numeric GameObject targets now try instance ID first and fall back to an exact object-name lookup, so objects named `2048`, `512`, and similar values remain reachable without weakening explicit `find_method=by_id` calls.
 - Component property writes now return authoritative post-write values for serialized and reflection-backed members, including per-target `newValue`/`applied` data in batch responses. Mutating tools also reject conflicting target selectors, malformed boolean values, and empty property maps without modifying scene objects.
+- Profiler sessions now start every persistent `ProfilerRecorder` instead of leaving them idle. Editor rendering counters use current Game View `UnityStats` values rather than misleading recorder zeroes, while unsupported, stopped, and warming-up states are reported explicitly; Unity 6.4+ marks only the removed Batches statistic unavailable.
 
 ### Contributors
-- Thanks @dehuaichendragonplus for numeric target routing in #38, structured tool responses in #39, type-ambiguity diagnostics in #40, additive scene lifecycle work in #41, and multi-target editing and component write-back work in #42.
+- Thanks @dehuaichendragonplus for trustworthy Editor profiler counter reporting in #37, numeric target routing in #38, structured tool responses in #39, type-ambiguity diagnostics in #40, additive scene lifecycle work in #41, and multi-target editing and component write-back work in #42.
 
 ## [0.5.2] - 2026-07-16
 
