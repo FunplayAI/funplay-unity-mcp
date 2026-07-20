@@ -343,7 +343,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 
 - **Tools** — `full` 下共 154 个工具，`core` 下 32 个高频工具
 - **Primary execution** — `execute_code` 用于复杂编辑器/运行态编排
-- **Prompts** — 包括 `fix_compile_errors`、`runtime_validation`、`create_playable_prototype` 等工作流 Prompt
+- **Prompts** — 参数化工作流 Prompt:`edit_prefab_safely`、`verify_compilation`、`enter_play_and_recover`、`wire_serialized_references`、`create_playable_prototype`。项目可在根目录放 `mcp-prompts/*.md` 注册专属 Prompt(front-matter 定义 `name`/`description`/`arguments`,正文模板用 `{arg}` 占位符)
 - **Resources** — 项目上下文、场景摘要、选择状态、编译错误、控制台错误、MCP 交互记录，以及按对象/组件/资源路径展开的模板资源
 
 ## 内置工具

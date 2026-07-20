@@ -86,6 +86,8 @@ namespace Funplay.Editor.MCP.Server
                     ["name"] = _serverName,
                     ["version"] = _serverVersion
                 },
+                // Cross-client usage guidance (MCP `instructions`); see MCPServerInstructions.
+                ["instructions"] = MCPServerInstructions.Text,
                 ["funplay"] = new Dictionary<string, object>
                 {
                     ["projectIdentity"] = _projectIdentity,
