@@ -124,19 +124,26 @@ namespace Funplay.Editor.Tools.Builtins
         }
 
         [Description("Save the currently open prefab stage back to its .prefab asset, without closing the stage. " +
-                     "Use after editing prefab contents via component tools or execute_code inside an open prefab stage.")]
+                     "Use after editing prefab contents via component tools or execute_code inside an open prefab stage. " +
+                     "WARNING: this re-serializes the WHOLE in-memory prefab graph, so layout groups / ContentSizeFitter / " +
+                     "TMP auto-size / Spine components that recompute in the open stage get their transient values frozen into " +
+                     "the asset (RectTransform/font freezing, Spine skeletonDataAsset zeroing). When such components are present " +
+                     "the message carries a ⚠ warning; for single-field edits prefer set_prefab_property (no stage, no corruption).")]
         public static string SavePrefabStage()
         {
             var stage = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage();
             if (stage == null)
                 return ToolResultFormatter.Error("NO_PREFAB_STAGE_OPEN", new { hint = "Call open_prefab_stage first." });
 
+            // Detect corruption-prone drivers BEFORE the wholesale re-serialize so we can warn the caller.
+            var warning = BuildStageSaveWarning(stage.prefabContentsRoot);
+
             var saved = PrefabUtility.SaveAsPrefabAsset(stage.prefabContentsRoot, stage.assetPath, out var success);
             if (!success || saved == null)
                 return ToolResultFormatter.Error("PREFAB_STAGE_SAVE_FAILED", new { stage.assetPath });
 
             stage.ClearDirtiness();
-            return $"Prefab stage saved: {stage.assetPath}";
+            return $"Prefab stage saved: {stage.assetPath}" + warning;
         }
 
         [Description("Close the currently open prefab stage and return to the main stage. By default pending edits are " +
@@ -152,8 +159,10 @@ namespace Funplay.Editor.Tools.Builtins
             var assetPath = stage.assetPath;
             var wasDirty = stage.scene.isDirty;
 
+            var warning = "";
             if (save && wasDirty)
             {
+                warning = BuildStageSaveWarning(stage.prefabContentsRoot);
                 PrefabUtility.SaveAsPrefabAsset(stage.prefabContentsRoot, assetPath, out var success);
                 if (!success)
                     return ToolResultFormatter.Error("PREFAB_STAGE_SAVE_FAILED", new { assetPath });
@@ -165,7 +174,49 @@ namespace Funplay.Editor.Tools.Builtins
             UnityEditor.SceneManagement.StageUtility.GoToMainStage();
 
             var action = !wasDirty ? "no pending edits" : (save ? "edits saved" : "edits discarded");
-            return $"Prefab stage closed: {assetPath} ({action})";
+            return $"Prefab stage closed: {assetPath} ({action})" + warning;
+        }
+
+        /// <summary>
+        /// Scan an open prefab stage's root for components that recompute in edit mode and would have
+        /// their transient state frozen by the wholesale SaveAsPrefabAsset — UGUI layout drivers
+        /// (LayoutGroup/ContentSizeFitter), Spine components (skeletonDataAsset zeroing / mesh reload),
+        /// and auto-sizing TMP text (fontSize freeze). Returns "" when none are present, else a "\n⚠ …"
+        /// warning line appended to the tool message so the caller knows to git-diff / prefer
+        /// set_prefab_property. Detection is name/interface based (no UI/TMP/Spine assembly dependency).
+        /// </summary>
+        private static string BuildStageSaveWarning(GameObject root)
+        {
+            if (root == null) return "";
+            bool layout = false, spine = false, tmpAuto = false;
+            foreach (var c in root.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                var tp = c.GetType();
+                if (!layout && System.Array.Exists(tp.GetInterfaces(),
+                        i => i.Name == "ILayoutController" || i.Name == "ILayoutGroup" || i.Name == "ILayoutSelfController"))
+                    layout = true;
+                if (!spine && tp.Namespace != null && tp.Namespace.StartsWith("Spine"))
+                    spine = true;
+                if (!tmpAuto && (tp.Name == "TextMeshProUGUI" || tp.Name == "TextMeshPro"))
+                {
+                    var pi = tp.GetProperty("enableAutoSizing");
+                    if (pi != null && pi.PropertyType == typeof(bool) && pi.CanRead)
+                    {
+                        try { if ((bool)pi.GetValue(c)) tmpAuto = true; } catch { }
+                    }
+                }
+                if (layout && spine && tmpAuto) break;
+            }
+            if (!layout && !spine && !tmpAuto) return "";
+
+            var kinds = new System.Collections.Generic.List<string>();
+            if (layout) kinds.Add("layout (RectTransform freeze)");
+            if (spine) kinds.Add("Spine (skeletonDataAsset zeroing)");
+            if (tmpAuto) kinds.Add("TMP auto-size (fontSize freeze)");
+            return "\n⚠ WARNING: this save re-serialized the whole prefab; components that recompute in the stage may have " +
+                   "overwritten unrelated fields — " + string.Join(", ", kinds) +
+                   ". For single-field edits use set_prefab_property (asset-level, changes only your field). Review with git diff.";
         }
 
         private static Vector3 ParseVector3(string value)

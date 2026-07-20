@@ -180,6 +180,105 @@ namespace Funplay.Editor.Tools.Builtins
                 });
         }
 
+        [Description("Set ONE serialized field on a component inside a .prefab ASSET directly, WITHOUT opening a prefab stage. " +
+                     "SAFE alternative to the open_prefab_stage -> set_component_property -> save_prefab_stage three-piece for " +
+                     "single-field edits: no live preview scene/Canvas is created, so layout groups / ContentSizeFitter / TMP " +
+                     "auto-size / Spine SkeletonGraphic never recompute and mutate the graph. The three-piece's wholesale " +
+                     "SaveAsPrefabAsset re-serializes those transient recomputes -- freezing RectTransform/font values and even " +
+                     "zeroing Spine skeletonDataAsset references; this path changes ONLY the field you set. Value format matches " +
+                     "set_component_property (JSON literal; Object references via {\"fileID\":<instanceId>} or " +
+                     "{\"assetPath\":\"Assets/...\"}). Echoes the post-write serialized value ('newValue'). For structural edits " +
+                     "(add/reparent components) use the prefab stage. Note: any save round-trips Unity serialization, so a prefab " +
+                     "authored by an older Unity/TMP version may pick up harmless serialization-format upgrades.")]
+        public static object SetPrefabProperty(
+            [ToolParam("Path to the .prefab asset (e.g. 'Assets/Prefabs/UIFoo.prefab')")] string prefab_path = null,
+            [ToolParam("Component type name (e.g. 'TextMeshProUGUI', 'UnityEngine.UI.Image')")] string component = null,
+            [ToolParam("Property/field name to set")] string property = null,
+            [ToolParam("New value as JSON literal")] string value = null,
+            [ToolParam("Hierarchy path of the target GameObject inside the prefab, '/'-separated, relative to and EXCLUDING the root (empty = the prefab root)", Required = false)] string game_object_path = null)
+        {
+            if (string.IsNullOrWhiteSpace(property))
+                return Response.Error("PROPERTY_REQUIRED");
+            if (value == null)
+                return Response.Error("VALUE_REQUIRED");
+
+            JToken token;
+            try { token = ParseJsonValue(value); }
+            catch (Exception ex) { return Response.Error("INVALID_VALUE_JSON", new { message = ex.Message }); }
+
+            var resolved = ResolvePrefabComponent(prefab_path, game_object_path, component);
+            if (resolved.Error != null) return resolved.Error;
+
+            var props = new JObject { [property] = token };
+            var results = ComponentSerializer.WriteProperties(resolved.Component, props,
+                $"Set {property} on {resolved.Component.GetType().Name} (prefab asset)");
+
+            var first = results.Count > 0 ? results[0] : null;
+            if (first == null || !first.Success)
+                return Response.Error("PROPERTY_SET_FAILED", new { property, error = first?.Error ?? "unknown" });
+
+            // Persist ONLY this prefab asset (not the whole project) — the edit was made on the
+            // loaded asset sub-object in memory; nothing recomputed it, so only the intended field changed.
+            AssetDatabase.SaveAssetIfDirty(resolved.Root);
+
+            var readBack = ReadBackFields(resolved.Component, new[] { property });
+            return Response.Success($"Set {resolved.Component.GetType().Name}.{property} in {prefab_path}.",
+                new
+                {
+                    prefab_path,
+                    gameObject = resolved.Component.gameObject.name,
+                    componentType = resolved.Component.GetType().Name,
+                    property,
+                    newValue = readBack.TryGetValue(property, out var nv) ? nv : null
+                });
+        }
+
+        [Description("Set MULTIPLE serialized fields on one component inside a .prefab ASSET directly, WITHOUT opening a prefab " +
+                     "stage. Same safety as set_prefab_property (no live scene => no layout/TMP/Spine recompute corruption). Pass " +
+                     "`properties` as a JSON object, e.g. {\"m_LocalizationID\": 42, \"m_Color\": {\"a\": 0.5}}. Returns per-field " +
+                     "success plus the post-write serialized values ('applied'). For structural edits use the prefab stage.")]
+        public static object SetPrefabProperties(
+            [ToolParam("Path to the .prefab asset")] string prefab_path = null,
+            [ToolParam("Component type name")] string component = null,
+            [ToolParam("JSON object of property→value pairs")] string properties = null,
+            [ToolParam("Hierarchy path of the target GameObject inside the prefab ('/'-separated, excluding root; empty = root)", Required = false)] string game_object_path = null)
+        {
+            if (string.IsNullOrWhiteSpace(properties))
+                return Response.Error("PROPERTIES_REQUIRED");
+
+            JObject jobj;
+            try { jobj = JObject.Parse(properties); }
+            catch (Exception ex) { return Response.Error("INVALID_PROPERTIES_JSON", new { message = ex.Message }); }
+            if (!jobj.HasValues)
+                return Response.Error("PROPERTIES_REQUIRED",
+                    new { hint = "The properties JSON object has no fields to set." });
+
+            var resolved = ResolvePrefabComponent(prefab_path, game_object_path, component);
+            if (resolved.Error != null) return resolved.Error;
+
+            var results = ComponentSerializer.WriteProperties(resolved.Component, jobj,
+                $"Set properties on {resolved.Component.GetType().Name} (prefab asset)");
+
+            int success = results.Count(r => r.Success);
+            int fail = results.Count - success;
+            if (success > 0)
+                AssetDatabase.SaveAssetIfDirty(resolved.Root);
+
+            var applied = ReadBackFields(resolved.Component, results.Where(r => r.Success).Select(r => r.Field));
+            return Response.Success(
+                $"Applied {success} of {results.Count} field(s) on {resolved.Component.GetType().Name} in {prefab_path}.",
+                new
+                {
+                    prefab_path,
+                    gameObject = resolved.Component.gameObject.name,
+                    componentType = resolved.Component.GetType().Name,
+                    successCount = success,
+                    failCount = fail,
+                    fields = results,
+                    applied
+                });
+        }
+
         // -------- Helpers --------
 
         /// <summary>
@@ -436,6 +535,57 @@ namespace Funplay.Editor.Tools.Builtins
                 Error = Response.Error("COMPONENT_NOT_FOUND_ON_TARGET",
                     new { target = go.name, component = componentName, available })
             };
+        }
+
+        private struct ResolvedPrefabComponent
+        {
+            public GameObject Root;      // the prefab asset root (for SaveAssetIfDirty)
+            public Component Component;
+            public object Error;
+        }
+
+        // Resolve a component inside a .prefab ASSET (loaded, not instantiated into a scene) by
+        // hierarchy path + type name. No PrefabStage / preview scene is opened, so nothing recomputes
+        // the graph — the caller's SerializedObject write is the only mutation.
+        private static ResolvedPrefabComponent ResolvePrefabComponent(
+            string prefabPath, string gameObjectPath, string componentName)
+        {
+            if (string.IsNullOrWhiteSpace(prefabPath))
+                return new ResolvedPrefabComponent { Error = Response.Error("PREFAB_PATH_REQUIRED") };
+
+            var root = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (root == null)
+                return new ResolvedPrefabComponent { Error = Response.Error("PREFAB_NOT_FOUND",
+                    new { prefab_path = prefabPath, hint = "Path must point to an existing .prefab asset." }) };
+
+            GameObject go;
+            if (string.IsNullOrEmpty(gameObjectPath) || gameObjectPath == "/")
+            {
+                go = root;
+            }
+            else
+            {
+                var t = root.transform.Find(gameObjectPath.Trim('/'));
+                if (t == null)
+                    return new ResolvedPrefabComponent { Root = root, Error = Response.Error("PREFAB_GAMEOBJECT_NOT_FOUND",
+                        new { game_object_path = gameObjectPath, prefab_root = root.name,
+                              hint = "'/'-separated child names relative to (and excluding) the prefab root." }) };
+                go = t.gameObject;
+            }
+
+            if (string.IsNullOrWhiteSpace(componentName))
+                return new ResolvedPrefabComponent { Root = root, Error = Response.Error("COMPONENT_REQUIRED") };
+
+            var comp = ObjectsHelper.ResolveComponentOnGo(go, componentName);
+            if (comp == null)
+            {
+                var available = string.Join(", ", go.GetComponents<Component>()
+                    .Where(c => c != null).Select(c => c.GetType().Name));
+                return new ResolvedPrefabComponent { Root = root, Error = Response.Error("COMPONENT_NOT_FOUND_ON_TARGET",
+                    new { game_object = go.name, component = componentName, available }) };
+            }
+
+            return new ResolvedPrefabComponent { Root = root, Component = comp };
         }
 
         // Accept loose values: bare numbers/booleans, quoted strings, JSON objects/arrays.

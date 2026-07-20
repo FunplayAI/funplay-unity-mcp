@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Added `set_prefab_property` and `set_prefab_properties`: edit a component field (or fields) inside a `.prefab` **asset** in place, WITHOUT opening a prefab stage. Because no live preview scene/Canvas is created, edit-mode drivers (UGUI `LayoutGroup`/`ContentSizeFitter`, TMP auto-size, Spine `SkeletonGraphic`) never recompute and mutate the graph, so only the field you set changes. This is the safe, API-correct alternative to `open_prefab_stage` → `set_component_property` → `save_prefab_stage` for single-field edits; value format and Object-reference handling match `set_component_property`, and the response echoes the post-write value.
+
+### Fixed
+- `save_prefab_stage` / `close_prefab_stage` now warn when the open prefab contains components that recompute in a stage (UGUI layout drivers, auto-sizing TMP text, or Spine components). `PrefabUtility.SaveAsPrefabAsset` re-serializes the WHOLE in-memory graph, so those transient recomputes get frozen into the asset — corrupting RectTransform/font values and, for Spine, zeroing `skeletonDataAsset` to `{fileID: 0}` (runtime animation lost). The save still proceeds (structural edits need the stage) but the message carries a ⚠ warning listing the risk kinds and steering single-field edits to `set_prefab_property`.
+
 ## [0.5.3] - 2026-07-18
 
 ### Added

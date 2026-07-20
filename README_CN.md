@@ -368,7 +368,7 @@ Funplay MCP for Unity 当前提供 **154 个工具函数**，覆盖 35 个模块
 | **粒子系统** | `particle_control` |
 | **灯光** | `get_lighting_settings`, `set_lighting_settings`, `bake_lightmaps` |
 | **Timeline** | `director_evaluate` |
-| **预制体** | `create_prefab`, `instantiate_prefab`, `unpack_prefab`, `open_prefab_stage`, `save_prefab_stage`, `close_prefab_stage` |
+| **预制体** | `create_prefab`, `instantiate_prefab`, `unpack_prefab`, `open_prefab_stage`, `save_prefab_stage`, `close_prefab_stage`, `set_prefab_property`, `set_prefab_properties` |
 | **ScriptableObject** | `create_scriptable_object`, `get_scriptable_object`, `set_scriptable_object_properties` |
 | **UI** | `create_canvas`, `create_button`, `create_text`, `create_image`, `raycast_at_point` |
 | **动画** | `create_animation_clip`, `create_animator_controller`, `assign_animator`, `get_animator_state`, `set_animator_parameter`, `play_animator_state` |
