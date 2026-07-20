@@ -341,7 +341,7 @@ The current open-source package exposes four high-value capability layers:
 
 - **Tools** — 154 total tools in `full`, 32 focused tools in `core`
 - **Primary execution** — `execute_code` for rich editor/runtime orchestration
-- **Prompts** — workflow prompts like `fix_compile_errors`, `runtime_validation`, and `create_playable_prototype`
+- **Prompts** — parameterized workflow prompts: `edit_prefab_safely`, `verify_compilation`, `enter_play_and_recover`, `wire_serialized_references`, `create_playable_prototype`. Projects can add their own by dropping `mcp-prompts/*.md` files in the project root (front-matter `name`/`description`/`arguments`, body template with `{arg}` placeholders)
 - **Resources** — project context, scene summaries, selection state, compile errors, console errors, MCP interaction history, plus resource templates for scene objects, components, and asset paths
 
 ## Built-in Tools

@@ -184,7 +184,9 @@ namespace Funplay.Editor.MCP.Server
                 MCPToolListChangeNotifier.CheckForChanges(toolExporter);
                 var executionBridge = new MCPExecutionBridge(_threadHelper, _settings, _stateController, _invoker, InteractionLog);
                 resourceProvider = new MCPResourceProvider(_contextBuilder, _applicationPaths, InteractionLog);
-                var promptProvider = new MCPPromptProvider(Application.productName, _applicationPaths.ProjectPath);
+                // Pass the resource provider so prompts can embed live read-only resources
+                // (current compile errors, selection, scene) into their workflow messages.
+                var promptProvider = new MCPPromptProvider(Application.productName, _applicationPaths.ProjectPath, resourceProvider);
                 var requestHandler = new MCPRequestHandler(
                     toolExporter,
                     executionBridge,

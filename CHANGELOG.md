@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- Projects can register their OWN MCP prompts without forking the package: drop `mcp-prompts/*.md` files in the project root. Each file has a `---` front-matter fence (`name`, `description`, `arguments: a(required), b`) followed by a body template referencing `{arg}` placeholders. They appear in `prompts/list` alongside the built-ins (reserved built-in names cannot be shadowed) and interpolate the caller's arguments in `prompts/get`. Parsing is dependency-free; malformed files are skipped with a logged warning rather than being fatal. This keeps generic workflows in the package and project-specific workflows (activity/build/port recipes) in the project.
+- Reworked the built-in prompts into parameterized workflow templates: `edit_prefab_safely`, `verify_compilation`, `enter_play_and_recover`, `wire_serialized_references`, `create_playable_prototype`. Each declares real `arguments` (required ones enforced in `prompts/get`) and expands into an ordered sequence of actual tool calls with the caller's arguments interpolated, plus a Guidance section on that workflow's pitfalls — replacing the previous zero-argument prompts that only restated their description. Prompts that act on live state also embed the relevant read-only resource inline (`verify_compilation` → current compilation errors, `wire_serialized_references` → current selection, `create_playable_prototype` → active scene), so the model sees that state without an extra fetch (best-effort; skipped if unavailable).
+- The MCP `initialize` result now returns server-level `instructions` — cross-client usage guidance for driving the Unity Editor (structured `{success,…}` envelopes, never hand-editing serialized assets, the `request_recompile`/Play Mode/domain-reload sequence, `instanceId` reuse, `group_duplicates` logs, small-payload screenshots). Unlike CLAUDE.md/AGENTS.md this reaches every MCP client, not just Claude Code.
+
 ## [0.5.3] - 2026-07-18
 
 ### Added
