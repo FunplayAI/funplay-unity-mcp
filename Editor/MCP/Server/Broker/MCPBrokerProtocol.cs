@@ -7,7 +7,11 @@ namespace Funplay.Editor.MCP.Server
         // v2: pull responses carry AcceptSseHeader (client's Accept: text/event-stream),
         //     push requests may carry ContentTypeHeader to override the client-facing
         //     response content type (used for SSE-piggybacked notifications).
-        public const int Version = 2;
+        // v3: no client-facing wire change. The broker now sweeps stale attached sessions
+        //     (crashed editors that never detached). Bumped so a pre-v3 broker still running
+        //     after a package upgrade fails the health probe and is replaced by the new one
+        //     (see MCPBrokerProcessManager.EnsureRunning's upgrade-cleanup path).
+        public const int Version = 3;
         public const string Name = "funplay-unity-mcp-broker";
         public const string HealthPath = "/_funplay/broker/health";
         public const string AttachPath = "/_funplay/broker/attach";
