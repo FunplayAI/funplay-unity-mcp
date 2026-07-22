@@ -66,7 +66,20 @@ namespace Funplay.Editor.MCP.Server
                         var shutdownAccepted = SendShutdown(existing.Port, existing.Token);
                         WaitForExit(existing.Pid, 2500);
                         if (shutdownAccepted)
+                        {
                             KillVerifiedProcess(existing.Pid);
+
+                            // The port frees a moment after the process exits (socket
+                            // teardown / TIME_WAIT). When the replacement reuses the same
+                            // port -- e.g. a protocol bump on a package upgrade forces this
+                            // broker to be replaced in place -- wait for it to actually free
+                            // so we bind it on this same call instead of bailing below.
+                            if (existing.Port == port)
+                            {
+                                for (var i = 0; i < 30 && IsTcpPortOpen(port); i++)
+                                    Thread.Sleep(100);
+                            }
+                        }
                     }
 
                     DeletePidFile(paths.PidFilePath);
