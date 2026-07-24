@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- The MCP Server window's transport status labels now refresh after a Transport Mode switch actually completes. Switching to/from Broker Mode restarts the server asynchronously, but the header ("Running on …" / "Attached to existing server …") and the transport line ("Transport: Direct HTTP." / "Broker running …") were refreshed on a fixed 2-frame `delayCall` that raced the async broker bring-up, so they kept showing the pre-switch transport after the switch had already taken effect. The refresh now runs once the restart has settled (and still reflects a direct-HTTP fallback if broker mode fails to start).
+
 ## [0.5.3] - 2026-07-18
 
 ### Added
