@@ -84,16 +84,19 @@ namespace Funplay.Editor.MCP.Server
 
                 if (_settings.MCPServerEnabled)
                 {
-                    _ = _server.StopAsync();
-                    EditorApplication.delayCall += () => _ = _server.StartAsync();
+                    // Restart, then refresh the status labels once the transport has actually
+                    // settled. A fixed 2-frame delayCall raced the async broker bring-up, so the
+                    // labels kept showing "Transport: Direct HTTP." / "Running on ..." after a
+                    // switch to broker mode had already completed.
+                    RestartServerAndRefreshStatus();
                 }
-                else if (!enabled)
+                else
                 {
-                    MCPBrokerProcessManager.Stop();
+                    if (!enabled)
+                        MCPBrokerProcessManager.Stop();
+                    UpdateBrokerStatus();
+                    InvokeRefreshStatus();
                 }
-
-                EditorApplication.delayCall += () =>
-                    EditorApplication.delayCall += () => { UpdateBrokerStatus(); InvokeRefreshStatus(); };
             });
             transportModeDropdown.style.marginBottom = 4;
             parent.Add(transportModeDropdown);
@@ -129,6 +132,26 @@ namespace Funplay.Editor.MCP.Server
         private void InvokeRefreshStatus()
         {
             _refreshStatus?.Invoke();
+        }
+
+        // Restarts the server for a transport-mode change and refreshes the status labels only
+        // after the restart has fully settled. Awaiting captures the editor main-thread context,
+        // so the post-await refresh runs on the main thread against the real, final transport
+        // state (broker up + attached, or a direct-HTTP fallback) instead of an in-between state.
+        private async void RestartServerAndRefreshStatus()
+        {
+            try
+            {
+                await _server.StopAsync();
+                await _server.StartAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[Funplay MCP Server] Server restart after transport-mode change failed: " + ex.Message);
+            }
+
+            UpdateBrokerStatus();
+            InvokeRefreshStatus();
         }
 
         private void UpdateBrokerControls(bool enabled)
