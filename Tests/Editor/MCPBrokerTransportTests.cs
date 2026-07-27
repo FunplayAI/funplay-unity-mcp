@@ -23,6 +23,25 @@ namespace Funplay.Editor
 {
     public sealed class MCPBrokerTransportTests
     {
+        private string _priorStaleEnv;
+
+        // The staleness override is a process-wide env var inherited by launched broker
+        // processes. Capture/restore it reliably here: a [TearDown] runs even when a
+        // [UnityTest] throws, whereas an in-test try/finally can be skipped when an
+        // exception propagates out of a nested yielded IEnumerator (which would otherwise
+        // leak the override into every later test's broker).
+        [SetUp]
+        public void CaptureStaleEnvOverride()
+        {
+            _priorStaleEnv = Environment.GetEnvironmentVariable(SessionStaleEnvVar);
+        }
+
+        [TearDown]
+        public void RestoreStaleEnvOverride()
+        {
+            Environment.SetEnvironmentVariable(SessionStaleEnvVar, _priorStaleEnv);
+        }
+
         [UnityTest]
         public IEnumerator BrokerProcess_StartsWithHealthTokenAndStops()
         {
@@ -102,6 +121,43 @@ namespace Funplay.Editor
                 Assert.IsFalse(MCPBrokerProcessManager.TryProbeBroker(oldPort, oldConnection.Token, out _));
                 Assert.IsTrue(MCPBrokerProcessManager.TryProbeBroker(newPort, newConnection.Token, out var health));
                 Assert.AreEqual(newConnection.Pid, health.Pid);
+            }
+            finally
+            {
+                MCPBrokerProcessManager.Stop(paths);
+                DeleteTempRoot(root);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator BrokerProcess_ReplacesRecordedBrokerOnSamePortInOneCall()
+        {
+            var root = CreateTempRoot();
+            var paths = CreateBrokerPaths(root);
+            var port = GetFreeTcpPort();
+
+            try
+            {
+                Assume.That(!string.IsNullOrEmpty(MCPBrokerProcessManager.ResolveMono(string.Empty)),
+                    "Unity-bundled Mono is required for broker process tests.");
+
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(port, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, port, out var first));
+
+                // Force the recorded broker to fail the identity probe (bogus pid) while keeping
+                // its real token, so EnsureRunning must shut it down and relaunch on the SAME
+                // port -- the shape of an in-place replacement (e.g. a protocol bump on upgrade).
+                // Without the post-shutdown port-free wait this bails with "port in use" because
+                // the just-closed socket lingers; with it, replacement completes in one call.
+                WriteBrokerState(paths, pid: 999999, port: port, token: first.Token);
+
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(port, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, port, out var second));
+                Assert.IsTrue(MCPBrokerProcessManager.TryProbeBroker(port, second.Token, out var health));
+                Assert.AreEqual(second.Pid, health.Pid);
+                Assert.AreNotEqual(first.Pid, second.Pid, "The recorded broker must be replaced by a new process on the same port.");
             }
             finally
             {
@@ -354,6 +410,50 @@ namespace Funplay.Editor
         }
 
         [UnityTest]
+        public IEnumerator BrokerTransport_StaleSessionIsSweptSoNewRequestsFailFast()
+        {
+            var root = CreateTempRoot();
+            var paths = CreateBrokerPaths(root);
+            var port = GetFreeTcpPort();
+
+            try
+            {
+                // Shorten the staleness window for the test; the child broker inherits this env var.
+                // [SetUp]/[TearDown] capture and restore it so it cannot leak into other tests.
+                Environment.SetEnvironmentVariable(SessionStaleEnvVar, "1500");
+
+                Assume.That(!string.IsNullOrEmpty(MCPBrokerProcessManager.ResolveMono(string.Empty)),
+                    "Unity-bundled Mono is required for broker process tests.");
+
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(port, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, port, out var connection));
+
+                // Simulate an editor that attached and then CRASHED: it registers a session (so
+                // AttachedSessions is non-empty) but never pulls and never sends detach.
+                var attachTask = SendAttachAsync(port, connection.Token, Guid.NewGuid().ToString("N"));
+                yield return WaitForTask(attachTask);
+
+                // Wait past the (shortened) staleness window so the sweep evicts the dead session.
+                yield return new WaitForSecondsRealtime(3f);
+
+                // A new client request must now fail fast instead of being queued until the hold deadline.
+                var startedAt = DateTime.UtcNow;
+                var requestTask = SendToolCallAsync(port, "get_editor_state");
+                yield return WaitForTask(requestTask, 4f);
+                var elapsed = DateTime.UtcNow - startedAt;
+
+                Assert.Less(elapsed.TotalSeconds, 2.0, "A crashed (never-detached) session must be swept so new requests fail fast, not hang.");
+                Assert.That(requestTask.Result, Does.Contain("\"code\":-32001"));
+                Assert.That(requestTask.Result, Does.Contain("\"retryable\":true"));
+            }
+            finally
+            {
+                MCPBrokerProcessManager.Stop(paths);
+                DeleteTempRoot(root);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator BrokerTransport_DetachRejectsQueuedRequestsBehindInterruptedSession()
         {
             var root = CreateTempRoot();
@@ -498,6 +598,20 @@ namespace Funplay.Editor
             {
                 var response = await client.PostAsync("http://127.0.0.1:" + port + "/", content);
                 return await response.Content.ReadAsStringAsync();
+            }
+        }
+
+        private const string SessionStaleEnvVar = "FUNPLAY_BROKER_SESSION_STALE_MS";
+
+        private static async Task SendAttachAsync(int port, string token, string session)
+        {
+            using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) })
+            using (var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/_funplay/broker/attach"))
+            {
+                request.Headers.TryAddWithoutValidation(MCPBrokerProtocol.TokenHeader, token);
+                request.Headers.TryAddWithoutValidation(MCPBrokerProtocol.SessionHeader, session);
+                request.Content = new StringContent(string.Empty);
+                await client.SendAsync(request);
             }
         }
 

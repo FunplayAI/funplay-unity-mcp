@@ -17,7 +17,10 @@ namespace Funplay.UnityMcp.Broker
 {
     internal static class Program
     {
-        private const int ProtocolVersion = 2;
+        // Bumped 2 -> 3 for the stale-session sweep below (no client-facing wire change). A
+        // pre-v3 broker left running after a package upgrade fails the new health probe and is
+        // replaced with a freshly compiled one. Keep in sync with MCPBrokerProtocol.Version.
+        private const int ProtocolVersion = 3;
         private const int PullTimeoutMs = 25000;
         private const long HoldDeadlineMs = 300000;
         private const int MaxHeaderBytes = 64 * 1024;
@@ -38,12 +41,23 @@ namespace Funplay.UnityMcp.Broker
         private static readonly object Gate = new object();
         private static readonly Dictionary<long, PendingRequest> Pending = new Dictionary<long, PendingRequest>();
         private static readonly List<long> Queue = new List<long>();
-        private static readonly HashSet<string> AttachedSessions = new HashSet<string>();
+        // session -> last-seen epoch ms (attach and pull act as the heartbeat). Stale entries are
+        // swept in SweepLoop so a crashed editor -- which never sends detach -- cannot linger
+        // forever and defeat the fast-fail gate in HandleClientRequest.
+        private static readonly Dictionary<string, long> AttachedSessions = new Dictionary<string, long>();
         private static Waiter WaitingPull;
         private static TcpListener Listener;
         private static string Token;
         private static long Sequence;
         private static bool Stopping;
+
+        // A session that has not pulled within this window is treated as dead and swept.
+        // Defaults to HoldDeadlineMs: we already hold a client request up to that long waiting
+        // for a session to (re)appear, so a session silent longer than that is definitely gone.
+        // Must stay >= the longest domain-reload/compile gap, otherwise a reloading editor's
+        // session would be swept mid-reload and requests would fail instead of waiting for it.
+        // Overridable via FUNPLAY_BROKER_SESSION_STALE_MS (used by tests to shorten the window).
+        private static long SessionStaleMs = HoldDeadlineMs;
 
         private sealed class PendingRequest
         {
@@ -86,6 +100,11 @@ namespace Funplay.UnityMcp.Broker
 
             if (port <= 0)
                 port = 8765;
+
+            var staleEnv = Environment.GetEnvironmentVariable("FUNPLAY_BROKER_SESSION_STALE_MS");
+            long parsedStale;
+            if (!string.IsNullOrEmpty(staleEnv) && long.TryParse(staleEnv, out parsedStale) && parsedStale > 0)
+                SessionStaleMs = parsedStale;
 
             if (string.IsNullOrEmpty(Token))
             {
@@ -296,7 +315,7 @@ namespace Funplay.UnityMcp.Broker
         {
             lock (Gate)
             {
-                AttachedSessions.Add(session);
+                AttachedSessions[session] = NowMs();
 
                 if (WaitingPull != null)
                 {
@@ -346,7 +365,7 @@ namespace Funplay.UnityMcp.Broker
                 return;
 
             lock (Gate)
-                AttachedSessions.Add(session);
+                AttachedSessions[session] = NowMs();
         }
 
         private static void HandleDetach(string session)
@@ -355,28 +374,39 @@ namespace Funplay.UnityMcp.Broker
                 return;
 
             lock (Gate)
+                RemoveSessionLocked(session);
+        }
+
+        // Removes a session and reconciles its in-flight work. Caller must hold Gate.
+        // Used by both explicit detach and the staleness sweep in SweepLoop.
+        private static void RemoveSessionLocked(string session)
+        {
+            AttachedSessions.Remove(session);
+
+            if (WaitingPull != null && string.Equals(WaitingPull.Session, session, StringComparison.Ordinal))
             {
-                AttachedSessions.Remove(session);
+                TryWriteNoContent(WaitingPull.Stream);
+                SafeClose(WaitingPull.Client);
+                WaitingPull = null;
+            }
 
-                if (WaitingPull != null && string.Equals(WaitingPull.Session, session, StringComparison.Ordinal))
-                {
-                    TryWriteNoContent(WaitingPull.Stream);
-                    SafeClose(WaitingPull.Client);
-                    WaitingPull = null;
-                }
+            foreach (var item in Pending)
+            {
+                var pending = item.Value;
+                if (!string.Equals(pending.ActiveSession, session, StringComparison.Ordinal))
+                    continue;
 
-                foreach (var item in Pending)
-                {
-                    var pending = item.Value;
-                    if (!string.Equals(pending.ActiveSession, session, StringComparison.Ordinal))
-                        continue;
+                pending.ActiveSession = null;
+                pending.Redelivered = true;
+                if (!Queue.Contains(item.Key))
+                    Queue.Insert(0, item.Key);
+            }
 
-                    pending.ActiveSession = null;
-                    pending.Redelivered = true;
-                    if (!Queue.Contains(item.Key))
-                        Queue.Insert(0, item.Key);
-                }
-
+            // Fail still-queued (never-dispatched) requests only when no backend remains to
+            // serve them. When another session is still attached -- e.g. a dead session swept
+            // while a healthy one is connected -- leave them queued for that session to pull.
+            if (AttachedSessions.Count == 0)
+            {
                 var unavailable = new List<long>();
                 foreach (var item in Pending)
                 {
@@ -552,6 +582,23 @@ namespace Funplay.UnityMcp.Broker
                         {
                         }
                         SafeClose(pending.Client);
+                    }
+
+                    var staleSessions = new List<string>();
+                    foreach (var item in AttachedSessions)
+                    {
+                        // The session whose pull is currently parked is provably alive even if
+                        // its last-seen is old (a parked long-poll does not refresh the timestamp).
+                        if (WaitingPull != null && string.Equals(item.Key, WaitingPull.Session, StringComparison.Ordinal))
+                            continue;
+                        if (now - item.Value > SessionStaleMs)
+                            staleSessions.Add(item.Key);
+                    }
+
+                    foreach (var session in staleSessions)
+                    {
+                        Log("session " + session + " swept after " + SessionStaleMs + "ms without activity");
+                        RemoveSessionLocked(session);
                     }
                 }
             }
