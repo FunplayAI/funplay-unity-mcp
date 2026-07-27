@@ -48,6 +48,8 @@ namespace Funplay.Editor.MCP.Server
             "get_component_properties",
             "set_component_property",
             "set_component_properties",
+            "set_prefab_property",
+            "set_prefab_properties",
             // Menu items -- safer fallback than execute_code for editor actions
             "execute_menu_item"
         };

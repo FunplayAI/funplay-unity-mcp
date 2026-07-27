@@ -2,11 +2,18 @@
 
 ## Unreleased
 
+### Added
+- Added `set_prefab_property` and `set_prefab_properties` for field-level edits on regular and variant prefab assets without opening Prefab Mode. The tools require normalized `Assets/**/*.prefab` paths, reject ambiguous hierarchy/component matches unless an explicit index is supplied, write serialized fields only, save through `PrefabUtility`, synchronously reimport, and return persisted readback. Both tools are included in the default `core` profile.
+
 ### Changed
 - Broker protocol bumped to v3 (no client-facing wire change). A pre-v3 broker still running after a package upgrade now fails the new health probe and is replaced in place, so the stale-session sweep below takes effect immediately on upgrade rather than only after the next natural broker restart. `EnsureRunning` also waits for the port to be released after shutting down its own recorded broker, so a same-port in-place replacement (which a protocol bump triggers) completes in a single call instead of bailing as "port in use" while the just-closed socket lingers.
 
 ### Fixed
 - The keepalive broker now sweeps stale attached sessions instead of remembering them forever. A crashed or force-killed editor never sends a detach, so its session lingered in the broker's attached-session set indefinitely and defeated the fast-fail gate for client requests: new requests were queued and held up to the 300s hold deadline instead of failing fast once the only backend was gone. Sessions now carry a last-seen timestamp (refreshed on attach and every pull) and are swept after a staleness window (default = the 300s hold deadline, so a domain-reload/compile gap never evicts a live-but-reloading session; overridable via `FUNPLAY_BROKER_SESSION_STALE_MS`). The sweep skips the session whose long-poll is currently parked (provably alive) and reconciles a swept session's in-flight work exactly like an explicit detach — failing still-queued requests only when no backend remains, so a dead session swept while a healthy one is connected leaves those requests for the healthy session.
+- Prefab Mode save and close responses now warn when UGUI layout, TMP auto-size, or Spine components are present because edit-time derived state may be included in the full-graph save. Field-only changes can use the new asset-level setters to avoid Prefab Stage recomputation.
+
+### Contributors
+- Thanks @dehuaichendragonplus for the stale broker-session recovery work in #47 and the prefab asset-editing proposal and implementation in #45.
 
 ## [0.5.3] - 2026-07-18
 

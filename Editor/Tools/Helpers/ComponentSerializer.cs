@@ -280,6 +280,121 @@ namespace Funplay.Editor.Tools.Helpers
             return results;
         }
 
+        /// <summary>
+        /// Write serialized fields only. Each field is applied independently so a failed conversion
+        /// cannot leave a partially modified SerializedProperty pending. This deliberately excludes
+        /// the public-member reflection fallback used by live component editing.
+        /// </summary>
+        public static List<FieldResult> WriteSerializedProperties(
+            UnityEngine.Object target,
+            JObject properties,
+            string undoLabel = null)
+        {
+            var results = new List<FieldResult>();
+            if (target == null || properties == null)
+                return results;
+
+            Undo.RecordObject(target, undoLabel ?? $"Set serialized properties on {target.GetType().Name}");
+            var anySuccess = false;
+
+            foreach (var property in properties.Properties())
+            {
+                var result = new FieldResult { Field = property.Name };
+                var serializedObject = new SerializedObject(target);
+                serializedObject.Update();
+
+                try
+                {
+                    var serializedProperty = FindSerializedProperty(
+                        serializedObject,
+                        property.Name,
+                        out var findError);
+                    if (serializedProperty == null)
+                    {
+                        result.Error = findError ?? $"Serialized property '{property.Name}' not found.";
+                    }
+                    else if (TryWriteSerializedProperty(serializedProperty, property.Value, out var writeError))
+                    {
+                        serializedObject.ApplyModifiedProperties();
+                        result.Success = true;
+                        anySuccess = true;
+                    }
+                    else
+                    {
+                        result.Error = writeError;
+                        serializedObject.Update();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Error = ex.Message;
+                    serializedObject.Update();
+                }
+
+                results.Add(result);
+            }
+
+            if (anySuccess)
+                EditorUtility.SetDirty(target);
+            return results;
+        }
+
+        private static SerializedProperty FindSerializedProperty(
+            SerializedObject serializedObject,
+            string requestedName,
+            out string error)
+        {
+            error = null;
+            var exact = serializedObject.FindProperty(requestedName);
+            if (exact != null)
+                return exact;
+
+            var normalized = NormalizeSerializedPropertyName(requestedName);
+            if (normalized.Length == 0)
+                return null;
+
+            SerializedProperty match = null;
+            var iterator = serializedObject.GetIterator();
+            if (!iterator.NextVisible(true))
+                return null;
+
+            do
+            {
+                if (NormalizeSerializedPropertyName(iterator.name) != normalized &&
+                    NormalizeSerializedPropertyName(iterator.displayName) != normalized)
+                    continue;
+
+                if (match != null && match.propertyPath != iterator.propertyPath)
+                {
+                    error = $"Serialized property name '{requestedName}' is ambiguous. Use an exact property path.";
+                    return null;
+                }
+
+                match = iterator.Copy();
+            }
+            while (iterator.NextVisible(true));
+
+            return match;
+        }
+
+        private static string NormalizeSerializedPropertyName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            if (normalized.StartsWith("m_", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized.Substring(2);
+
+            var chars = new List<char>(normalized.Length);
+            foreach (var character in normalized)
+            {
+                if (char.IsLetterOrDigit(character))
+                    chars.Add(char.ToLowerInvariant(character));
+            }
+            return new string(chars.ToArray());
+        }
+
         private static bool TryWriteSerializedProperty(SerializedProperty p, JToken value, out string error)
         {
             error = null;

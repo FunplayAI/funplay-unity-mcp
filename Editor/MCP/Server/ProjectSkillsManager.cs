@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.1",
+                "1.0.2",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects.",
                 true,
@@ -54,6 +54,7 @@ namespace Funplay.Editor.MCP.Server
                     "Use the `find_method` parameter on GameObject/Component tools to choose how a target is resolved: `by_id`, `by_name`, `by_path`, `by_tag`, `by_layer`, `by_component`, or `by_id_or_name_or_path`. Default auto-detect routes integers through `by_id_or_name_or_path` (ID first, then exact name), slashed strings through `by_path`, and other strings through `by_name`. Pass explicit `by_id` when a stale or invalid ID must fail instead of falling back.",
                     "When a GameObject has multiple components of the same type, target a specific one with `component_instance_id` instead of the type name to avoid hitting the wrong component.",
                     "Set component fields with `set_component_property(ies)`: it now writes through SerializedObject, so `[SerializeField] private` fields are reachable. Pass Object references as JSON `{\"fileID\": <instanceId>}` (preferred) or `{\"assetPath\": \"Assets/...\"}`. The response reports per-field success/failure.",
+                    "For field-only prefab asset changes, prefer `set_prefab_property(ies)`. Use a verified `Assets/**/*.prefab` path; when duplicate hierarchy paths or components are reported, select only an index returned by that ambiguity response. Use Prefab Mode or `LoadPrefabContents` for structural edits.",
                     "Inspect editor-level state through dedicated tools: `get_selection`, `set_selection`, `get_prefab_stage`, `get_active_tool`, `get_windows`, `get_tags`, `get_layers`, `get_build_settings`. Do not write `execute_code` snippets just to read this.",
                     "When no specialized MCP tool covers an editor action, try `execute_menu_item` (e.g. 'GameObject/2D Object/Sprite', 'Window/Layouts/Default', 'Edit/Project Settings...') before falling back to `execute_code`.",
                     "When Tool Exposure uses the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, input simulation, and performance inspection.",
@@ -759,6 +760,7 @@ $@"{ManagedMarker}
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
 - Tool returns are structured JSON (`{{success, message, data}}` / `{{success: false, code, error, data}}`). Branch on `code`, not free-form text.
 - Set component fields with `set_component_property(ies)` — it picks up `[SerializeField] private` fields and accepts Object references as `{{""fileID"": <instanceId>}}` or `{{""assetPath"": ""Assets/...""}}`.
+- For field-only prefab asset edits, use `set_prefab_property(ies)` with a verified `Assets/**/*.prefab` path. If it reports duplicate paths or components, retry only with an index from that response; use Prefab Mode for structural edits.
 - Read editor state through dedicated tools (`get_selection`, `get_prefab_stage`, `get_tags`, `get_layers`, `get_build_settings`); use `execute_menu_item` before falling back to ad-hoc `execute_code`.
 - Never edit `.unity`, `.prefab`, or `.asset` files with shell text tools or patches; use Unity MCP / Editor APIs for scenes, prefabs, and ScriptableObject assets.
 - Save only the scene or prefab assets intentionally modified, then read back exact values.
@@ -806,6 +808,7 @@ $@"{ManagedMarker}
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
 - Tool returns are structured JSON (`{{success, message, data}}` / `{{success: false, code, error, data}}`). Branch on `code`, not free-form text.
 - Set component fields with `set_component_property(ies)` — it picks up `[SerializeField] private` fields and accepts Object references as `{{""fileID"": <instanceId>}}` or `{{""assetPath"": ""Assets/...""}}`.
+- For field-only prefab asset edits, use `set_prefab_property(ies)` with a verified `Assets/**/*.prefab` path. If it reports duplicate paths or components, retry only with an index from that response; use Prefab Mode for structural edits.
 - Read editor state through `get_selection`, `get_prefab_stage`, `get_tags`, `get_layers`, `get_build_settings`; try `execute_menu_item` before writing ad-hoc `execute_code`.
 - Never edit `.unity`, `.prefab`, or `.asset` files with shell text tools or patches; use Unity MCP / Editor APIs for scenes, prefabs, and ScriptableObject assets.
 - Save only the scene or prefab assets intentionally modified, then read back exact values.
@@ -937,7 +940,7 @@ platform: {platform.ToString().ToLowerInvariant()}
 2. Choose the edit surface.
    - Edit source files with normal repo tools, then trigger Unity recompilation.
    - Edit scene objects through Unity APIs, mark the scene dirty, and save the scene.
-   - Edit prefab assets with `PrefabUtility.LoadPrefabContents`, `PrefabUtility.SaveAsPrefabAsset`, and `PrefabUtility.UnloadPrefabContents`.
+   - Edit prefab fields with `set_prefab_property(ies)` when available. Use `PrefabUtility.LoadPrefabContents`, `SaveAsPrefabAsset`, and `UnloadPrefabContents` for structural changes.
    - Edit ScriptableObject assets through `SerializedObject`, `EditorUtility.SetDirty`, and `AssetDatabase.SaveAssetIfDirty` / `SaveAssets`.
    - Never patch `.unity`, `.prefab`, or `.asset` YAML with shell text tools.
    - If the user is looking at an open scene instance, update the visible scene instance as well as the prefab asset when appropriate.
