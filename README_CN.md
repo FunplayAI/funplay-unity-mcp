@@ -343,8 +343,23 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 
 - **Tools** — `full` 下共 156 个工具，`core` 下 34 个高频工具
 - **Primary execution** — `execute_code` 用于复杂编辑器/运行态编排
-- **Prompts** — 包括 `fix_compile_errors`、`runtime_validation`、`create_playable_prototype` 等工作流 Prompt
+- **Prompts** — 参数化工作流 Prompt：`edit_prefab_safely`、`verify_compilation`、`enter_play_and_recover`、`wire_serialized_references`、`create_playable_prototype`。项目可通过根目录下的 `mcp-prompts/*.md` 注册专属 Prompt。
 - **Resources** — 项目上下文、场景摘要、选择状态、编译错误、控制台错误、MCP 交互记录，以及按对象/组件/资源路径展开的模板资源
+
+### 项目 Prompt
+
+项目 Prompt 文件使用轻量、无额外依赖的 front-matter 格式，后面跟随工作流正文：
+
+```markdown
+---
+name: validate_activity
+description: Open and validate a project activity.
+arguments: activity_key(required), theme_id
+---
+Open activity {activity_key} with theme {theme_id}, then validate its runtime state.
+```
+
+Prompt 名称和参数名必须匹配 `[a-z][a-z0-9_-]{0,63}`。`prompts/get` 会拒绝缺失的必填参数、未知参数和非字符串参数；未提供的可选参数占位符会替换为空字符串。定义会在 MCP Server 启动时缓存，因此修改 Prompt 文件后需重启 Server 或触发一次 Unity 域重载。
 
 ## 内置工具
 

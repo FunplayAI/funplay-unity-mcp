@@ -341,8 +341,23 @@ The current open-source package exposes four high-value capability layers:
 
 - **Tools** — 156 total tools in `full`, 34 focused tools in `core`
 - **Primary execution** — `execute_code` for rich editor/runtime orchestration
-- **Prompts** — workflow prompts like `fix_compile_errors`, `runtime_validation`, and `create_playable_prototype`
+- **Prompts** — parameterized workflow prompts: `edit_prefab_safely`, `verify_compilation`, `enter_play_and_recover`, `wire_serialized_references`, `create_playable_prototype`. Projects can add their own through `mcp-prompts/*.md` files in the project root.
 - **Resources** — project context, scene summaries, selection state, compile errors, console errors, MCP interaction history, plus resource templates for scene objects, components, and asset paths
+
+### Project Prompts
+
+Project prompt files use a small, dependency-free front-matter format followed by the workflow body:
+
+```markdown
+---
+name: validate_activity
+description: Open and validate a project activity.
+arguments: activity_key(required), theme_id
+---
+Open activity {activity_key} with theme {theme_id}, then validate its runtime state.
+```
+
+Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, and non-string arguments are rejected by `prompts/get`; omitted optional placeholders become empty strings. Definitions are cached when the MCP server starts, so restart the server or trigger a Unity domain reload after changing a prompt file.
 
 ## Built-in Tools
 

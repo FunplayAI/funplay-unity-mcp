@@ -4,6 +4,9 @@
 
 ### Added
 - Added `set_prefab_property` and `set_prefab_properties` for field-level edits on regular and variant prefab assets without opening Prefab Mode. The tools require normalized `Assets/**/*.prefab` paths, reject ambiguous hierarchy/component matches unless an explicit index is supplied, write serialized fields only, save through `PrefabUtility`, synchronously reimport, and return persisted readback. Both tools are included in the default `core` profile.
+- Added parameterized built-in MCP workflows for safe prefab edits, compilation checks, Play Mode recovery, serialized-reference wiring, and playable prototypes. Required and unknown arguments are validated by `prompts/get`, and prompts can best-effort embed relevant read-only Unity resources.
+- Projects can register validated workflow prompts through root-level `mcp-prompts/*.md` files without forking the package. Malformed, duplicate, oversized, or reserved definitions are skipped with a visible warning; changes are loaded after an MCP server restart or Unity domain reload.
+- The MCP `initialize` response now includes concise cross-client instructions for Unity serialization, object identity, compilation/reload recovery, console inspection, and screenshot transport behavior.
 
 ### Changed
 - Broker protocol bumped to v3 (no client-facing wire change). A pre-v3 broker still running after a package upgrade now fails the new health probe and is replaced in place, so the stale-session sweep below takes effect immediately on upgrade rather than only after the next natural broker restart. `EnsureRunning` also waits for the port to be released after shutting down its own recorded broker, so a same-port in-place replacement (which a protocol bump triggers) completes in a single call instead of bailing as "port in use" while the just-closed socket lingers.
@@ -13,7 +16,7 @@
 - Prefab Mode save and close responses now warn when UGUI layout, TMP auto-size, or Spine components are present because edit-time derived state may be included in the full-graph save. Field-only changes can use the new asset-level setters to avoid Prefab Stage recomputation.
 
 ### Contributors
-- Thanks @dehuaichendragonplus for the stale broker-session recovery work in #47 and the prefab asset-editing proposal and implementation in #45.
+- Thanks @dehuaichendragonplus for the stale broker-session recovery work in #47, the prefab asset-editing proposal and implementation in #45, and the parameterized prompt architecture in #46.
 
 ## [0.5.3] - 2026-07-18
 

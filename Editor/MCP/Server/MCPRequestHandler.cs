@@ -86,6 +86,8 @@ namespace Funplay.Editor.MCP.Server
                     ["name"] = _serverName,
                     ["version"] = _serverVersion
                 },
+                // Cross-client usage guidance (MCP `instructions`); see MCPServerInstructions.
+                ["instructions"] = MCPServerInstructions.Text,
                 ["funplay"] = new Dictionary<string, object>
                 {
                     ["projectIdentity"] = _projectIdentity,
@@ -161,22 +163,50 @@ namespace Funplay.Editor.MCP.Server
 
         private MCPResponse HandlePromptsGet(MCPRequest request)
         {
-            if (request.Params == null ||
+            return HandlePromptsGet(request, _promptProvider);
+        }
+
+        internal static MCPResponse HandlePromptsGet(MCPRequest request, MCPPromptProvider promptProvider)
+        {
+            if (request == null || request.Params == null ||
                 !request.Params.TryGetValue("name", out var nameObj) ||
                 !(nameObj is string promptName) ||
                 string.IsNullOrWhiteSpace(promptName))
             {
-                return CreateErrorResponse(request.Id, -32602, "Invalid params: 'name' is required");
+                return CreateErrorResponse(request?.Id, -32602, "Invalid params: 'name' is required");
             }
 
-            var arguments = request.Params.ContainsKey("arguments") && request.Params["arguments"] is Dictionary<string, object> args
-                ? args
-                : new Dictionary<string, object>();
+            var arguments = new Dictionary<string, object>();
+            if (request.Params.TryGetValue("arguments", out var argumentsObject))
+            {
+                if (!(argumentsObject is Dictionary<string, object> suppliedArguments))
+                {
+                    return CreateErrorResponse(
+                        request.Id,
+                        -32602,
+                        "Invalid params: 'arguments' must be an object",
+                        new Dictionary<string, object> { ["prompt"] = promptName });
+                }
+
+                arguments = suppliedArguments;
+            }
+
+            if (promptProvider == null)
+                return CreateErrorResponse(request.Id, -32603, "Prompt provider is unavailable");
+
+            if (!promptProvider.TryGetPrompt(promptName, arguments, out var result, out var promptError))
+            {
+                return CreateErrorResponse(
+                    request.Id,
+                    -32602,
+                    promptError?.Message ?? $"Invalid params for prompt '{promptName}'.",
+                    promptError?.Data);
+            }
 
             return new MCPResponse
             {
                 Id = request.Id,
-                Result = _promptProvider.GetPrompt(promptName, arguments)
+                Result = result
             };
         }
 
@@ -250,12 +280,12 @@ namespace Funplay.Editor.MCP.Server
             return content;
         }
 
-        private MCPResponse CreateErrorResponse(object requestId, int code, string message)
+        private static MCPResponse CreateErrorResponse(object requestId, int code, string message, object data = null)
         {
             return new MCPResponse
             {
                 Id = requestId,
-                Error = new MCPError { Code = code, Message = message }
+                Error = new MCPError { Code = code, Message = message, Data = data }
             };
         }
 
