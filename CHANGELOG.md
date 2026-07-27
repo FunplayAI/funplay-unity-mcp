@@ -14,9 +14,10 @@
 ### Fixed
 - The keepalive broker now sweeps stale attached sessions instead of remembering them forever. A crashed or force-killed editor never sends a detach, so its session lingered in the broker's attached-session set indefinitely and defeated the fast-fail gate for client requests: new requests were queued and held up to the 300s hold deadline instead of failing fast once the only backend was gone. Sessions now carry a last-seen timestamp (refreshed on attach and every pull) and are swept after a staleness window (default = the 300s hold deadline, so a domain-reload/compile gap never evicts a live-but-reloading session; overridable via `FUNPLAY_BROKER_SESSION_STALE_MS`). The sweep skips the session whose long-poll is currently parked (provably alive) and reconciles a swept session's in-flight work exactly like an explicit detach — failing still-queued requests only when no backend remains, so a dead session swept while a healthy one is connected leaves those requests for the healthy session.
 - Prefab Mode save and close responses now warn when UGUI layout, TMP auto-size, or Spine components are present because edit-time derived state may be included in the full-graph save. Field-only changes can use the new asset-level setters to avoid Prefab Stage recomputation.
+- MCP Server transport labels now show an in-progress state and refresh only after the service-owned settings restart settles. Transport, port, and broker-path changes no longer race a fixed two-frame refresh or start a second competing Stop/Start sequence from the window; rapid setting changes are coalesced, and disabling the server during a pending restart no longer starts it again.
 
 ### Contributors
-- Thanks @dehuaichendragonplus for the stale broker-session recovery work in #47, the prefab asset-editing proposal and implementation in #45, and the parameterized prompt architecture in #46.
+- Thanks @dehuaichendragonplus for the stale broker-session recovery work in #47, the prefab asset-editing proposal and implementation in #45, the parameterized prompt architecture in #46, and the transport status refresh fix in #48.
 
 ## [0.5.3] - 2026-07-18
 

@@ -2,8 +2,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Funplay.Editor.Settings;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -21,6 +21,7 @@ namespace Funplay.Editor.MCP.Server
         private Label _brokerStatus;
         private TextField _brokerMonoPathField;
         private Label _brokerMonoHint;
+        private int _statusRefreshGeneration;
 
         public FunplayMCPServerControlsPanel(
             ISettingsController settings,
@@ -39,16 +40,18 @@ namespace Funplay.Editor.MCP.Server
             toggle.RegisterValueChangedCallback(evt =>
             {
                 _settings.MCPServerEnabled = evt.newValue;
+                Task lifecycleTask;
                 if (evt.newValue)
-                    _ = _server.StartAsync();
+                    lifecycleTask = _server.StartAsync();
                 else
                 {
-                    _ = _server.StopAsync();
+                    lifecycleTask = _server.StopAsync();
                     MCPBrokerProcessManager.Stop();
                 }
 
-                EditorApplication.delayCall += () =>
-                    EditorApplication.delayCall += () => { UpdateBrokerStatus(); InvokeRefreshStatus(); };
+                RefreshStatusWhenSettled(
+                    lifecycleTask,
+                    evt.newValue ? "Transport: Starting..." : "Transport: Stopping...");
             });
             toggle.style.marginBottom = 4;
             parent.Add(toggle);
@@ -62,9 +65,7 @@ namespace Funplay.Editor.MCP.Server
             portField.RegisterValueChangedCallback(evt =>
             {
                 _settings.MCPServerPort = evt.newValue;
-
-                EditorApplication.delayCall += () =>
-                    EditorApplication.delayCall += () => { UpdateBrokerStatus(); InvokeRefreshStatus(); };
+                RefreshStatusWhenSettled(ResolveSettingsLifecycleTask(), "Transport: Restarting...");
             });
             portField.style.marginBottom = 8;
             parent.Add(portField);
@@ -84,16 +85,19 @@ namespace Funplay.Editor.MCP.Server
 
                 if (_settings.MCPServerEnabled)
                 {
-                    _ = _server.StopAsync();
-                    EditorApplication.delayCall += () => _ = _server.StartAsync();
+                    RefreshStatusWhenSettled(
+                        ResolveSettingsLifecycleTask(),
+                        enabled
+                            ? "Transport: Switching to Broker Mode..."
+                            : "Transport: Switching to Direct HTTP...");
                 }
-                else if (!enabled)
+                else
                 {
-                    MCPBrokerProcessManager.Stop();
+                    if (!enabled)
+                        MCPBrokerProcessManager.Stop();
+                    UpdateBrokerStatus();
+                    InvokeRefreshStatus();
                 }
-
-                EditorApplication.delayCall += () =>
-                    EditorApplication.delayCall += () => { UpdateBrokerStatus(); InvokeRefreshStatus(); };
             });
             transportModeDropdown.style.marginBottom = 4;
             parent.Add(transportModeDropdown);
@@ -103,7 +107,7 @@ namespace Funplay.Editor.MCP.Server
             _brokerMonoPathField.RegisterValueChangedCallback(evt =>
             {
                 _settings.MCPBrokerMonoPath = evt.newValue;
-                EditorApplication.delayCall += UpdateBrokerStatus;
+                RefreshStatusWhenSettled(ResolveSettingsLifecycleTask(), "Transport: Restarting...");
             });
             _brokerMonoPathField.style.marginBottom = 4;
             parent.Add(_brokerMonoPathField);
@@ -129,6 +133,45 @@ namespace Funplay.Editor.MCP.Server
         private void InvokeRefreshStatus()
         {
             _refreshStatus?.Invoke();
+        }
+
+        private Task ResolveSettingsLifecycleTask()
+        {
+            var restartTask = _server.WaitForSettingsRestartAsync();
+            if (!restartTask.IsCompleted || !_settings.MCPServerEnabled || _server.IsRunning)
+                return restartTask;
+
+            // The setting can be enabled while a previous start failed. In that settled state,
+            // applying a transport setting is also a reasonable explicit retry.
+            return _server.StartAsync();
+        }
+
+        private void RefreshStatusWhenSettled(Task lifecycleTask, string pendingText)
+        {
+            var generation = ++_statusRefreshGeneration;
+            if (lifecycleTask != null && !lifecycleTask.IsCompleted && _brokerStatus != null)
+                _brokerStatus.text = pendingText;
+
+            _ = RefreshStatusWhenSettledAsync(lifecycleTask, generation);
+        }
+
+        private async Task RefreshStatusWhenSettledAsync(Task lifecycleTask, int generation)
+        {
+            try
+            {
+                if (lifecycleTask != null)
+                    await lifecycleTask;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[Funplay MCP Server] Server lifecycle change failed: " + ex.Message);
+            }
+
+            if (generation != _statusRefreshGeneration)
+                return;
+
+            UpdateBrokerStatus();
+            InvokeRefreshStatus();
         }
 
         private void UpdateBrokerControls(bool enabled)

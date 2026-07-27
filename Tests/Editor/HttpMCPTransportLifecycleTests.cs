@@ -57,6 +57,38 @@ namespace Funplay.Editor
                 MCPServerService.DetermineInterruptedToolRecoveryStatus(ToolResultFormatter.Error("TEST_ERROR")));
         }
 
+        [Test]
+        public void SettingsRestartCompletion_CoalescesWaitersUntilFinalCompletion()
+        {
+            var completion = new MCPServerRestartCompletion();
+
+            var first = completion.Begin();
+            var second = completion.Begin();
+
+            Assert.AreSame(first, second);
+            Assert.IsFalse(first.IsCompleted);
+
+            completion.Complete(true);
+
+            Assert.IsTrue(first.IsCompleted);
+            Assert.IsTrue(first.Result);
+        }
+
+        [Test]
+        public void SettingsRestartCompletion_AfterCompletionReturnsSettledStateUntilNextRestart()
+        {
+            var completion = new MCPServerRestartCompletion();
+            var first = completion.Begin();
+            completion.Complete(false);
+
+            Assert.IsFalse(first.Result);
+            Assert.IsTrue(completion.CurrentOrCompleted(true).Result);
+
+            var next = completion.Begin();
+            Assert.AreNotSame(first, next);
+            Assert.IsFalse(next.IsCompleted);
+        }
+
         [UnityTest]
         public IEnumerator StartAsync_WhenPortIsAlreadyOwned_ReturnsFalseWithoutStoppingOwner()
         {

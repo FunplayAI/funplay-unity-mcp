@@ -17,6 +17,42 @@ using UnityEngine;
 
 namespace Funplay.Editor.MCP.Server
 {
+    internal sealed class MCPServerRestartCompletion
+    {
+        private readonly object _lock = new object();
+        private TaskCompletionSource<bool> _completion;
+
+        public Task<bool> Begin()
+        {
+            lock (_lock)
+            {
+                if (_completion == null || _completion.Task.IsCompleted)
+                {
+                    _completion = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+
+                return _completion.Task;
+            }
+        }
+
+        public Task<bool> CurrentOrCompleted(bool settledResult)
+        {
+            lock (_lock)
+                return _completion?.Task ?? Task.FromResult(settledResult);
+        }
+
+        public void Complete(bool result)
+        {
+            lock (_lock)
+            {
+                var completion = _completion;
+                _completion = null;
+                completion?.TrySetResult(result);
+            }
+        }
+    }
+
     /// <summary>
     /// Main MCP server service singleton.
     /// Manages server lifecycle, coordinates transport, handler, exporter, and bridge.
@@ -31,6 +67,7 @@ namespace Funplay.Editor.MCP.Server
         private readonly ICompilationService _compilationService;
         private readonly FunctionInvokerController _invoker;
         private readonly object _lifecycleLock = new object();
+        private readonly MCPServerRestartCompletion _settingsRestartCompletion = new MCPServerRestartCompletion();
 
         private IMCPTransport _transport;
         private MCPRequestHandler _requestHandler;
@@ -68,6 +105,11 @@ namespace Funplay.Editor.MCP.Server
         }
         public int Port { get; private set; }
         public MCPInteractionLog InteractionLog { get; }
+
+        internal Task<bool> WaitForSettingsRestartAsync()
+        {
+            return _settingsRestartCompletion.CurrentOrCompleted(IsRunning);
+        }
 
         public MCPServerService(
             ISettingsController settings,
@@ -423,8 +465,11 @@ namespace Funplay.Editor.MCP.Server
             var transportSetting = BuildTransportSetting();
             var toolExposureChanged = !string.Equals(toolExposureSetting, _toolExposureSetting, StringComparison.Ordinal);
             var transportChanged = !string.Equals(transportSetting, _transportSetting, StringComparison.Ordinal);
+            bool hasActiveLifecycle;
+            lock (_lifecycleLock)
+                hasActiveLifecycle = _isRunning || _startTask != null || _restartScheduled || _restartInProgress;
 
-            if ((portChanged || toolExposureChanged || transportChanged) && _isRunning)
+            if ((portChanged || toolExposureChanged || transportChanged) && hasActiveLifecycle)
             {
                 PluginDebugLogger.Log("[Funplay MCP Server] Server settings changed, restarting MCP transport...");
                 Port = _settings.MCPServerPort;
@@ -553,10 +598,17 @@ namespace Funplay.Editor.MCP.Server
 
         private void ScheduleRestart()
         {
-            if (_disposed || _restartScheduled)
+            if (_disposed)
+                return;
+
+            _settingsRestartCompletion.Begin();
+            if (_restartScheduled)
                 return;
 
             _restartScheduled = true;
+            if (_restartInProgress)
+                return;
+
             EditorApplication.update -= RestartTransportAfterSettingsChange;
             EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
             EditorApplication.delayCall += RestartTransportAfterSettingsChange;
@@ -570,7 +622,10 @@ namespace Funplay.Editor.MCP.Server
             _restartScheduled = false;
 
             if (_disposed)
+            {
+                _settingsRestartCompletion.Complete(false);
                 return;
+            }
 
             if (_restartInProgress)
             {
@@ -584,14 +639,17 @@ namespace Funplay.Editor.MCP.Server
                 await StopAsync();
 
                 if (_disposed)
+                {
+                    FinishSettingsRestartAttempt(false);
                     return;
+                }
 
                 ScheduleStartAfterSettingsChange();
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[Funplay MCP Server] Failed while restarting after settings change: {ex.Message}");
-                _restartInProgress = false;
+                FinishSettingsRestartAttempt(false);
             }
         }
 
@@ -608,17 +666,33 @@ namespace Funplay.Editor.MCP.Server
             EditorApplication.update -= StartTransportAfterSettingsChange;
             EditorApplication.delayCall -= StartTransportAfterSettingsChange;
 
+            var started = false;
             try
             {
-                if (!_disposed)
-                    await StartAsync();
+                if (!_disposed && _settings.MCPServerEnabled)
+                    started = await StartAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[Funplay MCP Server] Failed while starting after settings change: {ex.Message}");
             }
             finally
             {
-                _restartInProgress = false;
-                if (_restartScheduled && !_disposed)
-                    EditorApplication.delayCall += RestartTransportAfterSettingsChange;
+                FinishSettingsRestartAttempt(started);
             }
+        }
+
+        private void FinishSettingsRestartAttempt(bool started)
+        {
+            _restartInProgress = false;
+            if (_restartScheduled && !_disposed)
+            {
+                EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
+                EditorApplication.delayCall += RestartTransportAfterSettingsChange;
+                return;
+            }
+
+            _settingsRestartCompletion.Complete(started && !_disposed);
         }
 
         public void Dispose()
@@ -626,6 +700,13 @@ namespace Funplay.Editor.MCP.Server
             if (_disposed) return;
             _disposed = true;
             _settings.OnSettingsChanged -= HandleSettingsChanged;
+            EditorApplication.update -= RestartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= RestartTransportAfterSettingsChange;
+            EditorApplication.update -= StartTransportAfterSettingsChange;
+            EditorApplication.delayCall -= StartTransportAfterSettingsChange;
+            _restartScheduled = false;
+            _restartInProgress = false;
+            _settingsRestartCompletion.Complete(false);
             StopSync();
         }
 
