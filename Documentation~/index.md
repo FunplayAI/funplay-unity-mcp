@@ -7,10 +7,14 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 1. Install via UPM using the Git URL for this repository
 2. Open **Funplay > MCP Server**
 3. Start the server and use the built-in one-click client configuration
-4. Connect your AI client to the endpoint shown in the window (`http://127.0.0.1:8765/` by default)
+4. Connect your AI client to the endpoint shown in the window (`http://127.0.0.1:<port>/`, derived per project unless you pin a port)
 5. Open **Funplay > Tool Exposure** to edit the exact tools exposed by `core` or `full`
 6. For Claude Code, Cursor, and Codex, use **Configure + Skills** or open **Funplay > Project Skills** to install the default `unity-mcp-workflow` skill
 7. Open **Funplay > Plugin Settings** to adjust debug logging when troubleshooting
+
+## Guides
+
+- [Running Several Unity Projects at Once](multi-project-setup.md) ([中文](multi-project-setup.zh-CN.md)) — per-project ports and client-config entries, what upgrading changes, and the cases that need a decision
 
 ## Highlights
 

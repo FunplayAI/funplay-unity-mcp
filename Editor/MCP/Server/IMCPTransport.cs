@@ -14,6 +14,12 @@ namespace Funplay.Editor.MCP.Server
     {
         bool IsRunning { get; }
         bool IsAttachedToExistingServer { get; }
+
+        /// <summary>
+        /// Port clients must actually reach this transport on. It can differ from the port the
+        /// transport was constructed with when that one was taken and a free port was used instead.
+        /// </summary>
+        int Port { get; }
         Task<bool> StartAsync(CancellationToken ct = default);
         Task StopAsync();
 

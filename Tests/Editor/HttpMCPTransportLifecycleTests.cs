@@ -163,6 +163,44 @@ namespace Funplay.Editor
         }
 
         [UnityTest]
+        public IEnumerator StartAsync_KnownForeignConflictSkipsTheLongRetryAndPrefersLastFallback()
+        {
+            // The conflict was learned on a previous start (this session already fell back), so the
+            // full ~10s teardown retry window is skipped and the previous fallback port is tried
+            // first -- a client connected to it survives the domain reload on the same port.
+            var requestedPort = GetFreeTcpPort();
+            var owner = new HttpMCPTransport(requestedPort, ServerName, ProjectIdentityA);
+            var preferredPort = GetFreeTcpPort();
+            var transport = new HttpMCPTransport(
+                requestedPort, ServerName, ProjectIdentityA,
+                new PortFallbackHints(requestedPortKnownForeign: true, preferredFallbackPort: preferredPort));
+
+            try
+            {
+                var ownerStart = owner.StartAsync();
+                yield return WaitForTask(ownerStart);
+                Assert.IsTrue(ownerStart.Result);
+
+                var stopwatch = Stopwatch.StartNew();
+                var startTask = transport.StartAsync();
+                yield return WaitForTask(startTask, 10f);
+                stopwatch.Stop();
+
+                Assert.IsTrue(startTask.Result, "The fallback bind should succeed on the preferred port.");
+                Assert.AreEqual(preferredPort, transport.Port);
+                Assert.Less(
+                    stopwatch.Elapsed,
+                    TimeSpan.FromSeconds(6),
+                    "A known-foreign conflict must not wait out the full teardown retry window.");
+            }
+            finally
+            {
+                transport.Dispose();
+                owner.Dispose();
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Stop_ReleasesOwnedPortForRestart()
         {
             var port = GetFreeTcpPort();
