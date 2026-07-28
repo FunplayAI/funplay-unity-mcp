@@ -8,7 +8,7 @@ Thanks for your interest in contributing! Here's how to get started.
 2. Add this repository to the project as a local package or Git package
 3. Open the project in Unity Editor and wait for compilation to finish
 4. Open **Funplay → MCP Server**
-5. Start the server and confirm it is reachable at `http://127.0.0.1:8765/`
+5. Start the server and confirm it is reachable at the `http://127.0.0.1:<port>/` URL shown in the MCP Server window (the port is derived per project)
 
 ## Code Style
 

@@ -16,7 +16,6 @@ namespace Funplay.Editor.MCP.Server
     internal static class MCPServerDomainReloadHandler
     {
         private const string WasRunningKey = "Funplay_MCPServer_WasRunning";
-        private const string PortKey = "Funplay_MCPServer_Port";
         private const string RestartDeadlineTicksKey = "Funplay_MCPServer_RestartDeadlineTicks";
         private static readonly TimeSpan RestartRetryWindow = TimeSpan.FromMinutes(5);
         private static bool _restartScheduled;
@@ -44,7 +43,6 @@ namespace Funplay.Editor.MCP.Server
 
                 PluginDebugLogger.Log("[Funplay MCP Server] Saving state before domain reload");
                 SessionState.SetBool(WasRunningKey, true);
-                SessionState.SetInt(PortKey, mcpServer.Port);
                 SessionState.SetString(RestartDeadlineTicksKey, DateTime.UtcNow.Add(RestartRetryWindow).Ticks.ToString());
             }
             catch (Exception ex)
@@ -139,7 +137,6 @@ namespace Funplay.Editor.MCP.Server
                 return;
 
             var mcpServer = services.GetService(typeof(MCPServerService)) as MCPServerService;
-            var settings = services.GetService(typeof(ISettingsController)) as ISettingsController;
             if (mcpServer == null)
                 return;
 
@@ -147,10 +144,12 @@ namespace Funplay.Editor.MCP.Server
 
             try
             {
-                int savedPort = SessionState.GetInt(PortKey, -1);
-                if (savedPort > 0 && settings != null && settings.MCPServerPort != savedPort)
-                    settings.MCPServerPort = savedPort;
-
+                // The restart deliberately does not force the pre-reload port back into the settings.
+                // Port resolution is deterministic (an explicit setting, otherwise derived from the
+                // project identity), so the restart lands on the same port on its own; writing the
+                // pre-reload port back would instead persist it as an explicit user choice -- turning
+                // a derived or fallback port into a pin, and reverting a port the user changed while
+                // the reload was in flight.
                 if (!mcpServer.IsRunning)
                 {
                     var started = await mcpServer.StartAsync();
@@ -197,7 +196,6 @@ namespace Funplay.Editor.MCP.Server
         private static void ClearPendingRestart()
         {
             SessionState.EraseBool(WasRunningKey);
-            SessionState.EraseInt(PortKey);
             SessionState.EraseString(RestartDeadlineTicksKey);
         }
 

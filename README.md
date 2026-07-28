@@ -87,7 +87,9 @@ If you installed from a Git URL before, remove the Git dependency first, then in
 
 **Menu: Funplay → MCP Server** to start the server.
 
-The server starts on `http://127.0.0.1:8765/` by default.
+A new project gets its own port, derived from the project path, so two editors opened on different projects never fight over one port. The MCP Server window shows the exact URL (`http://127.0.0.1:<port>/`); the one-click configuration writes that URL for you. Type a port in **Server Port** to pin a fixed one (CI, a firewall rule) and **Use Per-Project Port** to derive one instead.
+
+Upgrading from an earlier version changes nothing: the project keeps the port it was already using, recorded as a pin, so existing client configs keep working. Click **Use Per-Project Port** when you want that project to run beside another editor. See [Running Several Unity Projects at Once](Documentation~/multi-project-setup.md) for the full setup guide.
 
 Direct in-process HTTP is the default transport. If you need stronger connection continuity across Unity script recompiles or Play Mode domain reloads, enable **Experimental Broker Mode** in the MCP Server window. It runs a tiny local broker with Unity's bundled Mono, keeps the same `127.0.0.1` port for MCP clients, and requires no client config change.
 
@@ -105,7 +107,7 @@ For Claude Code, Cursor, and Codex, click **Configure + Skills** to also install
 
 If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms and install the default `unity-mcp-workflow` skill.
 
-If you prefer to edit config files manually, use the examples below as fallback references:
+If you prefer to edit config files manually, use the examples below as fallback references. Replace `<project>` with this project's entry name and `<port>` with its port -- the MCP Server window shows both:
 
 <details>
 <summary>Claude Code / Claude Desktop</summary>
@@ -113,9 +115,9 @@ If you prefer to edit config files manually, use the examples below as fallback 
 ```json
 {
   "mcpServers": {
-    "funplay": {
+    "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:8765/"
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -129,8 +131,8 @@ If you prefer to edit config files manually, use the examples below as fallback 
 ```json
 {
   "mcpServers": {
-    "funplay": {
-      "url": "http://127.0.0.1:8765/"
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -146,8 +148,8 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 ```json
 {
   "mcpServers": {
-    "funplay": {
-      "url": "http://127.0.0.1:8765/"
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -161,9 +163,9 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 ```json
 {
   "servers": {
-    "funplay": {
+    "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:8765/"
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -177,8 +179,8 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 ```json
 {
   "mcpServers": {
-    "funplay": {
-      "url": "http://127.0.0.1:8765/"
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -192,9 +194,9 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 ```json
 {
   "mcpServers": {
-    "funplay": {
+    "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:8765/"
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -206,8 +208,8 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 <summary>Codex</summary>
 
 ```toml
-[mcp_servers.funplay]
-url = "http://127.0.0.1:8765/"
+[mcp_servers.funplay-<project>]
+url = "http://127.0.0.1:<port>/"
 ```
 
 </details>
@@ -236,7 +238,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 ## Before You Start
 
 - This package is **Editor-only**. It does not add runtime components to your built game.
-- The MCP server starts on `http://127.0.0.1:8765/` by default.
+- The MCP server port is derived per project (range 20000-29999) for new projects, or pinned — projects upgraded from an earlier version keep their existing port as a pin, and any port you type is a pin. The MCP Server window shows where the port came from and the active URL. A project's client-config entry is named after the project directory (for example `funplay-love-town`), so configuring several projects no longer overwrites one shared `funplay` entry. Two projects that share a product name would resolve to the same entry name; the second one configured appends a project hash automatically, so nothing is overwritten and no setting has to be turned on.
 - Local MCP server settings are stored in `UserSettings/FunplayMcpSettings.json`.
 - The package defaults to the `core` MCP tool profile to reduce tool-list noise for AI clients. `core` currently exposes 34 high-signal tools centered on `execute_code`, play mode control, input simulation, screenshots, performance inspection, logs, compilation checks, structured object and component editing, field-level prefab asset editing, editor selection / prefab-stage state, and `execute_menu_item` as a low-friction fallback. Switch to `full` in the MCP Server window if you want all 156 tools exposed.
 - `execute_code` safety checks and the stricter filesystem guard are enabled by default from **Funplay > MCP Settings**. The guard blocks obvious destructive snippets, broad `System.IO` writes, raw file streams, and absolute/user/system/traversal paths, but it is not a complete sandbox. Clients may still override the default per call with the optional `safety_checks` argument.

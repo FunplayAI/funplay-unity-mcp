@@ -87,7 +87,9 @@ openupm add com.gamebooom.unity.mcp
 
 **菜单：Funplay → MCP Server** 启动服务。
 
-默认从 `http://127.0.0.1:8765/` 启动。
+新工程使用**按工程路径派生的独立端口**，因此同时打开两个工程的编辑器不会互相抢端口。MCP Server 窗口会显示实际地址（`http://127.0.0.1:<端口>/`），一键配置会把该地址写进客户端配置。需要固定端口（CI / 防火墙规则）时在 **Server Port** 里填一个即可 pin 住，点 **Use Per-Project Port** 改为按工程派生。
+
+从旧版本升级不会有任何变化：工程会保留原来在用的端口（记为 pin），已配置的客户端照旧可用。等到需要让该工程与另一个编辑器同时服务时，再点一次 **Use Per-Project Port** 即可。完整配置指南见 [同时开多个 Unity 工程](Documentation~/multi-project-setup.zh-CN.md)。
 
 默认传输仍然是进程内 Direct HTTP。如果你需要在 Unity 脚本重编译或进入 Play Mode 触发域重载时尽量保持 MCP 客户端连接，可以在 MCP Server 窗口启用 **Experimental Broker Mode**。它会用 Unity 自带 Mono 启动一个很小的本地 broker，客户端仍然连接同一个 `127.0.0.1` 端口，不需要改 MCP 配置。
 
@@ -105,7 +107,7 @@ openupm add com.gamebooom.unity.mcp
 
 如果你希望为当前 Unity 项目配置项目级 AI 指引，可以打开 **Funplay → Project Skills**，为支持的平台安装默认的 `unity-mcp-workflow` skill。
 
-如果你更想手动编辑配置文件，再参考下面这些示例：
+如果你更想手动编辑配置文件，再参考下面这些示例（把 `<project>` 换成本工程的条目名、`<port>` 换成本工程端口——MCP Server 窗口里两者都有显示）：
 
 <details>
 <summary>Claude Code / Claude Desktop</summary>
@@ -113,9 +115,9 @@ openupm add com.gamebooom.unity.mcp
 ```json
 {
   "mcpServers": {
-    "funplay": {
+    "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:8765/"
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -129,8 +131,8 @@ openupm add com.gamebooom.unity.mcp
 ```json
 {
   "mcpServers": {
-    "funplay": {
-      "url": "http://127.0.0.1:8765/"
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -146,8 +148,8 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 ```json
 {
   "mcpServers": {
-    "funplay": {
-      "url": "http://127.0.0.1:8765/"
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -161,9 +163,9 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 ```json
 {
   "servers": {
-    "funplay": {
+    "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:8765/"
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -177,8 +179,8 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 ```json
 {
   "mcpServers": {
-    "funplay": {
-      "url": "http://127.0.0.1:8765/"
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -192,9 +194,9 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 ```json
 {
   "mcpServers": {
-    "funplay": {
+    "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:8765/"
+      "url": "http://127.0.0.1:<port>/"
     }
   }
 }
@@ -206,8 +208,8 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 <summary>Codex</summary>
 
 ```toml
-[mcp_servers.funplay]
-url = "http://127.0.0.1:8765/"
+[mcp_servers.funplay-<project>]
+url = "http://127.0.0.1:<port>/"
 ```
 
 </details>
@@ -238,7 +240,7 @@ url = "http://127.0.0.1:8765/"
 ## 开始前说明
 
 - 这是一个 **仅限 Editor** 的包，不会向最终构建产物添加运行时代码。
-- MCP Server 默认从 `http://127.0.0.1:8765/` 启动。
+- MCP Server 端口对**新工程**按工程派生（20000-29999 区间）；从旧版本升级的工程会保留原端口并记为 pin，手填的端口同样是 pin。MCP Server 窗口会显示端口来源与当前实际地址。客户端配置里的条目名按**工程目录名**命名（例如 `funplay-love-town`，只保留 ASCII 字母数字），多个工程不再互相覆盖同一个 `funplay` 条目。两个工程产品名相同时会解析出同一个条目名，此时后配置的那个会**自动追加工程哈希**，既不会覆盖对方，也不需要用户去开任何开关。
 - 本地 MCP Server 配置保存在 `UserSettings/FunplayMcpSettings.json`。
 - 插件默认使用 `core` MCP 工具暴露配置，减少 AI 客户端的工具噪音；`core` 当前暴露 34 个高频工具，覆盖 `execute_code`、运行模式控制、输入模拟、截图、性能检查、日志、编译检查、结构化对象与组件编辑、字段级 Prefab 资产编辑、编辑器选中与 prefab stage 状态读写，以及 `execute_menu_item` 兜底入口。如果你需要完整工具集，可在 MCP Server 窗口切换到 `full`，暴露全部 156 个工具。
 - `execute_code` safety checks 和更严格的文件系统 guard 现在可在 **Funplay > MCP Settings** 设置默认值，默认开启；它会阻止明显破坏性片段、宽泛的 `System.IO` 写入、原始文件流、绝对路径、用户/系统目录路径和 `../` 穿越路径，但它不是完整沙箱。客户端仍可在单次调用中用可选 `safety_checks` 参数显式覆盖。

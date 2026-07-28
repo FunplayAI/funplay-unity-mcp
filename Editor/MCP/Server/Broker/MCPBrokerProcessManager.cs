@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Threading;
+using Funplay.Editor.Settings;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -21,6 +22,12 @@ namespace Funplay.Editor.MCP.Server
         private static readonly MCPBrokerRuntimePaths DefaultPaths;
 
         public static string LastError { get; private set; }
+
+        /// <summary>
+        /// True when the last <see cref="EnsureRunning(int, string)"/> failure was "the port belongs to
+        /// something that is not our broker", the one failure a different port can recover from.
+        /// </summary>
+        public static bool LastErrorWasPortConflict { get; private set; }
 
         static MCPBrokerProcessManager()
         {
@@ -40,11 +47,68 @@ namespace Funplay.Editor.MCP.Server
             return EnsureRunning(port, monoPathOverride, DefaultPaths);
         }
 
+        /// <summary>
+        /// Starts (or reuses) this project's broker, moving to a free port when the requested one is
+        /// held by a process that is not our broker (another project that derived the same port, or
+        /// something unrelated). Reports the port the broker actually owns through
+        /// <paramref name="actualPort"/>; the caller must connect and publish that one.
+        /// </summary>
+        public static bool EnsureRunningWithPortFallback(int port, string monoPathOverride, out int actualPort)
+        {
+            if (EnsureRunning(port, monoPathOverride, DefaultPaths, out actualPort))
+                return true;
+
+            if (!LastErrorWasPortConflict)
+                return false;
+
+            int fallbackPort;
+            if (!FunplayFreePortScanner.TryFindFreePort(port, out fallbackPort))
+                return false;
+
+            if (!EnsureRunning(fallbackPort, monoPathOverride, DefaultPaths, out actualPort))
+                return false;
+
+            Debug.LogWarning(
+                $"[Funplay MCP Server] Port {port} is held by another process; the broker owns {actualPort} instead. " +
+                FunplayFreePortScanner.FallbackGuidance);
+            return true;
+        }
+
+        // Once per port value per domain: the keep-path runs on every reload while a conflict
+        // persists, and repeating a full warning each time would be noise -- but a debug-gated log
+        // alone left a user whose pinned port was hijacked with zero visible signal.
+        private static int _lastKeptFallbackWarnedPort;
+
+        private static void WarnKeptFallbackOncePerPort(int keptPort, int requestedPort)
+        {
+            if (_lastKeptFallbackWarnedPort == keptPort)
+            {
+                PluginDebugLogger.Log(
+                    "[Funplay MCP Server] Keeping the broker on fallback port " + keptPort +
+                    " because port " + requestedPort + " is still held by another process.");
+                return;
+            }
+
+            _lastKeptFallbackWarnedPort = keptPort;
+            Debug.LogWarning(
+                $"[Funplay MCP Server] The broker stays on fallback port {keptPort} because port {requestedPort} is held by another process. " +
+                FunplayFreePortScanner.FallbackGuidance);
+        }
+
         internal static bool EnsureRunning(int port, string monoPathOverride, MCPBrokerRuntimePaths paths)
         {
+            int actualPort;
+            return EnsureRunning(port, monoPathOverride, paths, out actualPort);
+        }
+
+        internal static bool EnsureRunning(
+            int port, string monoPathOverride, MCPBrokerRuntimePaths paths, out int actualPort)
+        {
+            actualPort = port;
             lock (Gate)
             {
                 LastError = null;
+                LastErrorWasPortConflict = false;
 
                 if (TryReadState(paths.PidFilePath, out var existing))
                 {
@@ -52,6 +116,23 @@ namespace Funplay.Editor.MCP.Server
                         TryProbeBroker(existing.Port, existing.Token, out var health) &&
                         health.Pid == existing.Pid)
                     {
+                        return true;
+                    }
+
+                    // Our broker is healthy on another port and the requested one is taken by someone
+                    // else, so the request cannot be honoured anyway: keep the broker we have. Killing
+                    // it would restart the broker on every domain reload for as long as the requested
+                    // port stays occupied -- the reload survival broker mode exists to provide.
+                    // "Taken" is a bind test, not a connect test: a port can be reserved without
+                    // accepting connections, and treating such a port as free would tear the healthy
+                    // broker down only to fail the re-bind.
+                    if (existing.Port != port &&
+                        !FunplayFreePortScanner.CanBind(port) &&
+                        TryProbeBroker(existing.Port, existing.Token, out var keptHealth) &&
+                        keptHealth.Pid == existing.Pid)
+                    {
+                        actualPort = existing.Port;
+                        WarnKeptFallbackOncePerPort(existing.Port, port);
                         return true;
                     }
 
@@ -76,7 +157,9 @@ namespace Funplay.Editor.MCP.Server
                             // so we bind it on this same call instead of bailing below.
                             if (existing.Port == port)
                             {
-                                for (var i = 0; i < 30 && IsTcpPortOpen(port); i++)
+                                // Bind test, not connect test: TIME_WAIT can block a bind while a
+                                // connect probe already reports the port closed.
+                                for (var i = 0; i < 30 && !FunplayFreePortScanner.CanBind(port); i++)
                                     Thread.Sleep(100);
                             }
                         }
@@ -85,11 +168,15 @@ namespace Funplay.Editor.MCP.Server
                     DeletePidFile(paths.PidFilePath);
                 }
 
-                if (IsTcpPortOpen(port))
+                // Bind test for the same reason as above: a port reserved without accepting
+                // connections would pass a connect probe as "free", the broker spawn on it would
+                // fail with a generic error, and the port-conflict fallback would never engage.
+                if (!FunplayFreePortScanner.CanBind(port))
                 {
                     LastError = existing != null && existing.Port == port
                         ? "Port is already in use, but it is not a verified Funplay broker."
                         : "Port is already in use by another process.";
+                    LastErrorWasPortConflict = true;
                     return false;
                 }
 

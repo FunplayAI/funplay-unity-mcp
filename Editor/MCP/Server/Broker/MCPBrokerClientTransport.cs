@@ -38,6 +38,9 @@ namespace Funplay.Editor.MCP.Server
 
         public bool IsRunning => _isRunning;
         public bool IsAttachedToExistingServer => true;
+
+        /// <summary>Port the broker owns, which is the port clients connect to.</summary>
+        public int Port => _port;
         public event Action<MCPRequest, Action<MCPResponse>> OnRequestReceived;
 
         public Task<bool> StartAsync(CancellationToken ct = default)
