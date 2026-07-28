@@ -14,6 +14,9 @@ namespace Funplay.Editor.Settings
         private const string SettingsDirectoryName = "UserSettings";
         private const string SettingsFileName = "FunplayMcpSettings.json";
         private const int DefaultPort = 8765;
+        private const int CurrentSettingsVersion = 1;
+        // Target names ("Claude Code") never contain '|'.
+        private const string LastClientConfigKeySeparator = "|";
         private const string DefaultToolExportProfile = "core";
         private const string DefaultSelectedConfigTarget = "Claude Code";
         private const bool DefaultExecuteCodeSafetyChecksEnabled = true;
@@ -61,9 +64,46 @@ namespace Funplay.Editor.Settings
             }
             set
             {
-                var normalized = value > 0 ? value : DefaultPort;
-                UpdateSettings(data => data.port = normalized);
+                // A cleared field commits 0, and a typo past 65535 cannot be bound at all (it would
+                // reach TcpListener as an ArgumentOutOfRangeException classified as a hard failure
+                // with no fallback). Both mean "no usable port chosen": release the pin rather than
+                // pinning DefaultPort, which would silently put this project back on the old shared
+                // port and re-create the collision with every other project on the machine.
+                if (value <= 0 || value > 65535)
+                {
+                    ClearMCPServerPortOverride();
+                    return;
+                }
+
+                // Writing a real port is the user picking one, so it outranks the per-project derived
+                // default from here on -- including when the value happens to equal DefaultPort.
+                UpdateSettings(data =>
+                {
+                    data.port = value;
+                    data.portConfigured = true;
+                });
             }
+        }
+
+        public bool MCPServerPortConfigured
+        {
+            get
+            {
+                lock (_lock)
+                    return _settings.portConfigured;
+            }
+        }
+
+        public void ClearMCPServerPortOverride()
+        {
+            // Also reset the stored value: "unpinned" must serialize one way only. Leaving the old
+            // pinned port behind created a second unpinned shape on disk that the one-shot migration
+            // machinery then had to defend against re-interpreting as a pin.
+            UpdateSettings(data =>
+            {
+                data.port = DefaultPort;
+                data.portConfigured = false;
+            });
         }
 
         public string MCPToolExportProfile
@@ -241,6 +281,49 @@ namespace Funplay.Editor.Settings
             }
         }
 
+        public string GetLastClientConfigKey(string targetName)
+        {
+            if (string.IsNullOrWhiteSpace(targetName))
+                return string.Empty;
+
+            var prefix = targetName.Trim() + LastClientConfigKeySeparator;
+            lock (_lock)
+            {
+                var entries = _settings.mcpLastClientConfigKeys;
+                if (entries == null)
+                    return string.Empty;
+
+                foreach (var entry in entries)
+                {
+                    if (entry != null && entry.StartsWith(prefix, StringComparison.Ordinal))
+                        return entry.Substring(prefix.Length);
+                }
+            }
+
+            return string.Empty;
+        }
+
+        public void SetLastClientConfigKey(string targetName, string serverKey)
+        {
+            if (string.IsNullOrWhiteSpace(targetName))
+                return;
+
+            var name = targetName.Trim();
+            var key = string.IsNullOrWhiteSpace(serverKey) ? string.Empty : serverKey.Trim();
+            var prefix = name + LastClientConfigKeySeparator;
+
+            UpdateSettings(data =>
+            {
+                if (data.mcpLastClientConfigKeys == null)
+                    data.mcpLastClientConfigKeys = new List<string>();
+
+                data.mcpLastClientConfigKeys.RemoveAll(
+                    entry => entry == null || entry.StartsWith(prefix, StringComparison.Ordinal));
+                if (key.Length > 0)
+                    data.mcpLastClientConfigKeys.Add(prefix + key);
+            });
+        }
+
         private void UpdateSettings(Action<SettingsData> apply)
         {
             if (apply == null) return;
@@ -316,8 +399,10 @@ namespace Funplay.Editor.Settings
         {
             return new SettingsData
             {
+                settingsVersion = CurrentSettingsVersion,
                 enabled = false,
                 port = DefaultPort,
+                portConfigured = false,
                 toolExportProfile = DefaultToolExportProfile,
                 selectedConfigTarget = DefaultSelectedConfigTarget,
                 executeCodeSafetyChecksEnabled = DefaultExecuteCodeSafetyChecksEnabled,
@@ -339,6 +424,25 @@ namespace Funplay.Editor.Settings
                 return;
 
             settings.port = settings.port > 0 ? settings.port : DefaultPort;
+
+            if (settings.settingsVersion < 1)
+            {
+                // A settings file written before portConfigured existed means this project was already
+                // serving on a port its clients are configured against. Upgrading keeps that port,
+                // pinned: the stored value becomes an explicit choice and nothing moves, so an upgrade
+                // never breaks a working setup (whether the port is the old shared default or one the
+                // user picked for CI or a firewall rule).
+                //
+                // Per-project derived ports are therefore the default for NEW projects only. An
+                // existing project opts in with "Use Per-Project Port" when it actually needs to run
+                // beside another editor -- which is also the fix the port-conflict warning points at.
+                settings.portConfigured = true;
+            }
+
+            // Loading persists the normalized data, so each migration above runs once and cannot
+            // later re-derive a value the user has since changed.
+            settings.settingsVersion = CurrentSettingsVersion;
+
             settings.mcpBrokerMonoPath = settings.mcpBrokerMonoPath ?? string.Empty;
             settings.toolExportProfile = NormalizeToolExportProfile(settings.toolExportProfile);
             settings.coreTools = settings.coreToolsCustom ? NormalizeToolNames(settings.coreTools) : null;
@@ -392,8 +496,15 @@ namespace Funplay.Editor.Settings
         [Serializable]
         private class SettingsData
         {
+            /// <summary>
+            /// 0 = written before <see cref="portConfigured"/> existed. Bumping this drives one-shot
+            /// migrations in <see cref="NormalizeInPlace"/> so they cannot re-run and overwrite a
+            /// later user choice.
+            /// </summary>
+            public int settingsVersion = 0;
             public bool enabled = false;
             public int port = DefaultPort;
+            public bool portConfigured = false;
             public string toolExportProfile = DefaultToolExportProfile;
             public bool coreToolsCustom = false;
             public List<string> coreTools;
@@ -410,6 +521,7 @@ namespace Funplay.Editor.Settings
             public bool pluginDebugLoggingConfigured = false;
             public bool mcpBrokerModeEnabled = DefaultMCPBrokerModeEnabled;
             public string mcpBrokerMonoPath = string.Empty;
+            public List<string> mcpLastClientConfigKeys;
         }
     }
 }
