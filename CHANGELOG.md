@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- A request that is in flight when Unity unloads the scripting domain is no longer reported as a server error. Disposing the editor-thread pump (`RootScopeServices` disposes the container on `beforeAssemblyReload`, and `MCPServerService` disposes it on stop) cancels queued work, so the awaiting request observed a `TaskCanceledException` and the catch-all logged `Error handling request: A task was canceled.` on ordinary recompiles and Play Mode transitions. Cancellation is now recognised as a shutdown/reload condition: it is logged through the plugin debug logger instead of `Debug.LogError`, and the client receives the retryable backend-unavailable response (`-32001`, `retryable: true`, `reason: unity_backend_reloading`) that the broker already returns for the same condition, instead of `-32603 Internal error`. Nothing in this path is cancellable per request (`HandleRequestAsync` is called with a default token and no tool raises `OperationCanceledException`), so no genuine failure is reclassified.
+
 ## [0.5.4] - 2026-07-27
 
 ### Added
