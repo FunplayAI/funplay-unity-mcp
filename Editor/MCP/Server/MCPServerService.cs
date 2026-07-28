@@ -445,6 +445,19 @@ namespace Funplay.Editor.MCP.Server
                     });
                 sendResponse(response);
             }
+            catch (Exception ex) when (IsShutdownCancellation(ex))
+            {
+                // Routine, not a failure: the editor-thread pump was disposed while this request
+                // was in flight, which happens on every domain reload (script compile, Play Mode
+                // transition) and on server stop. Logging it as an error made every reload that
+                // caught a request mid-flight print "Error handling request: A task was canceled."
+                // Nothing here is ever cancelled per-request -- HandleRequestAsync is called with
+                // a default token and no tool raises OperationCanceledException -- so a
+                // cancellation can only mean the server is going away.
+                PluginDebugLogger.Log(
+                    "[Funplay MCP Server] Request cancelled because the server is stopping or the domain is reloading.");
+                sendResponse(CreateBackendUnavailableResponse(request?.Id));
+            }
             catch (Exception ex)
             {
                 Debug.LogError($"[Funplay MCP Server] Error handling request: {ex.Message}");
@@ -454,6 +467,42 @@ namespace Funplay.Editor.MCP.Server
                     Error = new MCPError { Code = -32603, Message = $"Internal error: {ex.Message}" }
                 });
             }
+        }
+
+        /// <summary>
+        /// True when an exception raised while handling a request is the editor-thread pump being
+        /// disposed (server stop / domain reload) rather than a real failure.
+        /// <see cref="System.Threading.Tasks.TaskCanceledException"/> derives from
+        /// <see cref="OperationCanceledException"/>, so both are covered.
+        /// </summary>
+        internal static bool IsShutdownCancellation(Exception ex)
+        {
+            return ex is OperationCanceledException;
+        }
+
+        /// <summary>
+        /// Retryable "backend is going away" response. Mirrors the broker's own
+        /// backend-unavailable payload (code, message and <c>retryable</c>/<c>reason</c> data) so a
+        /// client sees the same shape whether the broker or the in-process server answers.
+        /// Keep in sync with <c>BackendUnavailableCode</c>/<c>BackendUnavailableMessage</c> in
+        /// <c>keepalive-broker.cs.txt</c> (the broker compiles standalone and cannot share them).
+        /// </summary>
+        internal static MCPResponse CreateBackendUnavailableResponse(object id)
+        {
+            return new MCPResponse
+            {
+                Id = id,
+                Error = new MCPError
+                {
+                    Code = -32001,
+                    Message = "Unity MCP backend is reloading or reconnecting. Retry shortly.",
+                    Data = new Dictionary<string, object>
+                    {
+                        ["retryable"] = true,
+                        ["reason"] = "unity_backend_reloading"
+                    }
+                }
+            };
         }
 
         private void HandleSettingsChanged()
