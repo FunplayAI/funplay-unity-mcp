@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.4] - 2026-07-27
+
 ### Added
 - Added `set_prefab_property` and `set_prefab_properties` for field-level edits on regular and variant prefab assets without opening Prefab Mode. The tools require normalized `Assets/**/*.prefab` paths, reject ambiguous hierarchy/component matches unless an explicit index is supplied, write serialized fields only, save through `PrefabUtility`, synchronously reimport, and return persisted readback. Both tools are included in the default `core` profile.
 - Added parameterized built-in MCP workflows for safe prefab edits, compilation checks, Play Mode recovery, serialized-reference wiring, and playable prototypes. Required and unknown arguments are validated by `prompts/get`, and prompts can best-effort embed relevant read-only Unity resources.
