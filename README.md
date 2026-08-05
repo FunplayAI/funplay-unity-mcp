@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.FunplayAI%2Ffunplay-unity-mcp.svg)](https://mcptoplist.com/server/io.github.FunplayAI%2Ffunplay-unity-mcp)
+
 <p align="center">
   <h1 align="center">Funplay MCP for Unity</h1>
   <p align="center">
