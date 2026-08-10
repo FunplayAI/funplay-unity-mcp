@@ -58,6 +58,35 @@ namespace Funplay.Editor
         }
 
         [Test]
+        public void ShutdownCancellation_CoversTaskCancellationButNotRealFailures()
+        {
+            // A disposed editor-thread pump cancels the queued TaskCompletionSource, so the awaiting
+            // request observes TaskCanceledException -- that must not be reported as a server error.
+            Assert.IsTrue(MCPServerService.IsShutdownCancellation(new TaskCanceledException()));
+            Assert.IsTrue(MCPServerService.IsShutdownCancellation(new OperationCanceledException()));
+            Assert.IsFalse(MCPServerService.IsShutdownCancellation(new InvalidOperationException("boom")));
+            Assert.IsFalse(MCPServerService.IsShutdownCancellation(null));
+        }
+
+        [Test]
+        public void BackendUnavailableResponse_MatchesBrokerRetryablePayload()
+        {
+            var response = MCPServerService.CreateBackendUnavailableResponse("req-7");
+
+            Assert.AreEqual("req-7", response.Id);
+            Assert.IsNotNull(response.Error);
+            Assert.AreEqual(-32001, response.Error.Code);
+            Assert.AreEqual(
+                "Unity MCP backend is reloading or reconnecting. Retry shortly.",
+                response.Error.Message);
+
+            var data = response.Error.Data as Dictionary<string, object>;
+            Assert.IsNotNull(data, "Error data should carry the broker's retryable payload.");
+            Assert.AreEqual(true, data["retryable"]);
+            Assert.AreEqual("unity_backend_reloading", data["reason"]);
+        }
+
+        [Test]
         public void SettingsRestartCompletion_CoalescesWaitersUntilFinalCompletion()
         {
             var completion = new MCPServerRestartCompletion();
