@@ -189,14 +189,20 @@ namespace Funplay.Editor.Tests
         {
             EnsureFolder(TempFolder);
             var materialPath = TempFolder + "/referenced.mat";
+            var unrelatedMaterialPath = TempFolder + "/unrelated.mat";
             var prefabPath = TempFolder + "/referencer.prefab";
             var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
             var material = new Material(shader);
+            var unrelatedMaterial = new Material(shader);
             var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
 
             try
             {
                 AssetDatabase.CreateAsset(material, materialPath);
+                // Keep at least two non-target assets in the fixture. With only the referencer
+                // prefab, a one-asset scan exhausts every candidate exactly and correctly reports
+                // truncated=false, making the asset-limit assertion depend on the host project.
+                AssetDatabase.CreateAsset(unrelatedMaterial, unrelatedMaterialPath);
                 go.GetComponent<Renderer>().sharedMaterial = material;
                 PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
                 AssetDatabase.SaveAssets();
