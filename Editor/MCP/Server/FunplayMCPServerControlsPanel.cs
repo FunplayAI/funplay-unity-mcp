@@ -21,6 +21,10 @@ namespace Funplay.Editor.MCP.Server
         private Label _brokerStatus;
         private TextField _brokerMonoPathField;
         private Label _brokerMonoHint;
+        private Label _portOriginHint;
+        private Button _releasePortPinButton;
+        private Button _pinPortButton;
+        private IntegerField _portField;
         private int _statusRefreshGeneration;
 
         public FunplayMCPServerControlsPanel(
@@ -56,19 +60,55 @@ namespace Funplay.Editor.MCP.Server
             toggle.style.marginBottom = 4;
             parent.Add(toggle);
 
-            var portField = new IntegerField("Server Port");
-            portField.SetValueWithoutNotify(_settings.MCPServerPort);
+            _portField = new IntegerField("Server Port");
+            _portField.tooltip =
+                "Shows the port this project is on. Without a pin each project derives its own port, so two " +
+                "editors never fight over one. Type a port to pin a fixed one (CI, a firewall rule), " +
+                "\"Pin Current Port\" to pin the one shown, and \"Use Per-Project Port\" to release the pin. " +
+                "Clearing the field also releases the pin.";
             // Commit on Enter/blur rather than per keystroke, since committing triggers a
             // full transport restart below -- typing a multi-digit port would otherwise
             // restart the server once per digit.
-            portField.isDelayed = true;
-            portField.RegisterValueChangedCallback(evt =>
+            _portField.isDelayed = true;
+            _portField.RegisterValueChangedCallback(evt =>
             {
                 _settings.MCPServerPort = evt.newValue;
                 RefreshStatusWhenSettled(ResolveSettingsLifecycleTask(), "Transport: Restarting...");
             });
-            portField.style.marginBottom = 8;
-            parent.Add(portField);
+            parent.Add(_portField);
+
+            _portOriginHint = new Label();
+            _portOriginHint.style.whiteSpace = WhiteSpace.Normal;
+            _portOriginHint.style.fontSize = 10;
+            _portOriginHint.style.opacity = 0.7f;
+            _portOriginHint.style.marginBottom = 2;
+            parent.Add(_portOriginHint);
+
+            var portButtonRow = new VisualElement();
+            portButtonRow.style.flexDirection = FlexDirection.Row;
+            portButtonRow.style.marginBottom = 8;
+
+            _releasePortPinButton = new Button(() =>
+            {
+                _settings.ClearMCPServerPortOverride();
+                RefreshStatusWhenSettled(ResolveSettingsLifecycleTask(), "Transport: Restarting...");
+            });
+            _releasePortPinButton.text = "Use Per-Project Port";
+            portButtonRow.Add(_releasePortPinButton);
+
+            // Typing the port already displayed fires no change event, so pinning the port a project
+            // is currently on needs its own gesture rather than an edit that never commits.
+            _pinPortButton = new Button(() =>
+            {
+                _settings.MCPServerPort = _portField.value;
+                RefreshStatusWhenSettled(ResolveSettingsLifecycleTask(), "Transport: Restarting...");
+            });
+            _pinPortButton.text = "Pin Current Port";
+            portButtonRow.Add(_pinPortButton);
+
+            parent.Add(portButtonRow);
+
+            UpdatePortOrigin();
 
             var transportModeDropdown = new DropdownField("Transport Mode");
             transportModeDropdown.choices = TransportChoices;
@@ -96,6 +136,7 @@ namespace Funplay.Editor.MCP.Server
                     if (!enabled)
                         MCPBrokerProcessManager.Stop();
                     UpdateBrokerStatus();
+                    UpdatePortOrigin();
                     InvokeRefreshStatus();
                 }
             });
@@ -171,7 +212,58 @@ namespace Funplay.Editor.MCP.Server
                 return;
 
             UpdateBrokerStatus();
+            UpdatePortOrigin();
             InvokeRefreshStatus();
+        }
+
+        /// <summary>
+        /// Says where the port came from -- a pin the user typed, or this project's derived default --
+        /// and flags a fallback bind, since that is the case where the port field and the port clients
+        /// must actually use disagree.
+        /// </summary>
+        private void UpdatePortOrigin()
+        {
+            if (_portOriginHint == null)
+                return;
+
+            var pinned = _settings.MCPServerPortConfigured;
+            var resolvedPort = _server != null ? _server.ResolvedPort : _settings.MCPServerPort;
+            var activePort = _server != null && _server.IsRunning ? _server.Port : 0;
+            // A fallback bind is the only case where the port asked for and the port served differ.
+            // Comparing against the stored override instead would call every derived port a fallback.
+            var fellBack = activePort > 0 && activePort != resolvedPort;
+
+            if (fellBack)
+            {
+                _portOriginHint.text = pinned
+                    ? $"Pinned to {resolvedPort}, but that port was in use; serving on {activePort}."
+                    : $"Derived per project ({resolvedPort}), but that port was in use; serving on {activePort}.";
+            }
+            else if (pinned)
+            {
+                // Existing projects are pinned by the upgrade so nothing moves, which means this hint
+                // is the only place they learn the per-project port exists at all.
+                _portOriginHint.text =
+                    $"Pinned to {resolvedPort} for this project. \"Use Per-Project Port\" derives a port from " +
+                    "the project path instead, so several editors can serve MCP at the same time.";
+            }
+            else
+            {
+                _portOriginHint.text =
+                    $"Derived from this project's path ({resolvedPort}), so each project gets its own port.";
+            }
+
+            // Keep the field on the port that is actually in play, so a user hand-writing a client
+            // entry from it never copies a port nothing serves. During a fallback bind that is the
+            // fallback port -- which also makes "Pin Current Port" a one-click way to make the
+            // fallback permanent and end the conflict.
+            if (_portField != null)
+                _portField.SetValueWithoutNotify(activePort > 0 ? activePort : resolvedPort);
+
+            if (_releasePortPinButton != null)
+                _releasePortPinButton.style.display = pinned ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_pinPortButton != null)
+                _pinPortButton.style.display = pinned ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         private void UpdateBrokerControls(bool enabled)

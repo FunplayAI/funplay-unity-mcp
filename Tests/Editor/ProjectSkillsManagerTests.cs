@@ -32,8 +32,13 @@ namespace Funplay.Editor.Tests
                 StringAssert.Contains("unity-mcp-workflow@1.0.2", File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
-                StringAssert.Contains("version: 1.0.2", File.ReadAllText(skillPath));
-                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.2 -->", File.ReadAllText(skillPath));
+                var skillContent = File.ReadAllText(skillPath);
+                StringAssert.Contains("version: 1.0.2", skillContent);
+                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.2 -->", skillContent);
+                StringAssert.Contains(
+                    "PORT=24312 # replace with the port shown in the Funplay MCP Server window",
+                    skillContent);
+                StringAssert.DoesNotContain("PORT=<port shown", skillContent);
 
                 var manifestJson = File.ReadAllText(ProjectSkillsManager.GetManifestPath(projectRoot));
                 StringAssert.Contains("\"skillVersions\"", manifestJson);

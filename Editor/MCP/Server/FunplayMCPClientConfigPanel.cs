@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Funplay.Editor.Settings;
 using UnityEditor;
 using UnityEngine;
@@ -134,6 +135,14 @@ namespace Funplay.Editor.MCP.Server
             var idx = Mathf.Clamp(_selectedTargetIndex, 0, _targets.Length - 1);
             var target = _targets[idx];
 
+            if (IsConfigurationBlockedByFallback())
+            {
+                _configStatusLabel.text = "Status: Resolve the port conflict before configuring";
+                _configStatusLabel.style.color = new Color(1f, 0.45f, 0.35f);
+                _configPathLabel.text = BuildFallbackConfigurationBlockedMessage();
+                return;
+            }
+
             if (target.IsLMStudio)
             {
                 var existingPaths = GetExistingLMStudioConfigPaths(GetUserHomePath());
@@ -157,7 +166,120 @@ namespace Funplay.Editor.MCP.Server
             _configStatusLabel.style.color = exists
                 ? new Color(0.4f, 1f, 0.4f)
                 : new Color(1f, 0.6f, 0.4f);
-            _configPathLabel.text = target.ConfigPath;
+            // Name and URL together are what a user needs to check or hand-write an entry, and both
+            // are project-specific now.
+            var resolvedKey = ResolveServerKeyForTarget(target);
+            var details = $"{target.ConfigPath}\nEntry: {resolvedKey} -> {GetServerUrl()}";
+
+            // Say why the name grew a hash, or the user just sees an unexplained hex suffix. The
+            // occupant can also be this same project under a lost record (settings file deleted,
+            // fresh checkout on the same machine), which we cannot tell apart from another project.
+            if (!string.Equals(resolvedKey, GetPreferredServerKey(), StringComparison.Ordinal))
+            {
+                details +=
+                    "\nA project hash was added because another project (or an earlier configuration " +
+                    $"of this one) already uses \"{GetPreferredServerKey()}\" in this config.";
+            }
+
+            // The legacy shared entry is never deleted automatically (any project could have written
+            // it), so say it is there -- otherwise it sits in the client as a server that answers
+            // nothing once every project has moved to its own entry.
+            if (exists && HasLegacyFunplayEntry(target))
+            {
+                details +=
+                    $"\nA legacy \"{FunplayMCPServerKey.LegacyKey}\" entry is still in this config. " +
+                    "No project writes it any more; remove it by hand once every project has been configured.";
+            }
+
+            _configPathLabel.text = details;
+        }
+
+        // Single-entry cache keyed by (path, mtime). ~/.claude.json grows to multiple MB in practice
+        // and these checks run on the UI thread on every window rebuild -- re-parsing it each time was
+        // a visible editor hitch scaling with a file this plugin does not own.
+        private static string _entryNamesCachePath;
+        private static DateTime _entryNamesCacheMtime;
+        private static HashSet<string> _entryNamesCache;
+
+        /// <summary>
+        /// Funplay entry names already present in a target's config. Used both to report the legacy
+        /// entry and to detect that another project has taken the name this project wants.
+        /// </summary>
+        private static HashSet<string> ReadFunplayEntryNames(MCPConfigTarget target)
+        {
+            try
+            {
+                if (!File.Exists(target.ConfigPath))
+                    return new HashSet<string>(StringComparer.Ordinal);
+
+                var mtime = File.GetLastWriteTimeUtc(target.ConfigPath);
+                if (_entryNamesCache != null &&
+                    string.Equals(target.ConfigPath, _entryNamesCachePath, StringComparison.Ordinal) &&
+                    mtime == _entryNamesCacheMtime)
+                {
+                    return _entryNamesCache;
+                }
+
+                var names = ParseFunplayEntryNames(target);
+                _entryNamesCachePath = target.ConfigPath;
+                _entryNamesCacheMtime = mtime;
+                _entryNamesCache = names;
+                return names;
+            }
+            catch (Exception)
+            {
+                // A config we cannot read is not worth a warning here; the write path reports failures.
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+        }
+
+        private static HashSet<string> ParseFunplayEntryNames(MCPConfigTarget target)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            var content = File.ReadAllText(target.ConfigPath);
+
+            // Cheap gate before any parsing: most configs contain no funplay entry at all.
+            if (content.IndexOf(FunplayMCPServerKey.LegacyKey, StringComparison.Ordinal) < 0)
+                return names;
+
+            if (target.IsToml)
+            {
+                foreach (Match match in Regex.Matches(content, @"(?m)^\[mcp_servers\.([^\]\s]+)\]"))
+                {
+                    var name = match.Groups[1].Value;
+                    if (FunplayMCPServerKey.IsFunplayKey(name))
+                        names.Add(name);
+                }
+
+                return names;
+            }
+
+            var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
+            object serversValue;
+            if (parsed == null || !parsed.TryGetValue(GetRootKey(target), out serversValue))
+                return names;
+
+            var servers = serversValue as Dictionary<string, object>;
+            if (servers == null)
+                return names;
+
+            foreach (var key in servers.Keys)
+            {
+                if (FunplayMCPServerKey.IsFunplayKey(key))
+                    names.Add(key);
+            }
+
+            return names;
+        }
+
+        private static bool HasLegacyFunplayEntry(MCPConfigTarget target)
+        {
+            return ReadFunplayEntryNames(target).Contains(FunplayMCPServerKey.LegacyKey);
+        }
+
+        private static string GetRootKey(MCPConfigTarget target)
+        {
+            return string.IsNullOrEmpty(target.RootKey) ? "mcpServers" : target.RootKey;
         }
 
         private MCPConfigTarget[] CreateTargets(string homePath)
@@ -278,9 +400,15 @@ namespace Funplay.Editor.MCP.Server
 
         private void WriteMCPConfigurationForTarget(MCPConfigTarget target)
         {
+            EnsureConfigurationEndpointIsSafe();
+
             if (target.IsLMStudio)
             {
-                ConfigureLMStudioTarget(target);
+                // The lmstudio:// deep link alone writes nothing; record the key only when config
+                // files were actually rewritten, or a cancelled dialog would poison the record.
+                var lmStudioKey = ConfigureLMStudioTarget(target);
+                if (!string.IsNullOrEmpty(lmStudioKey))
+                    RecordWrittenServerKey(target, lmStudioKey);
                 return;
             }
 
@@ -288,10 +416,23 @@ namespace Funplay.Editor.MCP.Server
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            if (target.IsToml)
-                ConfigureTomlTarget(target);
-            else
-                ConfigureJsonTarget(target);
+            var writtenKey = target.IsToml
+                ? ConfigureTomlTarget(target)
+                : ConfigureJsonTarget(target);
+
+            RecordWrittenServerKey(target, writtenKey);
+        }
+
+        /// <summary>
+        /// Remembers the entry name just written for this target, which is the only evidence a later
+        /// write has that an entry belongs to this project rather than to another project sharing the
+        /// config file. Per target: one shared slot meant a rename could only ever be cleaned up in
+        /// the first target re-configured. Records the name actually written, which may carry an
+        /// auto-added project hash.
+        /// </summary>
+        private void RecordWrittenServerKey(MCPConfigTarget target, string serverKey)
+        {
+            _settings.SetLastClientConfigKey(target.Name, serverKey);
         }
 
         private bool ConfigureProjectSkillsForPlatform(string platformId)
@@ -322,10 +463,14 @@ namespace Funplay.Editor.MCP.Server
             return true;
         }
 
-        private void ConfigureJsonTarget(MCPConfigTarget target)
+        /// <summary>
+        /// Returns the entry name written. <paramref name="presetServerKey"/> lets LM Studio write
+        /// one shared name into all of its config copies instead of re-resolving per file.
+        /// </summary>
+        private string ConfigureJsonTarget(MCPConfigTarget target, string presetServerKey = null)
         {
-            var rootKey = string.IsNullOrEmpty(target.RootKey) ? "mcpServers" : target.RootKey;
-            var serverName = "funplay";
+            var rootKey = GetRootKey(target);
+            var serverName = presetServerKey ?? ResolveServerKeyForTarget(target);
             var entry = CreateHttpEntry(target);
             Dictionary<string, object> root;
 
@@ -339,7 +484,11 @@ namespace Funplay.Editor.MCP.Server
                     root = parsed;
                     var servers = root[rootKey] as Dictionary<string, object>;
                     if (servers != null)
+                    {
                         servers[serverName] = entry;
+                        RemoveSupersededFunplayEntries(
+                            servers, serverName, _settings.GetLastClientConfigKey(target.Name));
+                    }
                     else
                         root[rootKey] = new Dictionary<string, object> { [serverName] = entry };
                 }
@@ -358,20 +507,65 @@ namespace Funplay.Editor.MCP.Server
             }
 
             File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
+            return serverName;
         }
 
-        private void ConfigureTomlTarget(MCPConfigTarget target)
+        /// <summary>
+        /// Retires the entry THIS project wrote last, once its name has changed (a renamed product, or
+        /// the project-hash toggle). Nothing else is removed: a <c>funplay-*</c> entry this project
+        /// never wrote belongs to another project, and deleting it would recreate the very bug the
+        /// per-project naming fixes -- configuring project B silently unhooking project A.
+        /// The legacy shared <c>funplay</c> entry is deliberately left in place for the same reason:
+        /// any project on the machine could have written it, so it is surfaced in the panel instead.
+        /// </summary>
+        internal static void RemoveSupersededFunplayEntries(
+            Dictionary<string, object> servers, string currentServerName, string previousServerName)
         {
-            var sectionHeader = "[mcp_servers.funplay]";
-            var tomlSection = CreateTomlSection(target);
+            if (string.IsNullOrEmpty(previousServerName) ||
+                string.Equals(previousServerName, currentServerName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!FunplayMCPServerKey.IsFunplayKey(previousServerName))
+                return;
+
+            object previousEntry;
+            if (!servers.TryGetValue(previousServerName, out previousEntry))
+                return;
+
+            // A recorded key whose entry now points somewhere non-local was edited by hand after we
+            // wrote it; leave that alone rather than deleting someone's deliberate change.
+            if (!IsLoopbackEntry(previousEntry))
+                return;
+
+            servers.Remove(previousServerName);
+        }
+
+        private static bool IsLoopbackEntry(object entry)
+        {
+            var entryMap = entry as Dictionary<string, object>;
+            object url;
+            if (entryMap == null || !entryMap.TryGetValue("url", out url))
+                return false;
+
+            return IsLoopbackUrl(url as string);
+        }
+
+        /// <summary>Returns the entry name written.</summary>
+        private string ConfigureTomlTarget(MCPConfigTarget target)
+        {
+            var serverKey = ResolveServerKeyForTarget(target);
+            var tomlSection = CreateTomlSection(target, serverKey);
             var content = File.Exists(target.ConfigPath) ? File.ReadAllText(target.ConfigPath) : string.Empty;
 
-            if (content.Contains(sectionHeader))
+            content = RemoveSupersededTomlSection(
+                content, serverKey, _settings.GetLastClientConfigKey(target.Name));
+
+            int startIdx;
+            int endIdx;
+            if (TryFindTomlSection(content, serverKey, out startIdx, out endIdx))
             {
-                var startIdx = content.IndexOf(sectionHeader, StringComparison.Ordinal);
-                var afterHeader = startIdx + sectionHeader.Length;
-                var nextSection = content.IndexOf("\n[", afterHeader, StringComparison.Ordinal);
-                var endIdx = nextSection >= 0 ? nextSection : content.Length;
                 content = content.Substring(0, startIdx) + tomlSection + content.Substring(endIdx);
             }
             else
@@ -382,25 +576,210 @@ namespace Funplay.Editor.MCP.Server
             }
 
             File.WriteAllText(target.ConfigPath, content);
+            return serverKey;
         }
 
-        private void ConfigureLMStudioTarget(MCPConfigTarget target)
+        /// <summary>
+        /// TOML counterpart of <see cref="RemoveSupersededFunplayEntries"/>: drops the section this
+        /// project wrote last when its name has changed, and nothing else. Mirrors the JSON path's
+        /// hand-edit guard -- a section whose url was repointed at a non-local host was edited
+        /// deliberately after we wrote it and is kept.
+        /// </summary>
+        internal static string RemoveSupersededTomlSection(
+            string content, string currentServerName, string previousServerName)
         {
-            OpenLMStudioAddMCPLink(target);
+            if (string.IsNullOrEmpty(content) ||
+                string.IsNullOrEmpty(previousServerName) ||
+                string.Equals(previousServerName, currentServerName, StringComparison.Ordinal) ||
+                !FunplayMCPServerKey.IsFunplayKey(previousServerName))
+            {
+                return content;
+            }
 
-            foreach (var configPath in GetExistingLMStudioConfigPaths(GetUserHomePath()))
+            int startIdx;
+            int endIdx;
+            if (!TryFindTomlSection(content, previousServerName, out startIdx, out endIdx))
+                return content;
+
+            var section = content.Substring(startIdx, endIdx - startIdx);
+            if (!TomlSectionPointsAtLoopback(section))
+                return content;
+
+            return content.Substring(0, startIdx) + content.Substring(endIdx);
+        }
+
+        /// <summary>
+        /// Locates a <c>[mcp_servers.&lt;name&gt;]</c> section. The single place that owns the
+        /// section-boundary rules, shared by the writer and the cleanup so they cannot drift.
+        /// Headers only match at the start of a line -- a commented-out
+        /// <c># [mcp_servers...]</c> used to match mid-line and made the cleanup cut from inside the
+        /// comment. The returned range includes the section's trailing newline; the next section's
+        /// <c>[</c> starts at <paramref name="endIdx"/>.
+        /// </summary>
+        internal static bool TryFindTomlSection(
+            string content, string serverName, out int startIdx, out int endIdx)
+        {
+            startIdx = -1;
+            endIdx = -1;
+            if (string.IsNullOrEmpty(content) || string.IsNullOrEmpty(serverName))
+                return false;
+
+            var header = "[mcp_servers." + serverName + "]";
+            var searchFrom = 0;
+            while (searchFrom <= content.Length - header.Length)
+            {
+                var idx = content.IndexOf(header, searchFrom, StringComparison.Ordinal);
+                if (idx < 0)
+                    return false;
+
+                if (idx == 0 || content[idx - 1] == '\n')
+                {
+                    startIdx = idx;
+                    break;
+                }
+
+                searchFrom = idx + 1;
+            }
+
+            if (startIdx < 0)
+                return false;
+
+            var afterHeader = startIdx + header.Length;
+            var nextSection = content.IndexOf("\n[", afterHeader, StringComparison.Ordinal);
+            endIdx = nextSection >= 0 ? nextSection + 1 : content.Length;
+            return true;
+        }
+
+        private static bool TomlSectionPointsAtLoopback(string section)
+        {
+            var match = Regex.Match(section, "url\\s*=\\s*\"([^\"]*)\"");
+            // No parseable url -> no evidence the section is still the one we wrote -> keep it.
+            return match.Success && IsLoopbackUrl(match.Groups[1].Value);
+        }
+
+        /// <summary>Returns the entry name written, or empty when no config file was rewritten.</summary>
+        private string ConfigureLMStudioTarget(MCPConfigTarget target)
+        {
+            var existingPaths = GetExistingLMStudioConfigPaths(GetUserHomePath());
+
+            // One name for everything LM Studio touches. Resolving per config file could
+            // hash-suffix one copy and not another, splitting this project's identity across LM
+            // Studio's config copies -- and with only one written name recorded, the cleanup
+            // could never retire the others. The deep link needs the shared name too: its target
+            // carries a display path (possibly several paths joined for the UI), so resolving
+            // against it would always see an unreadable file and never add a needed hash.
+            var preferredKey = GetPreferredServerKey();
+            var expectedUrl = GetServerUrl();
+            var namesAcrossAllFiles = new HashSet<string>(StringComparer.Ordinal);
+            var preferredEntryPointsAtCurrentUrl = false;
+            foreach (var configPath in existingPaths)
             {
                 var fileTarget = target;
                 fileTarget.ConfigPath = configPath;
-                ConfigureJsonTarget(fileTarget);
+                namesAcrossAllFiles.UnionWith(ReadFunplayEntryNames(fileTarget));
+                preferredEntryPointsAtCurrentUrl |=
+                    TargetEntryPointsAtUrl(fileTarget, preferredKey, expectedUrl);
+            }
+
+            var serverKey = ResolveServerKey(
+                _settings.GetLastClientConfigKey(target.Name),
+                namesAcrossAllFiles,
+                preferredEntryPointsAtCurrentUrl);
+
+            OpenLMStudioAddMCPLink(target, serverKey);
+
+            var wroteAnyFile = false;
+            foreach (var configPath in existingPaths)
+            {
+                var fileTarget = target;
+                fileTarget.ConfigPath = configPath;
+                ConfigureJsonTarget(fileTarget, serverKey);
+                wroteAnyFile = true;
+            }
+
+            return wroteAnyFile ? serverKey : string.Empty;
+        }
+
+        private static bool TargetEntryPointsAtUrl(
+            MCPConfigTarget target, string serverKey, string expectedUrl)
+        {
+            try
+            {
+                if (!File.Exists(target.ConfigPath))
+                    return false;
+
+                return ConfigEntryPointsAtUrl(
+                    File.ReadAllText(target.ConfigPath),
+                    target.IsToml,
+                    target.RootKey,
+                    serverKey,
+                    expectedUrl);
+            }
+            catch (Exception)
+            {
+                // The write path will report an unreadable or malformed config. Here, lack of a
+                // readable exact URL simply means there is no ownership evidence.
+                return false;
             }
         }
 
-        private void OpenLMStudioAddMCPLink(MCPConfigTarget target)
+        /// <summary>
+        /// Checks whether a named entry points at the exact endpoint this project would write. LM
+        /// Studio's first-time deep link may create the entry after Unity returns without giving us a
+        /// write receipt; finding the same key and URL on the next Configure is the evidence that the
+        /// entry came from that deep link rather than from another project.
+        /// </summary>
+        internal static bool ConfigEntryPointsAtUrl(
+            string content,
+            bool isToml,
+            string rootKey,
+            string serverKey,
+            string expectedUrl)
+        {
+            if (string.IsNullOrEmpty(content) ||
+                string.IsNullOrEmpty(serverKey) ||
+                string.IsNullOrEmpty(expectedUrl))
+            {
+                return false;
+            }
+
+            if (isToml)
+            {
+                int startIdx;
+                int endIdx;
+                if (!TryFindTomlSection(content, serverKey, out startIdx, out endIdx))
+                    return false;
+
+                var section = content.Substring(startIdx, endIdx - startIdx);
+                var match = Regex.Match(section, "url\\s*=\\s*\"([^\"]*)\"");
+                return match.Success &&
+                       string.Equals(match.Groups[1].Value, expectedUrl, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
+            object serversValue;
+            var effectiveRootKey = string.IsNullOrEmpty(rootKey) ? "mcpServers" : rootKey;
+            if (parsed == null || !parsed.TryGetValue(effectiveRootKey, out serversValue))
+                return false;
+
+            var servers = serversValue as Dictionary<string, object>;
+            object entryValue;
+            if (servers == null || !servers.TryGetValue(serverKey, out entryValue))
+                return false;
+
+            var entry = entryValue as Dictionary<string, object>;
+            object urlValue;
+            return entry != null &&
+                   entry.TryGetValue("url", out urlValue) &&
+                   string.Equals(urlValue as string, expectedUrl, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void OpenLMStudioAddMCPLink(MCPConfigTarget target, string serverKey)
         {
             var config = SimpleJsonHelper.Serialize(CreateHttpEntry(target));
             var encodedConfig = Uri.EscapeDataString(Convert.ToBase64String(Encoding.UTF8.GetBytes(config)));
-            Application.OpenURL($"lmstudio://add_mcp?name=funplay&config={encodedConfig}");
+            Application.OpenURL(
+                $"lmstudio://add_mcp?name={Uri.EscapeDataString(serverKey)}&config={encodedConfig}");
         }
 
         private string BuildLMStudioConfiguredMessage()
@@ -436,20 +815,153 @@ namespace Funplay.Editor.MCP.Server
             return entry;
         }
 
-        private string CreateTomlSection(MCPConfigTarget target)
+        private string CreateTomlSection(MCPConfigTarget target, string serverKey)
         {
             if (!target.IsToml)
                 return string.Empty;
 
-            return $"[mcp_servers.funplay]\nurl = \"{GetServerUrl()}\"\n";
+            return $"[mcp_servers.{serverKey}]\nurl = \"{GetServerUrl()}\"\n";
+        }
+
+        /// <summary>
+        /// The entry name this project wants: derived from the project directory name, never
+        /// hash-suffixed. <see cref="ResolveServerKeyForTarget"/> is what actually gets written.
+        /// </summary>
+        internal string GetPreferredServerKey()
+        {
+            return FunplayMCPServerKey.Build(
+                GetProjectFolderName(),
+                FunplayProjectIdentity.FromProjectPath(GetProjectRootPath()),
+                includeProjectHash: false);
+        }
+
+        /// <summary>
+        /// Entry name to write into <paramref name="target"/>'s config. Normally the preferred name,
+        /// but when that name is already in the config and this project is not the one that wrote it,
+        /// a project hash is appended automatically: two projects with the same directory name would
+        /// otherwise resolve to the same entry name and the second one configured would silently
+        /// replace the first one's entry -- with nothing on either side to indicate it happened.
+        /// Detecting the collision keeps names clean for everyone else instead of taxing every project
+        /// with a hash it does not need (the hash costs 7 of the 25 characters a client tool name can
+        /// spare).
+        /// </summary>
+        private string ResolveServerKeyForTarget(MCPConfigTarget target)
+        {
+            return ResolveServerKey(
+                _settings.GetLastClientConfigKey(target.Name),
+                ReadFunplayEntryNames(target));
+        }
+
+        private string ResolveServerKey(
+            string recordedKey,
+            ICollection<string> existingEntryNames,
+            bool preferredEntryPointsAtCurrentUrl = false)
+        {
+            var preferred = GetPreferredServerKey();
+            if (!ShouldAddProjectHash(
+                    preferred,
+                    recordedKey,
+                    existingEntryNames,
+                    preferredEntryPointsAtCurrentUrl))
+            {
+                return preferred;
+            }
+
+            return FunplayMCPServerKey.Build(
+                GetProjectFolderName(),
+                FunplayProjectIdentity.FromProjectPath(GetProjectRootPath()),
+                includeProjectHash: true);
+        }
+
+        /// <summary>
+        /// True when the preferred entry name is already taken by a project that is not this one.
+        /// The recorded name is the normal ownership evidence: an entry this project wrote is ours
+        /// to overwrite, anything else under that name belongs to another project. LM Studio's deep
+        /// link is the exception because it creates the file outside Unity; an exact URL match on the
+        /// next Configure is accepted as its write receipt.
+        /// </summary>
+        internal static bool ShouldAddProjectHash(
+            string preferredKey,
+            string recordedKey,
+            ICollection<string> existingEntryNames,
+            bool preferredEntryPointsAtCurrentUrl = false)
+        {
+            if (string.IsNullOrEmpty(preferredKey) || existingEntryNames == null)
+                return false;
+
+            if (string.Equals(recordedKey, preferredKey, StringComparison.Ordinal) ||
+                preferredEntryPointsAtCurrentUrl)
+            {
+                return false;
+            }
+
+            return existingEntryNames.Contains(preferredKey);
+        }
+
+        internal static bool ShouldBlockConfigurationForFallback(
+            bool isRunning, int resolvedPort, int activePort)
+        {
+            return isRunning && resolvedPort > 0 && activePort > 0 && resolvedPort != activePort;
+        }
+
+        private bool IsConfigurationBlockedByFallback()
+        {
+            return _server != null &&
+                   ShouldBlockConfigurationForFallback(
+                       _server.IsRunning, _server.ResolvedPort, _server.Port);
+        }
+
+        private void EnsureConfigurationEndpointIsSafe()
+        {
+            if (!IsConfigurationBlockedByFallback())
+                return;
+
+            throw new InvalidOperationException(BuildFallbackConfigurationBlockedMessage());
+        }
+
+        private string BuildFallbackConfigurationBlockedMessage()
+        {
+            return
+                $"This editor resolved stable port {_server.ResolvedPort}, but it is serving on fallback port {_server.Port} " +
+                "because the stable port is owned by another process. Writing the stable endpoint could route this " +
+                "project's tools to that process, while writing the fallback would leave a stale entry after restart. " +
+                "Click Use Per-Project Port or Pin Current Port, wait for the server restart to finish, then Configure again.";
         }
 
         private string GetServerUrl()
         {
-            var port = _server != null && _server.IsRunning
-                ? _server.Port
-                : _settings.MCPServerPort;
+            // ResolvedPort, deliberately not Port: the config file is persistent, so it must carry the
+            // project's stable port identity. Port equals it except during a fallback bind, and baking
+            // a transient fallback port into the config would leave a dead entry behind the moment the
+            // conflict clears. WriteMCPConfigurationForTarget blocks every write while a fallback is
+            // active, so this stable URL can never be persisted while another process owns it.
+            // ISettingsController.MCPServerPort is only the stored override and is meaningless when
+            // nothing was pinned.
+            var port = _server != null ? _server.ResolvedPort : _settings.MCPServerPort;
             return $"http://127.0.0.1:{port}/";
+        }
+
+        /// <summary>
+        /// Recognises the loopback URL shape this plugin writes. Must stay in sync with
+        /// <see cref="GetServerUrl"/> -- an entry whose URL no longer matches is treated as
+        /// hand-edited and never cleaned up.
+        /// </summary>
+        internal static bool IsLoopbackUrl(string url)
+        {
+            return !string.IsNullOrEmpty(url) &&
+                   (url.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) ||
+                    url.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Project directory name, the source of the entry name. Preferred over
+        /// <c>Application.productName</c>: the product name is often left at Unity's default or set to
+        /// non-ASCII text, while the directory name always exists and is what developers call the
+        /// project.
+        /// </summary>
+        private static string GetProjectFolderName()
+        {
+            return Path.GetFileName(GetProjectRootPath());
         }
 
         private static string GetProjectRootPath()

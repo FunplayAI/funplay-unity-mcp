@@ -975,10 +975,13 @@ platform: {platform.ToString().ToLowerInvariant()}
 
 ## MCP Call Pattern
 
-If native MCP tools are not directly available, probe the local HTTP endpoint:
+If native MCP tools are not directly available, probe the local HTTP endpoint. The port is
+per project, so read it from the Funplay MCP Server window (it is also the port in the
+configured client entry) instead of assuming a fixed one:
 
 ```bash
-curl -sS -m 1 -X POST http://127.0.0.1:8765/mcp \
+PORT=24312 # replace with the port shown in the Funplay MCP Server window
+curl -sS -m 1 -X POST http://127.0.0.1:$PORT/mcp \
   -H 'Content-Type: application/json' \
   -d '{""jsonrpc"":""2.0"",""id"":1,""method"":""tools/list""}'
 ```

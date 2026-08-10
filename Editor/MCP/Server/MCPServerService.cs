@@ -83,6 +83,21 @@ namespace Funplay.Editor.MCP.Server
         private string _toolExposureSetting;
         private string _transportSetting;
 
+        /// <summary>
+        /// The resolution the last applied lifecycle used. Only consumed by
+        /// <see cref="HandleSettingsChanged"/> to decide whether a settings edit changed the port and
+        /// the transport must restart -- everything user-facing reads the live computed
+        /// <see cref="Port"/>/<see cref="ResolvedPort"/> instead, which cannot go stale.
+        /// </summary>
+        private int _resolvedStartupPort;
+
+        /// <summary>
+        /// Per-project derived port, computed once: the project path cannot change within a domain,
+        /// and caching keeps the SHA-256 derivation out of every settings-change and property read.
+        /// 0 when the project path could not be resolved.
+        /// </summary>
+        private readonly int _derivedPort;
+
         public bool IsRunning
         {
             get
@@ -103,7 +118,34 @@ namespace Funplay.Editor.MCP.Server
                 }
             }
         }
-        public int Port { get; private set; }
+        /// <summary>
+        /// Port clients must use right now: the live transport's port while one exists (which is the
+        /// fallback port during a fallback bind), otherwise the current resolution. Computed rather
+        /// than stored so it can never go stale -- a stored copy went wrong twice (stale after a
+        /// pin change while the server was stopped, and a dead fallback port surviving a stop).
+        /// </summary>
+        public int Port
+        {
+            get
+            {
+                lock (_lifecycleLock)
+                {
+                    if (_transport != null)
+                        return _transport.Port;
+                }
+
+                return ResolveStartupPort();
+            }
+        }
+
+        /// <summary>
+        /// Port resolution asks for -- the explicit setting when there is one, otherwise this
+        /// project's derived port. Differs from <see cref="Port"/> only while a fallback bind is in
+        /// effect. This is the stable identity a client config entry should point at. Never read
+        /// <c>ISettingsController.MCPServerPort</c> to answer "which port is this project on": that
+        /// field is only the stored override and is meaningless when nothing was pinned.
+        /// </summary>
+        public int ResolvedPort => ResolveStartupPort();
         public MCPInteractionLog InteractionLog { get; }
 
         internal Task<bool> WaitForSettingsRestartAsync()
@@ -128,7 +170,14 @@ namespace Funplay.Editor.MCP.Server
             _compilationService = compilationService ?? throw new ArgumentNullException(nameof(compilationService));
             _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
 
-            Port = _settings.MCPServerPort;
+            int derivedPort;
+            _derivedPort = FunplayProjectIdentity.TryDerivePortFromProjectPath(
+                _applicationPaths.ProjectPath, out derivedPort)
+                ? derivedPort
+                : 0;
+
+            lock (_lifecycleLock)
+                _resolvedStartupPort = ResolveStartupPort();
             _toolExposureSetting = BuildToolExposureSetting();
             _transportSetting = BuildTransportSetting();
             InteractionLog = new MCPInteractionLog();
@@ -244,7 +293,7 @@ namespace Funplay.Editor.MCP.Server
                 {
                     if (!_disposed && lifecycleVersion == _lifecycleVersion)
                     {
-                        Port = startupPort;
+                        _resolvedStartupPort = startupPort;
                         _toolExposureSetting = toolExposureSetting;
                         _transportSetting = BuildTransportSetting();
                         _transport = transport;
@@ -277,6 +326,11 @@ namespace Funplay.Editor.MCP.Server
                         CleanupServerState(transport);
                         return false;
                     }
+
+                    // Awaits in this method resume on the editor sync context, so this is the main
+                    // thread SessionState requires. A fallback bind is remembered for the next
+                    // (post-reload) start; landing on the requested port clears the memory.
+                    FunplayPortFallbackMemory.RecordStartOutcome(startupPort, transport.Port);
 
                     if (transport.IsAttachedToExistingServer)
                     {
@@ -509,19 +563,29 @@ namespace Funplay.Editor.MCP.Server
         {
             if (_disposed) return;
 
-            var portChanged = _settings.MCPServerPort != Port;
+            // Compare against the port resolution asked for, not the active one: a fallback bind (the
+            // resolved port was occupied) leaves Port different from the resolved port, and comparing
+            // those would report a port change on every unrelated settings edit and restart the server.
+            var resolvedStartupPort = ResolveStartupPort();
             var toolExposureSetting = BuildToolExposureSetting();
             var transportSetting = BuildTransportSetting();
             var toolExposureChanged = !string.Equals(toolExposureSetting, _toolExposureSetting, StringComparison.Ordinal);
             var transportChanged = !string.Equals(transportSetting, _transportSetting, StringComparison.Ordinal);
             bool hasActiveLifecycle;
+            bool portChanged;
             lock (_lifecycleLock)
+            {
+                // Read the previous resolution under the same lock a start writes it under, so a
+                // settings change racing an in-flight start cannot compare against a torn value.
+                portChanged = resolvedStartupPort != _resolvedStartupPort;
                 hasActiveLifecycle = _isRunning || _startTask != null || _restartScheduled || _restartInProgress;
+            }
 
             if ((portChanged || toolExposureChanged || transportChanged) && hasActiveLifecycle)
             {
                 PluginDebugLogger.Log("[Funplay MCP Server] Server settings changed, restarting MCP transport...");
-                Port = _settings.MCPServerPort;
+                lock (_lifecycleLock)
+                    _resolvedStartupPort = resolvedStartupPort;
                 _toolExposureSetting = toolExposureSetting;
                 _transportSetting = transportSetting;
                 ScheduleRestart();
@@ -532,10 +596,12 @@ namespace Funplay.Editor.MCP.Server
         {
             if (_settings.MCPBrokerModeEnabled)
             {
-                if (MCPBrokerProcessManager.EnsureRunning(startupPort, _settings.MCPBrokerMonoPath) &&
-                    MCPBrokerProcessManager.TryGetConnectionInfo(startupPort, out var broker))
+                int brokerPort;
+                if (MCPBrokerProcessManager.EnsureRunningWithPortFallback(
+                        startupPort, _settings.MCPBrokerMonoPath, out brokerPort) &&
+                    MCPBrokerProcessManager.TryGetConnectionInfo(brokerPort, out var broker))
                 {
-                    return new MCPBrokerClientTransport(startupPort, broker.Token);
+                    return new MCPBrokerClientTransport(brokerPort, broker.Token);
                 }
 
                 Debug.LogWarning(
@@ -548,7 +614,11 @@ namespace Funplay.Editor.MCP.Server
                 MCPBrokerProcessManager.Stop();
             }
 
-            return new HttpMCPTransport(startupPort, serverName, projectIdentity);
+            // Read on the main thread (CreateTransport runs before the first await in
+            // StartCoreAsync); the transport itself binds on pool threads where SessionState is off
+            // limits, so the hints travel in by value.
+            var fallbackHints = FunplayPortFallbackMemory.ReadHints(startupPort);
+            return new HttpMCPTransport(startupPort, serverName, projectIdentity, fallbackHints);
         }
 
         private string BuildToolExposureSetting()
@@ -634,15 +704,27 @@ namespace Funplay.Editor.MCP.Server
             return request.Params.TryGetValue("name", out var value) ? value?.ToString() ?? string.Empty : string.Empty;
         }
 
+        /// <summary>
+        /// The port this project wants to bind: a port the user picked always wins, otherwise it is
+        /// derived from the project identity so two editors on different projects do not both aim at
+        /// one shared default. Derivation is a pure function of the project path, so the resolved
+        /// port is stable across restarts and a client config entry stays valid; if a derived port is
+        /// occupied by something else, the transport falls back to a free one at bind time.
+        /// </summary>
         private int ResolveStartupPort()
         {
-            var configuredPort = NormalizePort(_settings.MCPServerPort);
-            return configuredPort;
+            if (_settings.MCPServerPortConfigured)
+                return NormalizePort(_settings.MCPServerPort);
+
+            return _derivedPort > 0 ? _derivedPort : NormalizePort(_settings.MCPServerPort);
         }
 
         private static int NormalizePort(int port)
         {
-            return port > 0 ? port : 8765;
+            // The upper bound matters: an out-of-range pin reaching TcpListener throws
+            // ArgumentOutOfRangeException, which the start path classifies as a hard failure with no
+            // port fallback -- the server would just stay down.
+            return port > 0 && port <= 65535 ? port : 8765;
         }
 
         private void ScheduleRestart()

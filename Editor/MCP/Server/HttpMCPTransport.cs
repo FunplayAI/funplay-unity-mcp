@@ -21,79 +21,182 @@ namespace Funplay.Editor.MCP.Server
     {
         private TcpListener _listener;
         private CancellationTokenSource _cts;
-        private readonly int _port;
+        private readonly int _requestedPort;
+        private readonly PortFallbackHints _fallbackHints;
+        private int _activePort;
         private bool _isRunning;
         private const int StartRetryAttempts = 40;
+
+        // When the requested port is already known to be foreign-owned (this session fell back
+        // before), the owner is not going to release it the way a tearing-down previous AppDomain
+        // does -- waiting the full window would just add ~10s of MCP outage to every domain reload.
+        private const int KnownConflictRetryAttempts = 3;
         private const int StartRetryDelayMs = 250;
+        private const int FallbackScanAttempts = 3;
         private const int MaxHeaderBytes = 64 * 1024;
 
         public bool IsRunning => _isRunning;
         public bool IsAttachedToExistingServer => false;
+
+        /// <summary>
+        /// Port actually bound, which differs from the requested one when that port was taken and the
+        /// transport fell back. Callers must publish this rather than the requested port.
+        /// </summary>
+        public int Port => _activePort;
+
         public event Action<MCPRequest, Action<MCPResponse>> OnRequestReceived;
 
-        public HttpMCPTransport(int port, string expectedServerName = null, string expectedProjectIdentity = null)
+        private enum StartAttemptOutcome
         {
-            _port = port;
+            Started,
+            PortUnavailable,
+            Cancelled,
+            Failed
+        }
+
+        public HttpMCPTransport(
+            int port,
+            string expectedServerName = null,
+            string expectedProjectIdentity = null,
+            PortFallbackHints fallbackHints = default)
+        {
+            _requestedPort = port;
+            _activePort = port;
+            _fallbackHints = fallbackHints;
         }
 
         public async Task<bool> StartAsync(CancellationToken ct = default)
         {
             if (_isRunning) return true;
 
-            for (var attempt = 1; attempt <= StartRetryAttempts; attempt++)
+            var retryAttempts = _fallbackHints.RequestedPortKnownForeign
+                ? KnownConflictRetryAttempts
+                : StartRetryAttempts;
+            var outcome = await TryStartOnPortAsync(_requestedPort, retryAttempts, ct).ConfigureAwait(false);
+            if (outcome == StartAttemptOutcome.Started)
+                return true;
+
+            if (outcome != StartAttemptOutcome.PortUnavailable)
+            {
+                _isRunning = false;
+                return false;
+            }
+
+            // The port stayed occupied for the whole retry window, so this is not the previous
+            // AppDomain's listener finishing its teardown -- it belongs to someone else: another
+            // project whose derived port collided, or an unrelated process. Serving on a fallback port
+            // beats not serving at all; the fallback is remembered only in SessionState (see
+            // FunplayPortFallbackMemory), never persisted, so it cannot outlive the conflict.
+
+            // A fallback this session already served is tried first so a client connected to it
+            // survives the domain reload instead of chasing a re-rolled port.
+            var preferredPort = _fallbackHints.PreferredFallbackPort;
+            if (preferredPort > 0 && preferredPort != _requestedPort)
+            {
+                var preferredOutcome = await TryStartOnPortAsync(preferredPort, 1, ct).ConfigureAwait(false);
+                if (preferredOutcome == StartAttemptOutcome.Started)
+                {
+                    LogFallbackBind(preferredPort);
+                    _isRunning = true;
+                    return true;
+                }
+
+                if (preferredOutcome != StartAttemptOutcome.PortUnavailable)
+                {
+                    _isRunning = false;
+                    return false;
+                }
+            }
+
+            for (var scan = 1; scan <= FallbackScanAttempts; scan++)
+            {
+                int fallbackPort;
+                if (!FunplayFreePortScanner.TryFindFreePort(_requestedPort, out fallbackPort))
+                    break;
+
+                // The scan probes by binding and releasing, so another process can take the port in
+                // between. Re-scan instead of giving up: losing that race once must not leave this
+                // editor without an MCP server while plenty of ports are free.
+                var fallbackOutcome = await TryStartOnPortAsync(fallbackPort, 1, ct).ConfigureAwait(false);
+                if (fallbackOutcome == StartAttemptOutcome.Started)
+                {
+                    LogFallbackBind(fallbackPort);
+                    _isRunning = true;
+                    return true;
+                }
+
+                if (fallbackOutcome != StartAttemptOutcome.PortUnavailable)
+                {
+                    _isRunning = false;
+                    return false;
+                }
+            }
+
+            Debug.LogError(
+                $"[Funplay MCP Server] Port {_requestedPort} is in use and no free port nearby could be bound; the MCP server is not serving.");
+            _isRunning = false;
+            return false;
+        }
+
+        private void LogFallbackBind(int fallbackPort)
+        {
+            Debug.LogWarning(
+                $"[Funplay MCP Server] Port {_requestedPort} is held by another process; serving on {fallbackPort} instead. " +
+                FunplayFreePortScanner.FallbackGuidance);
+        }
+
+        private async Task<StartAttemptOutcome> TryStartOnPortAsync(int port, int retryAttempts, CancellationToken ct)
+        {
+            for (var attempt = 1; attempt <= retryAttempts; attempt++)
             {
                 try
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    _listener = new TcpListener(IPAddress.Loopback, _port);
+                    _listener = new TcpListener(IPAddress.Loopback, port);
                     _listener.Server.NoDelay = true;
                     _listener.Start();
 
                     _cts = new CancellationTokenSource();
+                    _activePort = port;
                     _isRunning = true;
 
                     _ = Task.Run(() => ListenLoopAsync(_cts.Token), _cts.Token);
 
-                    PluginDebugLogger.Log($"[Funplay MCP Server] HTTP transport started on http://127.0.0.1:{_port}/");
-                    return true;
+                    PluginDebugLogger.Log($"[Funplay MCP Server] HTTP transport started on http://127.0.0.1:{port}/");
+                    return StartAttemptOutcome.Started;
                 }
                 catch (OperationCanceledException)
                 {
                     CleanupFailedStart();
                     _isRunning = false;
-                    return false;
+                    return StartAttemptOutcome.Cancelled;
                 }
                 catch (Exception ex) when (IsAddressInUse(ex))
                 {
                     CleanupFailedStart();
-                    if (attempt >= StartRetryAttempts)
-                    {
-                        Debug.LogError($"[Funplay MCP Server] Failed to start HTTP transport: {ex.Message}");
-                        _isRunning = false;
-                        return false;
-                    }
+                    if (attempt >= retryAttempts)
+                        return StartAttemptOutcome.PortUnavailable;
 
                     if (attempt == 1)
                     {
                         Debug.LogWarning(
-                            $"[Funplay MCP Server] Port {_port} is temporarily in use; retrying for up to {(StartRetryAttempts * StartRetryDelayMs) / 1000f:0.#} seconds.");
+                            $"[Funplay MCP Server] Port {port} is temporarily in use; retrying for up to {(retryAttempts * StartRetryDelayMs) / 1000f:0.#} seconds.");
                     }
 
                     if (!await DelayBeforeRetryAsync(ct).ConfigureAwait(false))
-                        return false;
+                        return StartAttemptOutcome.Cancelled;
                 }
                 catch (Exception ex)
                 {
                     CleanupFailedStart();
                     Debug.LogError($"[Funplay MCP Server] Failed to start HTTP transport: {ex.Message}");
                     _isRunning = false;
-                    return false;
+                    return StartAttemptOutcome.Failed;
                 }
             }
 
-            _isRunning = false;
-            return false;
+            return StartAttemptOutcome.PortUnavailable;
         }
 
         public Task StopAsync()
