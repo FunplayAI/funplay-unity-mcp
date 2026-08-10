@@ -135,6 +135,14 @@ namespace Funplay.Editor.MCP.Server
             var idx = Mathf.Clamp(_selectedTargetIndex, 0, _targets.Length - 1);
             var target = _targets[idx];
 
+            if (IsConfigurationBlockedByFallback())
+            {
+                _configStatusLabel.text = "Status: Resolve the port conflict before configuring";
+                _configStatusLabel.style.color = new Color(1f, 0.45f, 0.35f);
+                _configPathLabel.text = BuildFallbackConfigurationBlockedMessage();
+                return;
+            }
+
             if (target.IsLMStudio)
             {
                 var existingPaths = GetExistingLMStudioConfigPaths(GetUserHomePath());
@@ -171,15 +179,6 @@ namespace Funplay.Editor.MCP.Server
                 details +=
                     "\nA project hash was added because another project (or an earlier configuration " +
                     $"of this one) already uses \"{GetPreferredServerKey()}\" in this config.";
-            }
-
-            // The written URL always carries the stable port, so say so while a fallback bind is in
-            // effect -- otherwise "Configure succeeded but the client cannot connect" looks broken.
-            if (_server != null && _server.IsRunning && _server.Port != _server.ResolvedPort)
-            {
-                details +=
-                    $"\nCurrently serving on fallback port {_server.Port} because {_server.ResolvedPort} is in use. " +
-                    "The entry targets the stable port and connects once it frees; pin a free port if the conflict is permanent.";
             }
 
             // The legacy shared entry is never deleted automatically (any project could have written
@@ -401,6 +400,8 @@ namespace Funplay.Editor.MCP.Server
 
         private void WriteMCPConfigurationForTarget(MCPConfigTarget target)
         {
+            EnsureConfigurationEndpointIsSafe();
+
             if (target.IsLMStudio)
             {
                 // The lmstudio:// deep link alone writes nothing; record the key only when config
@@ -667,16 +668,23 @@ namespace Funplay.Editor.MCP.Server
             // could never retire the others. The deep link needs the shared name too: its target
             // carries a display path (possibly several paths joined for the UI), so resolving
             // against it would always see an unreadable file and never add a needed hash.
+            var preferredKey = GetPreferredServerKey();
+            var expectedUrl = GetServerUrl();
             var namesAcrossAllFiles = new HashSet<string>(StringComparer.Ordinal);
+            var preferredEntryPointsAtCurrentUrl = false;
             foreach (var configPath in existingPaths)
             {
                 var fileTarget = target;
                 fileTarget.ConfigPath = configPath;
                 namesAcrossAllFiles.UnionWith(ReadFunplayEntryNames(fileTarget));
+                preferredEntryPointsAtCurrentUrl |=
+                    TargetEntryPointsAtUrl(fileTarget, preferredKey, expectedUrl);
             }
 
             var serverKey = ResolveServerKey(
-                _settings.GetLastClientConfigKey(target.Name), namesAcrossAllFiles);
+                _settings.GetLastClientConfigKey(target.Name),
+                namesAcrossAllFiles,
+                preferredEntryPointsAtCurrentUrl);
 
             OpenLMStudioAddMCPLink(target, serverKey);
 
@@ -690,6 +698,80 @@ namespace Funplay.Editor.MCP.Server
             }
 
             return wroteAnyFile ? serverKey : string.Empty;
+        }
+
+        private static bool TargetEntryPointsAtUrl(
+            MCPConfigTarget target, string serverKey, string expectedUrl)
+        {
+            try
+            {
+                if (!File.Exists(target.ConfigPath))
+                    return false;
+
+                return ConfigEntryPointsAtUrl(
+                    File.ReadAllText(target.ConfigPath),
+                    target.IsToml,
+                    target.RootKey,
+                    serverKey,
+                    expectedUrl);
+            }
+            catch (Exception)
+            {
+                // The write path will report an unreadable or malformed config. Here, lack of a
+                // readable exact URL simply means there is no ownership evidence.
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks whether a named entry points at the exact endpoint this project would write. LM
+        /// Studio's first-time deep link may create the entry after Unity returns without giving us a
+        /// write receipt; finding the same key and URL on the next Configure is the evidence that the
+        /// entry came from that deep link rather than from another project.
+        /// </summary>
+        internal static bool ConfigEntryPointsAtUrl(
+            string content,
+            bool isToml,
+            string rootKey,
+            string serverKey,
+            string expectedUrl)
+        {
+            if (string.IsNullOrEmpty(content) ||
+                string.IsNullOrEmpty(serverKey) ||
+                string.IsNullOrEmpty(expectedUrl))
+            {
+                return false;
+            }
+
+            if (isToml)
+            {
+                int startIdx;
+                int endIdx;
+                if (!TryFindTomlSection(content, serverKey, out startIdx, out endIdx))
+                    return false;
+
+                var section = content.Substring(startIdx, endIdx - startIdx);
+                var match = Regex.Match(section, "url\\s*=\\s*\"([^\"]*)\"");
+                return match.Success &&
+                       string.Equals(match.Groups[1].Value, expectedUrl, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
+            object serversValue;
+            var effectiveRootKey = string.IsNullOrEmpty(rootKey) ? "mcpServers" : rootKey;
+            if (parsed == null || !parsed.TryGetValue(effectiveRootKey, out serversValue))
+                return false;
+
+            var servers = serversValue as Dictionary<string, object>;
+            object entryValue;
+            if (servers == null || !servers.TryGetValue(serverKey, out entryValue))
+                return false;
+
+            var entry = entryValue as Dictionary<string, object>;
+            object urlValue;
+            return entry != null &&
+                   entry.TryGetValue("url", out urlValue) &&
+                   string.Equals(urlValue as string, expectedUrl, StringComparison.OrdinalIgnoreCase);
         }
 
         private void OpenLMStudioAddMCPLink(MCPConfigTarget target, string serverKey)
@@ -770,11 +852,20 @@ namespace Funplay.Editor.MCP.Server
                 ReadFunplayEntryNames(target));
         }
 
-        private string ResolveServerKey(string recordedKey, ICollection<string> existingEntryNames)
+        private string ResolveServerKey(
+            string recordedKey,
+            ICollection<string> existingEntryNames,
+            bool preferredEntryPointsAtCurrentUrl = false)
         {
             var preferred = GetPreferredServerKey();
-            if (!ShouldAddProjectHash(preferred, recordedKey, existingEntryNames))
+            if (!ShouldAddProjectHash(
+                    preferred,
+                    recordedKey,
+                    existingEntryNames,
+                    preferredEntryPointsAtCurrentUrl))
+            {
                 return preferred;
+            }
 
             return FunplayMCPServerKey.Build(
                 GetProjectFolderName(),
@@ -784,19 +875,57 @@ namespace Funplay.Editor.MCP.Server
 
         /// <summary>
         /// True when the preferred entry name is already taken by a project that is not this one.
-        /// The recorded name is the ownership evidence: an entry this project wrote is ours to
-        /// overwrite, anything else under that name belongs to another project.
+        /// The recorded name is the normal ownership evidence: an entry this project wrote is ours
+        /// to overwrite, anything else under that name belongs to another project. LM Studio's deep
+        /// link is the exception because it creates the file outside Unity; an exact URL match on the
+        /// next Configure is accepted as its write receipt.
         /// </summary>
         internal static bool ShouldAddProjectHash(
-            string preferredKey, string recordedKey, ICollection<string> existingEntryNames)
+            string preferredKey,
+            string recordedKey,
+            ICollection<string> existingEntryNames,
+            bool preferredEntryPointsAtCurrentUrl = false)
         {
             if (string.IsNullOrEmpty(preferredKey) || existingEntryNames == null)
                 return false;
 
-            if (string.Equals(recordedKey, preferredKey, StringComparison.Ordinal))
+            if (string.Equals(recordedKey, preferredKey, StringComparison.Ordinal) ||
+                preferredEntryPointsAtCurrentUrl)
+            {
                 return false;
+            }
 
             return existingEntryNames.Contains(preferredKey);
+        }
+
+        internal static bool ShouldBlockConfigurationForFallback(
+            bool isRunning, int resolvedPort, int activePort)
+        {
+            return isRunning && resolvedPort > 0 && activePort > 0 && resolvedPort != activePort;
+        }
+
+        private bool IsConfigurationBlockedByFallback()
+        {
+            return _server != null &&
+                   ShouldBlockConfigurationForFallback(
+                       _server.IsRunning, _server.ResolvedPort, _server.Port);
+        }
+
+        private void EnsureConfigurationEndpointIsSafe()
+        {
+            if (!IsConfigurationBlockedByFallback())
+                return;
+
+            throw new InvalidOperationException(BuildFallbackConfigurationBlockedMessage());
+        }
+
+        private string BuildFallbackConfigurationBlockedMessage()
+        {
+            return
+                $"This editor resolved stable port {_server.ResolvedPort}, but it is serving on fallback port {_server.Port} " +
+                "because the stable port is owned by another process. Writing the stable endpoint could route this " +
+                "project's tools to that process, while writing the fallback would leave a stale entry after restart. " +
+                "Click Use Per-Project Port or Pin Current Port, wait for the server restart to finish, then Configure again.";
         }
 
         private string GetServerUrl()
@@ -804,8 +933,10 @@ namespace Funplay.Editor.MCP.Server
             // ResolvedPort, deliberately not Port: the config file is persistent, so it must carry the
             // project's stable port identity. Port equals it except during a fallback bind, and baking
             // a transient fallback port into the config would leave a dead entry behind the moment the
-            // conflict clears. ISettingsController.MCPServerPort is only the stored override and is
-            // meaningless when nothing was pinned.
+            // conflict clears. WriteMCPConfigurationForTarget blocks every write while a fallback is
+            // active, so this stable URL can never be persisted while another process owns it.
+            // ISettingsController.MCPServerPort is only the stored override and is meaningless when
+            // nothing was pinned.
             var port = _server != null ? _server.ResolvedPort : _settings.MCPServerPort;
             return $"http://127.0.0.1:{port}/";
         }

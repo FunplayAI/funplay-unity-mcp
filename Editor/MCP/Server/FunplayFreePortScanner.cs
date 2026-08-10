@@ -17,16 +17,16 @@ namespace Funplay.Editor.MCP.Server
 
         /// <summary>
         /// Shared tail of every fallback-bind warning (in-process transport, broker launch, broker
-        /// keep-path), so all three tell the user the same recovery story. Configured clients keep
-        /// targeting the STABLE port -- the one-click configuration deliberately never writes a
-        /// fallback port -- which is why the guidance is "pin and re-configure", not "repoint at the
-        /// fallback".
+        /// keep-path), so all three tell the user the same recovery story. Existing clients may still
+        /// target the occupied stable port, and one-click configuration is blocked until the conflict
+        /// is resolved; this prevents calls from being routed to the process that owns that port and
+        /// avoids persisting a transient fallback.
         /// </summary>
         public const string FallbackGuidance =
-            "Configured clients keep targeting this project's stable port and reconnect once it frees. " +
-            "If the conflict is permanent -- typically two projects pinned to the same port -- open the MCP Server window and " +
-            "either click \"Use Per-Project Port\" to derive a port from this project's path, or pin a free port; " +
-            "then re-run the one-click client configuration.";
+            "Do not send requests through a client entry that still targets the occupied stable port; it may reach the other process. " +
+            "One-click client configuration is blocked while this fallback is active. Open the MCP Server window and either click " +
+            "\"Use Per-Project Port\" to derive a port from this project's path, or click \"Pin Current Port\" to keep the active port; " +
+            "wait for the restart, then re-run the one-click configuration.";
 
         /// <summary>
         /// Scans upwards from <paramref name="startPort"/> for a port that can actually be bound on

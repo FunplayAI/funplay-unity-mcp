@@ -60,10 +60,11 @@ editor session only, which buys two things:
   already knows is held by someone else.
 - It re-binds the same fallback port first, so a client connected to it survives recompiles.
 
-The one-click configuration always writes the project's **stable** port, never a fallback port. A
-client pointed at the stable port simply reconnects once that port frees up. If the conflict is
-permanent, pin a free port (or click **Pin Current Port** while the fallback is active) and
-re-configure.
+One-click configuration is **blocked while a fallback is active**. Writing the occupied stable port
+could route this project's mutating calls to the other process, while writing the transient fallback
+would leave a dead entry after restart. An existing client entry that still targets the occupied
+stable port may also reach that other process, so do not use it until the conflict is resolved. Click
+**Use Per-Project Port** or **Pin Current Port**, wait for the server restart, then re-configure.
 
 ---
 
@@ -108,8 +109,8 @@ added a hash so the suffix is not a mystery.
 | The line under the field | Says where the port came from: pinned, derived, or serving on a fallback because the resolved port was in use. |
 
 The client config panel shows the entry it will write (`Entry: funplay-game-alpha ->
-http://127.0.0.1:24312/`), notes an auto-added project hash, and notes when a fallback bind is
-active.
+http://127.0.0.1:24312/`) and notes an auto-added project hash. During a fallback bind it replaces
+that preview with the blocking safety explanation and the two recovery choices.
 
 ---
 
@@ -123,7 +124,7 @@ re-configuration is needed when you toggle it.
 | --- | --- | --- |
 | Per-project state | the listening port | the port, plus `<project>/Library/FunplayMcp/Broker/` (pid file and the compiled broker) — inside the project, so isolated by construction |
 | On a port conflict | remembers the conflict for the session: short retry, and the previous fallback port is tried first | a broker already healthy on a fallback port is kept rather than killed and restarted while the requested port stays occupied |
-| Written into the client config | the stable port | the stable port |
+| Written into the client config | the stable port; blocked during fallback | the stable port; blocked during fallback |
 
 The broker is internally single-tenant (one queue, one waiting backend), but that is not a limit
 here: each project runs **its own** broker process on its own port.

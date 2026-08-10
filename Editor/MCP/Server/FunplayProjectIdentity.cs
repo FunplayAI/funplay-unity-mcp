@@ -91,7 +91,13 @@ namespace Funplay.Editor.MCP.Server
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                 .Replace('\\', '/');
 
-            return fullPath.ToLowerInvariant();
+            // Windows path lookup is case-insensitive, so spelling the same project with different
+            // casing must not move its derived port. Unix paths are case-sensitive by default (and
+            // macOS can use a case-sensitive volume), so folding there would collapse distinct
+            // projects such as /work/Game and /work/game into one identity.
+            return Path.DirectorySeparatorChar == '\\'
+                ? fullPath.ToLowerInvariant()
+                : fullPath;
         }
     }
 }

@@ -23,6 +23,7 @@ namespace Funplay.Editor
     {
         private const string ServerName = "Funplay MCP Server - Test Project";
         private const string ProjectIdentityA = "project-a";
+        private const string ProjectIdentityB = "project-b";
 
         [Test]
         public void ClientDisconnectDetection_CoversExpectedResponseWriteFailures()
@@ -197,6 +198,56 @@ namespace Funplay.Editor
             {
                 transport.Dispose();
                 owner.Dispose();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator StartAsync_TwoProjectsContendingForOneStablePort_SecondUsesFallback()
+        {
+            // Models two upgraded projects that both retained the old pinned port. Project A owns
+            // the stable endpoint; project B must serve elsewhere and its one-click configuration
+            // must remain blocked until the user gives it a stable, unambiguous port.
+            int stablePort;
+            Assert.IsTrue(FunplayFreePortScanner.TryFindFreePort(24000, 256, out stablePort));
+
+            var projectA = new HttpMCPTransport(stablePort, ServerName, ProjectIdentityA);
+            var projectB = new HttpMCPTransport(
+                stablePort,
+                ServerName,
+                ProjectIdentityB,
+                new PortFallbackHints(requestedPortKnownForeign: true, preferredFallbackPort: 0));
+
+            projectA.OnRequestReceived += (request, sendResponse) =>
+                HandleInitializeRequest(request, sendResponse, ProjectIdentityA);
+            projectB.OnRequestReceived += (request, sendResponse) =>
+                HandleInitializeRequest(request, sendResponse, ProjectIdentityB);
+
+            try
+            {
+                var firstStart = projectA.StartAsync();
+                yield return WaitForTask(firstStart);
+                Assert.IsTrue(firstStart.Result);
+
+                var secondStart = projectB.StartAsync();
+                yield return WaitForTask(secondStart, 10f);
+                Assert.IsTrue(secondStart.Result, "The second project should bind a nearby fallback port.");
+                Assert.AreNotEqual(stablePort, projectB.Port);
+                Assert.IsTrue(FunplayMCPClientConfigPanel.ShouldBlockConfigurationForFallback(
+                    isRunning: true,
+                    resolvedPort: stablePort,
+                    activePort: projectB.Port));
+
+                var projectAProbe = SendInitializeRequestAsync(stablePort);
+                var projectBProbe = SendInitializeRequestAsync(projectB.Port);
+                yield return WaitForTask(projectAProbe);
+                yield return WaitForTask(projectBProbe);
+                Assert.That(projectAProbe.Result, Does.Contain(ProjectIdentityA));
+                Assert.That(projectBProbe.Result, Does.Contain(ProjectIdentityB));
+            }
+            finally
+            {
+                projectB.Dispose();
+                projectA.Dispose();
             }
         }
 

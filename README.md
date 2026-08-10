@@ -91,6 +91,8 @@ A new project gets its own port, derived from the project path, so two editors o
 
 Upgrading from an earlier version changes nothing: the project keeps the port it was already using, recorded as a pin, so existing client configs keep working. Click **Use Per-Project Port** when you want that project to run beside another editor. See [Running Several Unity Projects at Once](Documentation~/multi-project-setup.md) for the full setup guide.
 
+If the window reports a fallback port, do not use a client entry that still targets the occupied stable port; it could reach the process that owns that port. One-click configuration stays blocked until you click **Use Per-Project Port** or **Pin Current Port** and the server finishes restarting.
+
 Direct in-process HTTP is the default transport. If you need stronger connection continuity across Unity script recompiles or Play Mode domain reloads, enable **Experimental Broker Mode** in the MCP Server window. It runs a tiny local broker with Unity's bundled Mono, keeps the same `127.0.0.1` port for MCP clients, and requires no client config change.
 
 Open **Funplay → Tool Exposure** if you want to edit the exact tools exposed by `core` or `full`.

@@ -1,6 +1,7 @@
 // Copyright (C) Funplay. Licensed under MIT.
 
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -37,14 +38,39 @@ namespace Funplay.Editor
         }
 
         [Test]
-        public void DerivedPort_IgnoresTrailingSeparatorAndCase()
+        public void DerivedPort_IgnoresTrailingSeparator()
         {
             int plain;
             int decorated;
             Assert.IsTrue(FunplayProjectIdentity.TryDerivePortFromProjectPath(ProjectA, out plain));
-            Assert.IsTrue(FunplayProjectIdentity.TryDerivePortFromProjectPath(ProjectA.ToUpperInvariant() + "/", out decorated));
+            Assert.IsTrue(FunplayProjectIdentity.TryDerivePortFromProjectPath(ProjectA + "/", out decorated));
 
-            Assert.AreEqual(plain, decorated, "The same project reached through a differently spelled path must keep its port.");
+            Assert.AreEqual(plain, decorated, "A trailing separator must not move the project's port.");
+        }
+
+        [Test]
+        public void ProjectIdentity_UsesPlatformPathCaseSemantics()
+        {
+            var parent = Path.Combine(Path.GetTempPath(), "FunplayCaseIdentity");
+            var upperCaseProject = Path.Combine(parent, "Game");
+            var lowerCaseProject = Path.Combine(parent, "game");
+            var upperIdentity = FunplayProjectIdentity.FromProjectPath(upperCaseProject);
+            var lowerIdentity = FunplayProjectIdentity.FromProjectPath(lowerCaseProject);
+
+            if (Path.DirectorySeparatorChar == '\\')
+            {
+                Assert.AreEqual(
+                    upperIdentity,
+                    lowerIdentity,
+                    "Windows paths differing only by case identify the same project.");
+            }
+            else
+            {
+                Assert.AreNotEqual(
+                    upperIdentity,
+                    lowerIdentity,
+                    "Case-sensitive platforms must not collapse distinct Game and game directories.");
+            }
         }
 
         [Test]
@@ -216,6 +242,67 @@ namespace Funplay.Editor
 
             Assert.IsFalse(FunplayMCPClientConfigPanel.ShouldAddProjectHash(null, null, existing));
             Assert.IsFalse(FunplayMCPClientConfigPanel.ShouldAddProjectHash("funplay-love-town", null, null));
+        }
+
+        [Test]
+        public void LMStudioSecondConfigure_ReusesThePreferredEntryCreatedByTheFirstDeepLink()
+        {
+            const string preferredKey = "funplay-love-town";
+            const string expectedUrl = "http://127.0.0.1:24312/";
+            var noEntriesBeforeFirstConfigure = new HashSet<string>();
+
+            Assert.IsFalse(
+                FunplayMCPClientConfigPanel.ShouldAddProjectHash(
+                    preferredKey, null, noEntriesBeforeFirstConfigure),
+                "The first Configure should offer the clean preferred name to LM Studio.");
+
+            // LM Studio accepts the deep link and creates its mcp.json after Unity has returned, so
+            // there is deliberately no recorded key yet. The next Configure recovers ownership from
+            // the exact key + URL that the first deep link supplied.
+            var configCreatedByLMStudio =
+                "{\"mcpServers\":{\"funplay-love-town\":{\"url\":\"http://127.0.0.1:24312/\",\"type\":\"http\"}}}";
+            var exactUrlMatch = FunplayMCPClientConfigPanel.ConfigEntryPointsAtUrl(
+                configCreatedByLMStudio,
+                isToml: false,
+                rootKey: null,
+                serverKey: preferredKey,
+                expectedUrl: expectedUrl);
+            var anotherProjectUrlMatch = FunplayMCPClientConfigPanel.ConfigEntryPointsAtUrl(
+                configCreatedByLMStudio,
+                isToml: false,
+                rootKey: null,
+                serverKey: preferredKey,
+                expectedUrl: "http://127.0.0.1:25000/");
+            var entriesBeforeSecondConfigure = new HashSet<string> { preferredKey };
+
+            Assert.IsTrue(exactUrlMatch);
+            Assert.IsFalse(anotherProjectUrlMatch);
+            Assert.IsFalse(
+                FunplayMCPClientConfigPanel.ShouldAddProjectHash(
+                    preferredKey,
+                    recordedKey: null,
+                    existingEntryNames: entriesBeforeSecondConfigure,
+                    preferredEntryPointsAtCurrentUrl: exactUrlMatch),
+                "The second Configure must update the deep-link-created entry instead of adding a hash duplicate.");
+
+            Assert.IsTrue(
+                FunplayMCPClientConfigPanel.ShouldAddProjectHash(
+                    preferredKey,
+                    recordedKey: null,
+                    existingEntryNames: entriesBeforeSecondConfigure,
+                    preferredEntryPointsAtCurrentUrl: anotherProjectUrlMatch),
+                "A same-name entry at another project's URL remains a collision.");
+        }
+
+        [Test]
+        public void ClientConfiguration_IsBlockedOnlyDuringAnActiveFallbackBind()
+        {
+            Assert.IsTrue(FunplayMCPClientConfigPanel.ShouldBlockConfigurationForFallback(
+                isRunning: true, resolvedPort: 8765, activePort: 8766));
+            Assert.IsFalse(FunplayMCPClientConfigPanel.ShouldBlockConfigurationForFallback(
+                isRunning: true, resolvedPort: 8765, activePort: 8765));
+            Assert.IsFalse(FunplayMCPClientConfigPanel.ShouldBlockConfigurationForFallback(
+                isRunning: false, resolvedPort: 8765, activePort: 8766));
         }
 
         [Test]

@@ -91,6 +91,8 @@ openupm add com.gamebooom.unity.mcp
 
 从旧版本升级不会有任何变化：工程会保留原来在用的端口（记为 pin），已配置的客户端照旧可用。等到需要让该工程与另一个编辑器同时服务时，再点一次 **Use Per-Project Port** 即可。完整配置指南见 [同时开多个 Unity 工程](Documentation~/multi-project-setup.zh-CN.md)。
 
+如果窗口显示当前使用回退端口，不要继续使用仍指向被占稳定端口的客户端条目；它可能连到占着该端口的另一个进程。一键配置会保持阻止，直到你点 **Use Per-Project Port** 或 **Pin Current Port**，并等服务器完成重启。
+
 默认传输仍然是进程内 Direct HTTP。如果你需要在 Unity 脚本重编译或进入 Play Mode 触发域重载时尽量保持 MCP 客户端连接，可以在 MCP Server 窗口启用 **Experimental Broker Mode**。它会用 Unity 自带 Mono 启动一个很小的本地 broker，客户端仍然连接同一个 `127.0.0.1` 端口，不需要改 MCP 配置。
 
 如果你想编辑 `core` 或 `full` 各自暴露哪些工具，可以打开 **Funplay → Tool Exposure**。
