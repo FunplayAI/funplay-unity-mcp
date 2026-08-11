@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Funplay.Editor.MCP.Server;
 using Funplay.Editor.Tools.Builtins;
 using NUnit.Framework;
@@ -170,6 +171,17 @@ namespace Funplay.Editor.Tests
         {
             Assert.IsTrue(MCPToolExportPolicy.DefaultCoreTools.Contains("capture_editor_window"));
             Assert.IsTrue(MCPToolExportPolicy.DefaultCoreTools.Contains("raycast_at_point"));
+        }
+
+        [Test]
+        public void CaptureGameView_IsAsyncSoItCanWaitForFreshEditorFrames()
+        {
+            var method = typeof(ScreenshotFunctions).GetMethod(
+                "CaptureGameView",
+                BindingFlags.Public | BindingFlags.Static);
+
+            Assert.IsNotNull(method);
+            Assert.AreEqual(typeof(Task<string>), method.ReturnType);
         }
 
         [Test]

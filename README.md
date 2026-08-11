@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.1"
+    "com.gamebooom.unity.mcp": "0.6.2"
   }
 }
 ```
@@ -105,9 +105,9 @@ Use the built-in **One-Click MCP Configuration** in the `Funplay > MCP Server` w
 
 Select your target client, click **Configure**, and the package writes the recommended MCP config entry for you.
 
-For Claude Code, Cursor, and Codex, click **Configure + Skills** to also install the required project MCP workflow skill.
+For Claude Code, Cursor, and Codex, click **Configure + Skills** to also install both built-in project skills.
 
-If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms, install the required `unity-mcp-workflow` skill, and optionally enable `unity-ui-composition` for responsive portrait and landscape uGUI work.
+If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms and install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills. The UI skill covers responsive portrait and landscape uGUI work.
 
 If you prefer to edit config files manually, use the examples below as fallback references. Replace `<project>` with this project's entry name and `<port>` with its port -- the MCP Server window shows both:
 
@@ -268,7 +268,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
 - **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, LM Studio, VS Code, Kiro, Trae, Codex, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
-- **Project Skills Manager** — Configure project-level skills for supported AI clients, with the required `unity-mcp-workflow` skill and optional `unity-ui-composition` guidance
+- **Project Skills Manager** — Configure project-level skills for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - **MCP Settings** — Adjust `execute_code` safety defaults and enable verbose plugin debug logging when troubleshooting MCP connections or tool execution
 - **Vendor Agnostic** — Works with any AI client that supports MCP: Claude Code, Cursor, LM Studio, Windsurf, Codex, VS Code Copilot, etc.
 

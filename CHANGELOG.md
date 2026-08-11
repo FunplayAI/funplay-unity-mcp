@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2] - 2026-08-11
+
+### Changed
+- `unity-ui-composition` Project Skill v1.0.1 is now built in and installed for every configured AI platform instead of requiring an optional selection. Existing v0.6.1 manifests that list it as optional are normalized automatically.
+
+### Fixed
+- `capture_game_view` now requests Game View repaints and waits for fresh Editor frames before reading Unity's internal RenderTexture, preventing consecutive captures from returning a previously rendered frame.
+
 ## [0.6.1] - 2026-08-11
 
 ### Added

@@ -29,7 +29,9 @@ namespace Funplay.Editor.Tests
                 Assert.IsFalse(status.HasUpdates);
                 Assert.IsTrue(File.Exists(agentsPath));
                 Assert.IsTrue(File.Exists(skillPath));
-                StringAssert.Contains("unity-mcp-workflow@1.0.3", File.ReadAllText(agentsPath));
+                var agentsContent = File.ReadAllText(agentsPath);
+                StringAssert.Contains("unity-mcp-workflow@1.0.3", agentsContent);
+                StringAssert.Contains("unity-ui-composition@1.0.1", agentsContent);
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
                 var skillContent = File.ReadAllText(skillPath);
@@ -44,6 +46,8 @@ namespace Funplay.Editor.Tests
                 StringAssert.Contains("\"skillVersions\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-mcp-workflow\"", manifestJson);
                 StringAssert.Contains("\"version\": \"1.0.3\"", manifestJson);
+                StringAssert.Contains("\"id\": \"unity-ui-composition\"", manifestJson);
+                StringAssert.Contains("\"version\": \"1.0.1\"", manifestJson);
             }
             finally
             {
@@ -85,7 +89,7 @@ namespace Funplay.Editor.Tests
         }
 
         [Test]
-        public void ApplyConfiguration_WritesOptionalUnityUiCompositionSkillOnlyWhenSelected()
+        public void ApplyConfiguration_WritesBuiltInUnityUiCompositionSkillForEveryPlatform()
         {
             const string skillId = "unity-ui-composition";
             var projectRoot = CreateTempProjectPath();
@@ -108,15 +112,6 @@ namespace Funplay.Editor.Tests
                     new[] { "codex", "claude", "cursor" },
                     Array.Empty<string>());
 
-                Assert.IsFalse(File.Exists(codexSkillPath));
-                Assert.IsFalse(File.Exists(claudeSkillPath));
-                Assert.IsFalse(File.Exists(cursorRulePath));
-
-                ProjectSkillsManager.ApplyConfiguration(
-                    projectRoot,
-                    new[] { "codex", "claude", "cursor" },
-                    new[] { skillId });
-
                 Assert.IsTrue(File.Exists(codexSkillPath));
                 Assert.IsTrue(File.Exists(claudeSkillPath));
                 Assert.IsTrue(File.Exists(cursorRulePath));
@@ -124,7 +119,7 @@ namespace Funplay.Editor.Tests
                 foreach (var path in new[] { codexSkillPath, claudeSkillPath, cursorRulePath })
                 {
                     var content = File.ReadAllText(path);
-                    StringAssert.Contains("unity-ui-composition@1.0.0", content);
+                    StringAssert.Contains("unity-ui-composition@1.0.1", content);
                     StringAssert.Contains("Screen.safeArea", content);
                     StringAssert.Contains("720 x 1559", content);
                     StringAssert.Contains("1559 x 720", content);
@@ -135,11 +130,22 @@ namespace Funplay.Editor.Tests
 
                 AssertStandardSkillFrontmatter(codexSkillPath);
                 AssertStandardSkillFrontmatter(claudeSkillPath);
+                StringAssert.Contains("alwaysApply: true", File.ReadAllText(cursorRulePath));
+
+                Assert.IsTrue(ProjectSkillsManager.GetBuiltInSkills().Any(skill => skill.Id == skillId));
+                Assert.IsFalse(ProjectSkillsManager.GetOptionalSkills().Any(skill => skill.Id == skillId));
+
+                // A manifest written by 0.6.1 may still submit this former optional id. It must be
+                // normalized away while the skill remains installed as a built-in.
+                ProjectSkillsManager.ApplyConfiguration(
+                    projectRoot,
+                    new[] { "codex", "claude", "cursor" },
+                    new[] { skillId });
 
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
-                CollectionAssert.Contains(manifest.optionalSkills, skillId);
+                CollectionAssert.DoesNotContain(manifest.optionalSkills, skillId);
                 Assert.IsTrue(manifest.skillVersions.Any(entry =>
-                    entry.id == skillId && entry.version == "1.0.0"));
+                    entry.id == skillId && entry.version == "1.0.1"));
             }
             finally
             {

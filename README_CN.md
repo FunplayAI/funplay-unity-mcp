@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.1"
+    "com.gamebooom.unity.mcp": "0.6.2"
   }
 }
 ```
@@ -105,9 +105,9 @@ openupm add com.gamebooom.unity.mcp
 
 选择目标客户端后点击 **Configure**，插件会直接帮你写入推荐的 MCP 配置项。
 
-对于 Claude Code、Cursor 和 Codex，也可以点击 **Configure + Skills**，同时安装必需的项目级 MCP 工作流 skill。
+对于 Claude Code、Cursor 和 Codex，也可以点击 **Configure + Skills**，同时安装两个内置项目 skills。
 
-如果你希望为当前 Unity 项目配置项目级 AI 指引，可以打开 **Funplay → Project Skills**，为支持的平台安装必需的 `unity-mcp-workflow` skill，并按需启用面向竖屏、横屏响应式 uGUI 的 `unity-ui-composition` skill。
+如果你希望为当前 Unity 项目配置项目级 AI 指引，可以打开 **Funplay → Project Skills**，为支持的平台安装内置的 `unity-mcp-workflow` 和 `unity-ui-composition` skills，其中 UI skill 用于竖屏、横屏响应式 uGUI 工作。
 
 如果你更想手动编辑配置文件，再参考下面这些示例（把 `<project>` 换成本工程的条目名、`<port>` 换成本工程端口——MCP Server 窗口里两者都有显示）：
 
@@ -270,7 +270,7 @@ url = "http://127.0.0.1:<port>/"
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
 - **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、LM Studio、VS Code、Kiro、Trae、Codex 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
-- **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含必需的 `unity-mcp-workflow` 与可选的 `unity-ui-composition` 指引
+- **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含内置的 `unity-mcp-workflow` 与 `unity-ui-composition` 指引
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志
 - **厂商无关** — 兼容任意支持 MCP 的 AI 客户端：Claude Code、Cursor、LM Studio、Windsurf、Codex、VS Code Copilot 等
 

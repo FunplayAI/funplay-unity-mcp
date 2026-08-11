@@ -80,11 +80,11 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.0",
+                "1.0.1",
                 "Unity UI Composition",
                 "Build and revise responsive Unity uGUI mobile interfaces, including portrait and landscape layouts, safe areas, prefabs, auto layout, scrolling, text, input, animation, and performance validation.",
-                false,
-                "Use this optional skill when creating, assembling, adapting, reviewing, or fixing Canvas-based Unity UI, especially mobile screen or popup prefabs that must work across aspect ratios, notches, tablets, localization, and runtime state changes.",
+                true,
+                "Use this built-in skill when creating, assembling, adapting, reviewing, or fixing Canvas-based Unity UI, especially mobile screen or popup prefabs that must work across aspect ratios, notches, tablets, localization, and runtime state changes.",
                 new[]
                 {
                     "Inspect the existing Canvas, hierarchy, prefab ownership, anchors, serialized references, layout controllers, and target orientation before editing.",
@@ -912,10 +912,11 @@ version: {skill.Version}
 
         private static string BuildUnityUiCompositionCursorRuleContent(SkillDefinition skill)
         {
+            var alwaysApply = skill.IsBuiltIn ? "true" : "false";
             return
 $@"---
 description: {skill.Description}
-alwaysApply: false
+alwaysApply: {alwaysApply}
 version: {skill.Version}
 ---
 {ManagedMarker}

@@ -161,22 +161,25 @@ namespace Funplay.Editor.Tools.Builtins
             return path + Path.DirectorySeparatorChar;
         }
 
-        [Description("Capture a screenshot of the Game View (what the main camera sees). Returns a base64-encoded PNG image, " +
-                     "or a saved file path when save_to_file=true.")]
+        [Description("Capture a fresh screenshot of the Game View (what the main camera sees). Requests a Game View repaint and waits for Editor frames before readback. " +
+                     "Returns a base64-encoded PNG image, or a saved file path when save_to_file=true.")]
         [ReadOnlyTool]
-        public static string CaptureGameView(
+        public static async Task<string> CaptureGameView(
             [ToolParam("Width of the screenshot in pixels", Required = false)] int width = 0,
             [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0,
             [ToolParam(SaveToFileParamDescription, Required = false)] bool save_to_file = false,
             [ToolParam(OutputPathParamDescription, Required = false)] string output_path = null)
         {
-            if (!TryResolveGameViewSize(ref width, ref height))
+            var playModeView = GetMainPlayModeView();
+            await RefreshGameViewBeforeCaptureAsync(playModeView);
+
+            if (!TryResolveGameViewSize(playModeView, ref width, ref height))
             {
                 width = Mathf.Clamp(width > 0 ? width : 512, 64, 4096);
                 height = Mathf.Clamp(height > 0 ? height : 512, 64, 4096);
             }
 
-            var playModePng = TryCapturePlayModeViewPngBytes(width, height);
+            var playModePng = TryCapturePlayModeViewPngBytes(playModeView, width, height);
             if (playModePng != null)
                 return FinishCapture(playModePng, save_to_file, output_path, "game-view");
 
@@ -680,6 +683,11 @@ namespace Funplay.Editor.Tools.Builtins
 
         internal static bool TryResolveGameViewSize(ref int width, ref int height)
         {
+            return TryResolveGameViewSize(GetMainPlayModeView(), ref width, ref height);
+        }
+
+        private static bool TryResolveGameViewSize(object playModeView, ref int width, ref int height)
+        {
             if (width > 0 && height > 0)
             {
                 width = Mathf.Clamp(width, 64, 4096);
@@ -689,11 +697,6 @@ namespace Funplay.Editor.Tools.Builtins
 
             try
             {
-                var playModeViewType = Type.GetType("UnityEditor.PlayModeView,UnityEditor");
-                var getMainPlayModeView = playModeViewType?.GetMethod(
-                    "GetMainPlayModeView",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                var playModeView = getMainPlayModeView?.Invoke(null, null);
                 if (playModeView == null)
                     return false;
 
@@ -719,6 +722,44 @@ namespace Funplay.Editor.Tools.Builtins
             }
 
             return false;
+        }
+
+        private static object GetMainPlayModeView()
+        {
+            try
+            {
+                var playModeViewType = Type.GetType("UnityEditor.PlayModeView,UnityEditor");
+                var getMainPlayModeView = playModeViewType?.GetMethod(
+                    "GetMainPlayModeView",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                return getMainPlayModeView?.Invoke(null, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static async Task RefreshGameViewBeforeCaptureAsync(object playModeView)
+        {
+            if (!(playModeView is EditorWindow gameViewWindow))
+                return;
+
+            try
+            {
+                // Repaint is processed on a later Editor update. Request it twice and wait after
+                // each request so m_RenderTexture contains the newest Game View frame before
+                // readback instead of whichever frame happened to be rendered previously.
+                gameViewWindow.Repaint();
+                await WaitForEditorFramesAsync(1);
+                gameViewWindow.Repaint();
+                await WaitForEditorFramesAsync(1);
+            }
+            catch
+            {
+                // The Game View can disappear during a layout change or domain reload. Continue
+                // through the existing RenderTexture/camera fallback path in that case.
+            }
         }
 
         private static bool TryGetSimulatorWindow(bool openIfNeeded, out object simulatorWindow, out object errorDetail)
@@ -1305,17 +1346,12 @@ namespace Funplay.Editor.Tools.Builtins
                 texture.SetPixel(x, y, color);
         }
 
-        private static byte[] TryCapturePlayModeViewPngBytes(int width, int height)
+        private static byte[] TryCapturePlayModeViewPngBytes(object playModeView, int width, int height)
         {
             Texture2D screenshot = null;
 
             try
             {
-                var playModeViewType = Type.GetType("UnityEditor.PlayModeView,UnityEditor");
-                var getMainPlayModeView = playModeViewType?.GetMethod(
-                    "GetMainPlayModeView",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                var playModeView = getMainPlayModeView?.Invoke(null, null);
                 if (playModeView == null)
                     return null;
 
