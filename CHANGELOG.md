@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.1] - 2026-08-11
+
+### Added
+- Added the optional `unity-ui-composition` Project Skill for responsive portrait and landscape uGUI work, with component selection guidance, safe-area and aspect-ratio patterns, prefab-preserving edits, performance rules, validation matrices, and links to official Unity documentation.
+
+### Changed
+- Project Skills v1.0.3 now preserve existing UI and GameObject prefab hierarchies by default, modifying only the required objects, components, and serialized fields unless a full rebuild is explicitly requested.
+- Codex and Claude generated `SKILL.md` files now keep version and platform details in the managed marker and Metadata section so their YAML frontmatter follows the standard Skill schema.
+
 ## [0.6.0] - 2026-08-10
 
 ### Added

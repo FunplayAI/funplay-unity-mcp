@@ -29,12 +29,12 @@ namespace Funplay.Editor.Tests
                 Assert.IsFalse(status.HasUpdates);
                 Assert.IsTrue(File.Exists(agentsPath));
                 Assert.IsTrue(File.Exists(skillPath));
-                StringAssert.Contains("unity-mcp-workflow@1.0.2", File.ReadAllText(agentsPath));
+                StringAssert.Contains("unity-mcp-workflow@1.0.3", File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
                 var skillContent = File.ReadAllText(skillPath);
-                StringAssert.Contains("version: 1.0.2", skillContent);
-                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.2 -->", skillContent);
+                StringAssert.Contains("- Skill version: `1.0.3`", skillContent);
+                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.3 -->", skillContent);
                 StringAssert.Contains(
                     "PORT=24312 # replace with the port shown in the Funplay MCP Server window",
                     skillContent);
@@ -43,7 +43,103 @@ namespace Funplay.Editor.Tests
                 var manifestJson = File.ReadAllText(ProjectSkillsManager.GetManifestPath(projectRoot));
                 StringAssert.Contains("\"skillVersions\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-mcp-workflow\"", manifestJson);
-                StringAssert.Contains("\"version\": \"1.0.2\"", manifestJson);
+                StringAssert.Contains("\"version\": \"1.0.3\"", manifestJson);
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        [Test]
+        public void ApplyConfiguration_WritesPrefabStructurePreservationRuleToEveryPlatform()
+        {
+            const string expectedRule =
+                "Unless the user explicitly requests a full rebuild, preserve the existing hierarchy when editing UI or GameObject prefabs and modify only the required objects, components, and serialized fields; do not recreate the entire prefab.";
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(
+                    projectRoot,
+                    new[] { "codex", "claude", "cursor" },
+                    Array.Empty<string>());
+
+                var codexSkillPath = GetCodexWorkflowSkillPath(projectRoot);
+                var claudeSkillPath = Path.Combine(
+                    ProjectSkillsManager.GetClaudeSkillsRoot(projectRoot),
+                    "funplay-unity-mcp-workflow",
+                    "SKILL.md");
+                var cursorRulePath = Path.Combine(
+                    ProjectSkillsManager.GetCursorRulesPath(projectRoot),
+                    "funplay-unity-mcp-workflow.mdc");
+
+                StringAssert.Contains(expectedRule, File.ReadAllText(codexSkillPath));
+                StringAssert.Contains(expectedRule, File.ReadAllText(claudeSkillPath));
+                StringAssert.Contains(expectedRule, File.ReadAllText(cursorRulePath));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        [Test]
+        public void ApplyConfiguration_WritesOptionalUnityUiCompositionSkillOnlyWhenSelected()
+        {
+            const string skillId = "unity-ui-composition";
+            var projectRoot = CreateTempProjectPath();
+            var codexSkillPath = Path.Combine(
+                ProjectSkillsManager.GetCodexSkillsRoot(projectRoot),
+                $"funplay-{skillId}",
+                "SKILL.md");
+            var claudeSkillPath = Path.Combine(
+                ProjectSkillsManager.GetClaudeSkillsRoot(projectRoot),
+                $"funplay-{skillId}",
+                "SKILL.md");
+            var cursorRulePath = Path.Combine(
+                ProjectSkillsManager.GetCursorRulesPath(projectRoot),
+                $"funplay-{skillId}.mdc");
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(
+                    projectRoot,
+                    new[] { "codex", "claude", "cursor" },
+                    Array.Empty<string>());
+
+                Assert.IsFalse(File.Exists(codexSkillPath));
+                Assert.IsFalse(File.Exists(claudeSkillPath));
+                Assert.IsFalse(File.Exists(cursorRulePath));
+
+                ProjectSkillsManager.ApplyConfiguration(
+                    projectRoot,
+                    new[] { "codex", "claude", "cursor" },
+                    new[] { skillId });
+
+                Assert.IsTrue(File.Exists(codexSkillPath));
+                Assert.IsTrue(File.Exists(claudeSkillPath));
+                Assert.IsTrue(File.Exists(cursorRulePath));
+
+                foreach (var path in new[] { codexSkillPath, claudeSkillPath, cursorRulePath })
+                {
+                    var content = File.ReadAllText(path);
+                    StringAssert.Contains("unity-ui-composition@1.0.0", content);
+                    StringAssert.Contains("Screen.safeArea", content);
+                    StringAssert.Contains("720 x 1559", content);
+                    StringAssert.Contains("1559 x 720", content);
+                    StringAssert.Contains("RectTransformUtility.CalculateRelativeRectTransformBounds", content);
+                    StringAssert.Contains("Do not recreate an entire UI or GameObject prefab", content);
+                    StringAssert.Contains("Official Unity References", content);
+                }
+
+                AssertStandardSkillFrontmatter(codexSkillPath);
+                AssertStandardSkillFrontmatter(claudeSkillPath);
+
+                var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
+                CollectionAssert.Contains(manifest.optionalSkills, skillId);
+                Assert.IsTrue(manifest.skillVersions.Any(entry =>
+                    entry.id == skillId && entry.version == "1.0.0"));
             }
             finally
             {
@@ -183,7 +279,7 @@ namespace Funplay.Editor.Tests
                 ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
                 var skillPath = GetCodexWorkflowSkillPath(projectRoot);
                 RemoveLinesContaining(skillPath, "Funplay Unity MCP skill version:");
-                RemoveLinesContaining(skillPath, "version: 1.0.2");
+                RemoveLinesContaining(skillPath, "version: 1.0.3");
 
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
                 var status = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, "codex");
@@ -192,7 +288,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(status.HasUpdates);
                 Assert.IsTrue(skillStatus.RequiresUpgrade);
                 Assert.AreEqual("unknown", skillStatus.InstalledVersion);
-                Assert.AreEqual("1.0.2", skillStatus.ExpectedVersion);
+                Assert.AreEqual("1.0.3", skillStatus.ExpectedVersion);
             }
             finally
             {
@@ -218,7 +314,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(status.HasUpdates);
                 Assert.IsTrue(skillStatus.Missing);
                 Assert.AreEqual("missing", skillStatus.InstalledVersion);
-                Assert.AreEqual("1.0.2", skillStatus.ExpectedVersion);
+                Assert.AreEqual("1.0.3", skillStatus.ExpectedVersion);
             }
             finally
             {
@@ -286,6 +382,20 @@ namespace Funplay.Editor.Tests
                 index += marker.Length;
             }
             return count;
+        }
+
+        private static void AssertStandardSkillFrontmatter(string path)
+        {
+            var content = File.ReadAllText(path).Replace("\r\n", "\n");
+            Assert.IsTrue(content.StartsWith("---\n", StringComparison.Ordinal));
+            var end = content.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+            Assert.Greater(end, 0);
+
+            var frontmatter = content.Substring(4, end - 4);
+            StringAssert.Contains("name:", frontmatter);
+            StringAssert.Contains("description:", frontmatter);
+            StringAssert.DoesNotContain("version:", frontmatter);
+            StringAssert.DoesNotContain("platform:", frontmatter);
         }
 
         private static void RemoveLinesContaining(string path, string text)
