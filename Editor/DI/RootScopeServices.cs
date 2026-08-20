@@ -42,6 +42,11 @@ namespace Funplay.Editor.DI
                 unityLogsRepository?.StartListening();
 
                 var settings = _serviceProvider.GetService(typeof(ISettingsController)) as ISettingsController;
+                if (settings != null)
+                {
+                    FunplayMCPClientConfigPanel.TryMigrateLegacyClaudeCodeEntryOnce(settings);
+                }
+
                 if (settings?.MCPServerEnabled == true &&
                     !MCPServerDomainReloadHandler.IsPendingPostReloadRestart())
                 {
