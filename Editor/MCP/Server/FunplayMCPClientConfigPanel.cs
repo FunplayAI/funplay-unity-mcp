@@ -377,6 +377,11 @@ namespace Funplay.Editor.MCP.Server
 
         private MCPConfigTarget[] CreateTargets(string homePath)
         {
+            var kimiConfigPath = GetKimiConfigPath(
+                homePath,
+                GetProjectRootPath(),
+                Environment.GetEnvironmentVariable("KIMI_CODE_HOME"));
+
             return new[]
             {
                 new MCPConfigTarget
@@ -390,6 +395,12 @@ namespace Funplay.Editor.MCP.Server
                 {
                     Name = "Cursor",
                     ConfigPath = Path.Combine(homePath, ".cursor", "mcp.json"),
+                },
+                new MCPConfigTarget
+                {
+                    Name = "Kimi",
+                    ConfigPath = kimiConfigPath,
+                    ActivationHint = "Start a new Kimi session in this Unity project for it to take effect.",
                 },
                 new MCPConfigTarget
                 {
@@ -434,7 +445,9 @@ namespace Funplay.Editor.MCP.Server
                 var message = target.IsLMStudio
                     ? BuildLMStudioConfiguredMessage()
                     : $"MCP configuration written to:\n{target.ConfigPath}\n\n" +
-                      $"Please restart {target.Name} for it to take effect.";
+                      (string.IsNullOrEmpty(target.ActivationHint)
+                          ? $"Please restart {target.Name} for it to take effect."
+                          : target.ActivationHint);
 
                 EditorUtility.DisplayDialog("MCP Configuration", message, "OK");
                 _rebuildWindow?.Invoke();
@@ -1408,6 +1421,36 @@ namespace Funplay.Editor.MCP.Server
             return Environment.GetFolderPath(Environment.SpecialFolder.Personal);
         }
 
+        /// <summary>
+        /// Kimi Code's current format supports a project-local <c>.kimi-code/mcp.json</c>, which
+        /// keeps this Unity project's loopback server out of unrelated Kimi sessions. Older Kimi CLI
+        /// releases only load <c>~/.kimi/mcp.json</c>, so a machine with only that legacy data root
+        /// keeps using it. A configured <c>KIMI_CODE_HOME</c> or an existing <c>~/.kimi-code</c>
+        /// identifies the current client; when neither client has run yet, prefer the current format.
+        /// </summary>
+        internal static string GetKimiConfigPath(
+            string homePath,
+            string projectRoot,
+            string kimiCodeHomeOverride)
+        {
+            var modernHome = !string.IsNullOrWhiteSpace(kimiCodeHomeOverride)
+                ? kimiCodeHomeOverride.Trim()
+                : Path.Combine(homePath, ".kimi-code");
+            var legacyHome = Path.Combine(homePath, ".kimi");
+            var modernDetected = !string.IsNullOrWhiteSpace(kimiCodeHomeOverride) || Directory.Exists(modernHome);
+            var legacyDetected = Directory.Exists(legacyHome);
+
+            if (modernDetected || !legacyDetected)
+            {
+                if (!string.IsNullOrWhiteSpace(projectRoot))
+                    return Path.Combine(projectRoot, ".kimi-code", "mcp.json");
+
+                return Path.Combine(modernHome, "mcp.json");
+            }
+
+            return Path.Combine(legacyHome, "mcp.json");
+        }
+
         private static string GetLMStudioDisplayPath(string homePath)
         {
             var existingPaths = GetExistingLMStudioConfigPaths(homePath);
@@ -1470,6 +1513,7 @@ namespace Funplay.Editor.MCP.Server
         {
             public string Name;
             public string ConfigPath;
+            public string ActivationHint;
             public string RootKey;
             public bool IsToml;
             public bool IncludeTypeField;

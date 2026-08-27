@@ -45,6 +45,161 @@ namespace Funplay.Editor
         }
 
         [Test]
+        public void RecentActivityResult_RendersResponseEnvelopeWithoutJsonSyntax()
+        {
+            const string json = "{\"success\":true,\"message\":\"Loaded 2 items.\",\"data\":{\"count\":2,\"next_page\":null},\"items\":[{\"name\":\"First\"},{\"name\":\"Second\"}]}";
+            var log = new MCPInteractionLog(1);
+
+            log.Add("test_json", MCPToolCallStatus.Success, json);
+
+            var entry = log.GetEntries()[0];
+            Assert.IsTrue(entry.IsJsonResult);
+            Assert.AreEqual(json, entry.ResultSummary);
+            Assert.That(entry.DisplayResult, Does.StartWith("Loaded 2 items."));
+            Assert.That(entry.DisplayResult, Does.Contain("Count: 2"));
+            Assert.That(entry.DisplayResult, Does.Contain("Next page: —"));
+            Assert.That(entry.DisplayResult, Does.Contain("Items:"));
+            Assert.That(entry.DisplayResult, Does.Contain("Name: First"));
+            Assert.That(entry.DisplayResult, Does.Not.Contain("\"success\""));
+            Assert.That(entry.DisplayResult, Does.Not.Contain("{"));
+            Assert.That(entry.DisplayResult, Does.Not.Contain("}"));
+            Assert.That(entry.DisplayResult, Does.Not.Contain("["));
+            Assert.That(entry.DisplayResult, Does.Not.Contain("]"));
+        }
+
+        [Test]
+        public void RecentActivityResult_RendersErrorDetailsAsLabelsAndValues()
+        {
+            const string json = "{\"success\":false,\"code\":\"COMPILATION_FAILED\",\"error\":\"COMPILATION_FAILED\",\"message\":\"Compilation failed.\",\"data\":{\"compiler\":\"Roslyn\",\"errors\":[{\"line\":11,\"column\":13,\"text\":\"Missing semicolon\"}]}}";
+            var log = new MCPInteractionLog(1);
+
+            log.Add("execute_code", MCPToolCallStatus.Error, json);
+
+            var display = log.GetEntries()[0].DisplayResult;
+            Assert.That(display, Does.StartWith("Compilation failed."));
+            Assert.That(display, Does.Contain("Code: COMPILATION_FAILED"));
+            Assert.That(display, Does.Contain("Compiler: Roslyn"));
+            Assert.That(display, Does.Contain("Errors:"));
+            Assert.That(display, Does.Contain("Line: 11"));
+            Assert.That(display, Does.Contain("Text: Missing semicolon"));
+            Assert.AreEqual(1, display.Split(new[] { "COMPILATION_FAILED" }, StringSplitOptions.None).Length - 1);
+        }
+
+        [Test]
+        public void RecentActivityResult_RendersRootArrayAsNumberedItems()
+        {
+            const string json = "[{\"tool_name\":\"first\",\"enabled\":true},\"ready\"]";
+            var log = new MCPInteractionLog(1);
+
+            log.Add("array", MCPToolCallStatus.Success, json);
+
+            var display = log.GetEntries()[0].DisplayResult;
+            Assert.That(display, Does.Contain("1."));
+            Assert.That(display, Does.Contain("Tool name: first"));
+            Assert.That(display, Does.Contain("Enabled: Yes"));
+            Assert.That(display, Does.Contain("2. ready"));
+            Assert.That(display, Does.Not.Contain("["));
+            Assert.That(display, Does.Not.Contain("]"));
+        }
+
+        [Test]
+        public void RecentActivityResult_RendersNestedJsonStringAsStructuredDetails()
+        {
+            const string json = "{\"success\":true,\"message\":\"Recovery status loaded.\",\"data\":{\"result\":\"{\\\"recorded\\\":true,\\\"tool\\\":\\\"request_recompile\\\",\\\"details\\\":[1,2]}\",\"compiler\":\"Roslyn\"}}";
+            var log = new MCPInteractionLog(1);
+
+            log.Add("execute_code", MCPToolCallStatus.Success, json);
+
+            var display = log.GetEntries()[0].DisplayResult;
+            Assert.That(display, Does.Contain("Result:"));
+            Assert.That(display, Does.Contain("Recorded: Yes"));
+            Assert.That(display, Does.Contain("Tool: request_recompile"));
+            Assert.That(display, Does.Contain("Details:"));
+            Assert.That(display, Does.Contain("1. 1"));
+            Assert.That(display, Does.Contain("Compiler: Roslyn"));
+            Assert.That(display, Does.Not.Contain("\\\""));
+            Assert.That(display, Does.Not.Contain("{"));
+            Assert.That(display, Does.Not.Contain("}"));
+        }
+
+        [Test]
+        public void RecentActivityResult_LeavesPlainTextAndMalformedJsonCompact()
+        {
+            var log = new MCPInteractionLog(2);
+            log.Add("plain", MCPToolCallStatus.Success, "No compilation errors detected.");
+            log.Add("malformed", MCPToolCallStatus.Error, "{\"success\":false");
+
+            var entries = log.GetEntries();
+            Assert.IsFalse(entries[0].IsJsonResult);
+            Assert.AreEqual(entries[0].ResultSummary, entries[0].DisplayResult);
+            Assert.IsFalse(entries[1].IsJsonResult);
+            Assert.AreEqual(entries[1].ResultSummary, entries[1].DisplayResult);
+        }
+
+        [Test]
+        public void RecentActivityResult_BoundsLargeFormattedJsonPreview()
+        {
+            var json = "{\"value\":\"" + new string('x', 5000) + "\"}";
+            var log = new MCPInteractionLog(1);
+
+            log.Add("large_json", MCPToolCallStatus.Success, json);
+
+            var entry = log.GetEntries()[0];
+            Assert.IsTrue(entry.IsJsonResult);
+            Assert.AreEqual(200, entry.ResultSummary.Length);
+            Assert.LessOrEqual(entry.DisplayResult.Length, MCPInteractionLog.MaxDisplayResultCharacters);
+            Assert.That(entry.DisplayResult, Does.EndWith("... (truncated)"));
+        }
+
+        [Test]
+        public void RecentActivityDisplay_SeparatesMessagesSectionsPropertiesAndValues()
+        {
+            const string display =
+                "Loaded successfully.\n\n" +
+                "Result:\n" +
+                "  Job ID: abc-123\n" +
+                "  Status: passed\n" +
+                "  Has filters: Yes\n" +
+                "Items:\n" +
+                "  1. ready\n" +
+                "... (truncated)";
+
+            var lines = FunplayMCPRecentActivityPanel.ParseStructuredDisplay(display);
+
+            Assert.AreEqual(9, lines.Count);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Message, lines[0].Kind);
+            Assert.AreEqual("Loaded successfully.", lines[0].Value);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Spacer, lines[1].Kind);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Section, lines[2].Kind);
+            Assert.AreEqual("Result", lines[2].Label);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Property, lines[3].Kind);
+            Assert.AreEqual(1, lines[3].Depth);
+            Assert.AreEqual("Job ID", lines[3].Label);
+            Assert.AreEqual("abc-123", lines[3].Value);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Property, lines[4].Kind);
+            Assert.AreEqual("Status", lines[4].Label);
+            Assert.AreEqual("passed", lines[4].Value);
+            Assert.AreEqual(MCPActivityDisplayLineKind.NumberedItem, lines[7].Kind);
+            Assert.AreEqual(1, lines[7].Depth);
+            Assert.AreEqual("1.", lines[7].Label);
+            Assert.AreEqual("ready", lines[7].Value);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Truncated, lines[8].Kind);
+        }
+
+        [Test]
+        public void RecentActivityDisplay_KeepsColonsInsidePropertyValues()
+        {
+            const string display = "Endpoint: http://127.0.0.1:25144/mcp";
+
+            var lines = FunplayMCPRecentActivityPanel.ParseStructuredDisplay(display);
+
+            Assert.AreEqual(1, lines.Count);
+            Assert.AreEqual(MCPActivityDisplayLineKind.Property, lines[0].Kind);
+            Assert.AreEqual("Endpoint", lines[0].Label);
+            Assert.AreEqual("http://127.0.0.1:25144/mcp", lines[0].Value);
+        }
+
+        [Test]
         public void InterruptedToolRecoveryStatus_EmptyContinuationIsInterrupted()
         {
             Assert.AreEqual(

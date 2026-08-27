@@ -21,7 +21,7 @@
 
 ---
 
-Funplay MCP for Unity 是一个采用 MIT 协议的 Unity 编辑器 MCP 服务器，让 Claude Code、Cursor、LM Studio、Windsurf、Codex、VS Code Copilot 等 AI 助手直接操作正在运行的 Unity 项目。
+Funplay MCP for Unity 是一个采用 MIT 协议的 Unity 编辑器 MCP 服务器，让 Claude Code、Cursor、Kimi Code、LM Studio、Windsurf、Codex、VS Code Copilot 等 AI 助手直接操作正在运行的 Unity 项目。
 
 一句话描述你的游戏 — AI 助手通过 Funplay MCP for Unity 的 156 个内置工具自动创建场景、编写脚本、验证运行态、模拟输入、分析性能并完成编辑器自动化，把所有逻辑串联起来。
 
@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.2"
+    "com.gamebooom.unity.mcp": "0.6.3"
   }
 }
 ```
@@ -207,6 +207,23 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 </details>
 
 <details>
+<summary>Kimi / Kimi Code</summary>
+
+当前 Kimi Code 会从项目级 `.kimi-code/mcp.json` 加载 MCP Server（参见[官方 MCP 文档](https://moonshotai.github.io/kimi-code/zh/customization/mcp.html)）。Funplay 的一键 Configure 会写入这里，避免当前 Unity Server 出现在无关项目的 Kimi 会话中。如果机器上只检测到旧版 Kimi CLI 数据目录，则改写兼容的用户级 `~/.kimi/mcp.json`。配置完成后，从 Unity 项目根目录启动新的 Kimi 会话；首次使用时请检查回环地址并信任工作区。项目配置包含本机端口，通常不应提交，除非团队有意共用同一个固定端口。
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Codex</summary>
 
 ```toml
@@ -268,11 +285,11 @@ url = "http://127.0.0.1:<port>/"
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
 - **输入模拟 + 截图验证** — 在 Play Mode 中模拟键盘/鼠标，再用 Game View / Scene View 截图验证结果
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
-- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、LM Studio、VS Code、Kiro、Trae、Codex 等客户端生成 MCP 配置
+- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
 - **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含内置的 `unity-mcp-workflow` 与 `unity-ui-composition` 指引
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志
-- **厂商无关** — 兼容任意支持 MCP 的 AI 客户端：Claude Code、Cursor、LM Studio、Windsurf、Codex、VS Code Copilot 等
+- **厂商无关** — 兼容任意支持 MCP 的 AI 客户端：Claude Code、Cursor、Kimi Code、LM Studio、Windsurf、Codex、VS Code Copilot 等
 
 ## `execute_code`：内存 C# 执行
 
@@ -336,7 +353,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 | 通用逃生口 | `execute_code` — Roslyn 优先内存编译、`IFunplayCommand` + Undo、无沙箱（客户端层审批）| `RunCommand` — 命名空间黑名单沙箱 |
 | Play Mode 验证 | 完整闭环：进入 / 模拟输入 / 截图 / 读日志 / 退出 | 仅进入/退出，无输入模拟 |
 | 资产生成器 | 不内建（通过 `execute_code` 组合外部 API）| 内建 Image / Mesh / PBR / Sound / Animation 五类生成器 |
-| 主要客户端模型 | BYO 任意 MCP 客户端（Claude Code / Cursor / LM Studio / Codex / VS Code）| 自带对话窗口 + ACP 经 Gateway 接 Claude/Gemini |
+| 主要客户端模型 | BYO 任意 MCP 客户端（Claude Code / Cursor / Kimi / LM Studio / Codex / VS Code）| 自带对话窗口 + ACP 经 Gateway 接 Claude/Gemini |
 | 离线可用 | ✅ 工具调用本身全本地（推理依赖所选客户端）| ❌ 推理必须连 Unity Cloud |
 
 长文对比见 [Funplay Unity MCP 与 Unity AI Assistant 详细对比](https://blog.csdn.net/m0_62670368/article/details/161039766)。
