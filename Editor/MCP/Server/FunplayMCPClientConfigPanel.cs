@@ -191,7 +191,85 @@ namespace Funplay.Editor.MCP.Server
                     "No project writes it any more; remove it by hand once every project has been configured.";
             }
 
+            // Entries this plugin used to leave at the config's top level (before it started writing
+            // Claude Code entries under projects["<path>"]) are visible to every session on this
+            // machine, not just this project's -- surface them so they get cleaned up by hand instead
+            // of quietly leaking a different project's tools into an unrelated session.
+            if (exists && target.UseProjectScope)
+            {
+                var strayEntries = ReadTopLevelFunplayEntryNames(target);
+                if (strayEntries.Count > 0)
+                {
+                    details +=
+                        $"\n⚠ {string.Join(", ", strayEntries)} still at the top level of {target.ConfigPath}. " +
+                        "Every Claude Code session on this machine sees those, not just this project's -- " +
+                        "remove them by hand once each project you use Funplay in has been re-configured.";
+                }
+            }
+
             _configPathLabel.text = details;
+        }
+
+        // Same (path, mtime) cache shape as _entryNamesCache below, kept separate rather than shared:
+        // a Claude Code RefreshStatus() call queries both this and the project-scoped names for the
+        // same file in one pass, and a single shared slot would just have the second query evict the
+        // first's result.
+        private static string _topLevelEntryNamesCachePath;
+        private static DateTime _topLevelEntryNamesCacheMtime;
+        private static HashSet<string> _topLevelEntryNamesCache;
+
+        /// <summary>
+        /// Funplay-owned entries at the config's literal top level, ignoring the per-project
+        /// <c>projects["&lt;path&gt;"]</c> section this plugin writes to for <see
+        /// cref="MCPConfigTarget.UseProjectScope"/> targets. Used only to flag leftovers from before
+        /// that section existed; unlike <see cref="ReadFunplayEntryNames"/> it never mixes the two.
+        /// </summary>
+        private static HashSet<string> ReadTopLevelFunplayEntryNames(MCPConfigTarget target)
+        {
+            try
+            {
+                if (!File.Exists(target.ConfigPath))
+                    return new HashSet<string>(StringComparer.Ordinal);
+
+                var mtime = File.GetLastWriteTimeUtc(target.ConfigPath);
+                if (_topLevelEntryNamesCache != null &&
+                    string.Equals(target.ConfigPath, _topLevelEntryNamesCachePath, StringComparison.Ordinal) &&
+                    mtime == _topLevelEntryNamesCacheMtime)
+                {
+                    return _topLevelEntryNamesCache;
+                }
+
+                var names = ParseTopLevelFunplayEntryNames(target);
+                _topLevelEntryNamesCachePath = target.ConfigPath;
+                _topLevelEntryNamesCacheMtime = mtime;
+                _topLevelEntryNamesCache = names;
+                return names;
+            }
+            catch (Exception)
+            {
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+        }
+
+        private static HashSet<string> ParseTopLevelFunplayEntryNames(MCPConfigTarget target)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            var content = File.ReadAllText(target.ConfigPath);
+            if (content.IndexOf(FunplayMCPServerKey.LegacyKey, StringComparison.Ordinal) < 0)
+                return names;
+
+            var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
+            var servers = parsed != null ? FindNestedDictionary(parsed, GetRootKey(target)) : null;
+            if (servers == null)
+                return names;
+
+            foreach (var key in servers.Keys)
+            {
+                if (FunplayMCPServerKey.IsFunplayKey(key))
+                    names.Add(key);
+            }
+
+            return names;
         }
 
         // Single-entry cache keyed by (path, mtime). ~/.claude.json grows to multiple MB in practice
@@ -255,11 +333,12 @@ namespace Funplay.Editor.MCP.Server
             }
 
             var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
-            object serversValue;
-            if (parsed == null || !parsed.TryGetValue(GetRootKey(target), out serversValue))
+            if (parsed == null)
                 return names;
 
-            var servers = serversValue as Dictionary<string, object>;
+            var servers = target.UseProjectScope
+                ? FindProjectScopedServers(parsed, GetRootKey(target))
+                : FindNestedDictionary(parsed, GetRootKey(target));
             if (servers == null)
                 return names;
 
@@ -270,6 +349,20 @@ namespace Funplay.Editor.MCP.Server
             }
 
             return names;
+        }
+
+        private static Dictionary<string, object> FindNestedDictionary(Dictionary<string, object> parent, string key)
+        {
+            object value;
+            return parent.TryGetValue(key, out value) ? value as Dictionary<string, object> : null;
+        }
+
+        private static Dictionary<string, object> FindProjectScopedServers(
+            Dictionary<string, object> root, string rootKey)
+        {
+            var projects = FindNestedDictionary(root, "projects");
+            var projectEntry = projects != null ? FindNestedDictionary(projects, GetProjectScopeKeyPath()) : null;
+            return projectEntry != null ? FindNestedDictionary(projectEntry, rootKey) : null;
         }
 
         private static bool HasLegacyFunplayEntry(MCPConfigTarget target)
@@ -290,7 +383,8 @@ namespace Funplay.Editor.MCP.Server
                 {
                     Name = "Claude Code",
                     ConfigPath = Path.Combine(homePath, ".claude.json"),
-                    IncludeTypeField = true
+                    IncludeTypeField = true,
+                    UseProjectScope = true
                 },
                 new MCPConfigTarget
                 {
@@ -472,42 +566,316 @@ namespace Funplay.Editor.MCP.Server
             var rootKey = GetRootKey(target);
             var serverName = presetServerKey ?? ResolveServerKeyForTarget(target);
             var entry = CreateHttpEntry(target);
-            Dictionary<string, object> root;
 
+            Dictionary<string, object> root = null;
             if (File.Exists(target.ConfigPath))
-            {
-                var existingJson = File.ReadAllText(target.ConfigPath);
-                var parsed = SimpleJsonHelper.Deserialize(existingJson) as Dictionary<string, object>;
+                root = SimpleJsonHelper.Deserialize(File.ReadAllText(target.ConfigPath)) as Dictionary<string, object>;
+            root = root ?? new Dictionary<string, object>();
 
-                if (parsed != null && parsed.ContainsKey(rootKey))
-                {
-                    root = parsed;
-                    var servers = root[rootKey] as Dictionary<string, object>;
-                    if (servers != null)
-                    {
-                        servers[serverName] = entry;
-                        RemoveSupersededFunplayEntries(
-                            servers, serverName, _settings.GetLastClientConfigKey(target.Name));
-                    }
-                    else
-                        root[rootKey] = new Dictionary<string, object> { [serverName] = entry };
-                }
-                else
-                {
-                    root = parsed ?? new Dictionary<string, object>();
-                    root[rootKey] = new Dictionary<string, object> { [serverName] = entry };
-                }
-            }
-            else
-            {
-                root = new Dictionary<string, object>
-                {
-                    [rootKey] = new Dictionary<string, object> { [serverName] = entry }
-                };
-            }
+            var servers = target.UseProjectScope
+                ? GetOrCreateProjectScopedServers(root, rootKey)
+                : GetOrCreateNestedDictionary(root, rootKey);
+
+            servers[serverName] = entry;
+            RemoveSupersededFunplayEntries(servers, serverName, _settings.GetLastClientConfigKey(target.Name));
 
             File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
             return serverName;
+        }
+
+        /// <summary>
+        /// Gets (or creates) the server-name -> entry dictionary at <paramref name="root"/>[<paramref
+        /// name="key"/>], replacing whatever is there if it is not already a dictionary (a malformed
+        /// or foreign value under that key).
+        /// </summary>
+        private static Dictionary<string, object> GetOrCreateNestedDictionary(
+            Dictionary<string, object> root, string key)
+        {
+            object existing;
+            if (root.TryGetValue(key, out existing) && existing is Dictionary<string, object> servers)
+                return servers;
+
+            servers = new Dictionary<string, object>();
+            root[key] = servers;
+            return servers;
+        }
+
+        /// <summary>
+        /// Claude Code applies <c>projects["&lt;path&gt;"]</c> only to sessions opened at that exact
+        /// path. Writing Funplay's entry there -- instead of at the config's top level, which every
+        /// session on the machine sees regardless of which project it is in -- is what keeps one
+        /// project's Funplay tools from being usable (and mistaken for the right project's) from an
+        /// unrelated project's session. See docs/funplay-mcp-enhancement-backlog.md §I.
+        /// </summary>
+        private static Dictionary<string, object> GetOrCreateProjectScopedServers(
+            Dictionary<string, object> root, string rootKey)
+        {
+            var projects = GetOrCreateNestedDictionary(root, "projects");
+            var projectEntry = GetOrCreateNestedDictionary(projects, GetProjectScopeKeyPath());
+            return GetOrCreateNestedDictionary(projectEntry, rootKey);
+        }
+
+        private const string ProjectScopeMigrationSessionStateKey =
+            "Funplay.ClaudeCodeConfig.ProjectScopeMigrationDone";
+
+        /// <summary>
+        /// One-time, best-effort self-heal for a Claude Code entry this project wrote before entries
+        /// moved under <c>projects["&lt;path&gt;"]</c> (see CHANGELOG [Unreleased]). Without this, a
+        /// project whose Funplay panel is never reopened would keep leaking its tools into every Claude
+        /// Code session on the machine indefinitely -- clicking Configure again is the only other way
+        /// the old top-level entry gets moved. Called once from <c>RootScopeServices</c> on editor
+        /// startup, so it reaches that project the next time its own Editor happens to be open, with no
+        /// action required from the developer.
+        ///
+        /// Session-gated rather than running on every domain reload: <c>~/.claude.json</c> can be
+        /// multi-megabyte (see the read-side cache above) and this only ever needs to run once per
+        /// Editor process. Only the single entry this project itself previously recorded writing is
+        /// touched -- same ownership proof <see cref="RemoveSupersededFunplayEntries"/> already uses --
+        /// so another project's entry, or one hand-edited after Funplay wrote it, is left alone.
+        /// </summary>
+        internal static void TryMigrateLegacyClaudeCodeEntryOnce(ISettingsController settings)
+        {
+            if (SessionState.GetBool(ProjectScopeMigrationSessionStateKey, false))
+                return;
+            SessionState.SetBool(ProjectScopeMigrationSessionStateKey, true);
+
+            try
+            {
+                var target = new MCPConfigTarget
+                {
+                    Name = "Claude Code",
+                    ConfigPath = Path.Combine(GetUserHomePath(), ".claude.json"),
+                    IncludeTypeField = true,
+                    UseProjectScope = true
+                };
+
+                var recordedKey = settings?.GetLastClientConfigKey(target.Name);
+                if (string.IsNullOrEmpty(recordedKey) || !File.Exists(target.ConfigPath))
+                    return;
+
+                string migratedFrom;
+                if (!TryMigrateLegacyClaudeCodeEntryFile(
+                        target.ConfigPath,
+                        recordedKey,
+                        GetProjectRootPath(),
+                        GetProjectScopeKeyPath(),
+                        out migratedFrom))
+                {
+                    return;
+                }
+
+                PluginDebugLogger.Log(
+                    $"[Funplay MCP Server] Migrated Claude Code entry \"{recordedKey}\" out of {migratedFrom} in " +
+                    $"{target.ConfigPath} into this project's correct projects[...] scope.");
+            }
+            catch (Exception ex)
+            {
+                PluginDebugLogger.Log("[Funplay MCP Server] Claude Code config scope migration skipped: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Migrates the recorded Funplay entry out of Claude Code's legacy global or Unity-project
+        /// scopes and into the git-root scope. The transform is written only if the config still
+        /// contains the exact text that was parsed, so a concurrent Claude process cannot have its
+        /// update silently overwritten. The final replacement is atomic and takes place in the same
+        /// directory as the config file.
+        /// </summary>
+        internal static bool TryMigrateLegacyClaudeCodeEntryFile(
+            string configPath,
+            string recordedKey,
+            string legacyProjectPath,
+            string projectScopePath,
+            out string migratedFrom)
+        {
+            migratedFrom = null;
+            if (string.IsNullOrEmpty(configPath) ||
+                string.IsNullOrEmpty(recordedKey) ||
+                !FunplayMCPServerKey.IsFunplayKey(recordedKey) ||
+                string.IsNullOrEmpty(projectScopePath) ||
+                !File.Exists(configPath))
+            {
+                return false;
+            }
+
+            var originalContent = File.ReadAllText(configPath);
+            var root = SimpleJsonHelper.Deserialize(originalContent) as Dictionary<string, object>;
+            if (root == null)
+                return false;
+
+            if (!TryMigrateLegacyClaudeCodeEntry(
+                    root,
+                    "mcpServers",
+                    recordedKey,
+                    legacyProjectPath,
+                    projectScopePath,
+                    out migratedFrom))
+            {
+                return false;
+            }
+
+            var wroteConfig = TryWriteTextAtomicallyIfUnchanged(
+                configPath,
+                originalContent,
+                SimpleJsonHelper.Serialize(root));
+            if (!wroteConfig)
+                migratedFrom = null;
+            return wroteConfig;
+        }
+
+        private static bool TryMigrateLegacyClaudeCodeEntry(
+            Dictionary<string, object> root,
+            string rootKey,
+            string recordedKey,
+            string legacyProjectPath,
+            string projectScopePath,
+            out string migratedFrom)
+        {
+            migratedFrom = null;
+
+            var topLevelServers = FindNestedDictionary(root, rootKey);
+            object topLevelValue;
+            var hasTopLevelEntry = TryGetLoopbackEntry(topLevelServers, recordedKey, out topLevelValue);
+
+            Dictionary<string, object> legacyServers = null;
+            object legacyValue = null;
+            var hasLegacyProjectEntry = false;
+            if (!string.IsNullOrEmpty(legacyProjectPath) &&
+                !string.Equals(legacyProjectPath, projectScopePath, StringComparison.Ordinal))
+            {
+                var projects = FindNestedDictionary(root, "projects");
+                var legacyEntry = projects != null ? FindNestedDictionary(projects, legacyProjectPath) : null;
+                legacyServers = legacyEntry != null ? FindNestedDictionary(legacyEntry, rootKey) : null;
+                hasLegacyProjectEntry = TryGetLoopbackEntry(legacyServers, recordedKey, out legacyValue);
+            }
+
+            if (!hasTopLevelEntry && !hasLegacyProjectEntry)
+                return false;
+
+            Dictionary<string, object> destinationServers;
+            if (!TryGetOrCreateProjectScopedServersForMigration(
+                    root, rootKey, projectScopePath, out destinationServers))
+            {
+                return false;
+            }
+
+            // Preserve a destination entry that already exists. It may have been reconfigured more
+            // recently or deliberately edited by the user; a stale source must never overwrite it.
+            if (!destinationServers.ContainsKey(recordedKey))
+            {
+                // The Unity-project scope was the newer of the two legacy layouts, so prefer its
+                // endpoint when both stale copies exist.
+                destinationServers[recordedKey] = hasLegacyProjectEntry ? legacyValue : topLevelValue;
+            }
+
+            var sources = new List<string>();
+            if (hasTopLevelEntry)
+            {
+                topLevelServers.Remove(recordedKey);
+                sources.Add("the top level");
+            }
+
+            if (hasLegacyProjectEntry)
+            {
+                legacyServers.Remove(recordedKey);
+                sources.Add($"projects[\"{legacyProjectPath}\"]");
+            }
+
+            migratedFrom = string.Join(" and ", sources);
+            return true;
+        }
+
+        /// <summary>
+        /// Creates the destination dictionaries only when every existing value on the path is also
+        /// a dictionary. Automatic startup migration must not replace malformed or foreign config
+        /// values merely to make room for Funplay.
+        /// </summary>
+        private static bool TryGetOrCreateProjectScopedServersForMigration(
+            Dictionary<string, object> root,
+            string rootKey,
+            string projectScopePath,
+            out Dictionary<string, object> servers)
+        {
+            servers = null;
+
+            Dictionary<string, object> projects;
+            if (!TryGetOrCreateNestedDictionaryForMigration(root, "projects", out projects))
+                return false;
+
+            Dictionary<string, object> projectEntry;
+            if (!TryGetOrCreateNestedDictionaryForMigration(projects, projectScopePath, out projectEntry))
+                return false;
+
+            return TryGetOrCreateNestedDictionaryForMigration(projectEntry, rootKey, out servers);
+        }
+
+        private static bool TryGetOrCreateNestedDictionaryForMigration(
+            Dictionary<string, object> parent,
+            string key,
+            out Dictionary<string, object> child)
+        {
+            object existing;
+            if (parent.TryGetValue(key, out existing))
+            {
+                child = existing as Dictionary<string, object>;
+                return child != null;
+            }
+
+            child = new Dictionary<string, object>();
+            parent[key] = child;
+            return true;
+        }
+
+        private static bool TryGetLoopbackEntry(
+            Dictionary<string, object> servers, string key, out object value)
+        {
+            value = null;
+            return servers != null &&
+                   servers.TryGetValue(key, out value) &&
+                   IsLoopbackEntry(value);
+        }
+
+        /// <summary>
+        /// Best-effort compare-and-swap for a JSON config. A temporary file in the destination
+        /// directory is fully written first, then atomically replaces the original. Symbolic links
+        /// are skipped because replacing one would replace the link itself rather than its target.
+        /// </summary>
+        internal static bool TryWriteTextAtomicallyIfUnchanged(
+            string path, string expectedContent, string updatedContent)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return false;
+
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                return false;
+
+            if (!string.Equals(File.ReadAllText(path), expectedContent, StringComparison.Ordinal))
+                return false;
+
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory))
+                return false;
+
+            var tempPath = Path.Combine(
+                directory,
+                "." + Path.GetFileName(path) + ".funplay-" + Guid.NewGuid().ToString("N") + ".tmp");
+
+            try
+            {
+                File.WriteAllText(tempPath, updatedContent, new UTF8Encoding(false));
+
+                // Narrow the race window once more after the potentially expensive temp write.
+                if (!string.Equals(File.ReadAllText(path), expectedContent, StringComparison.Ordinal))
+                    return false;
+
+                File.Replace(tempPath, path, null);
+                return true;
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
+            }
         }
 
         /// <summary>
@@ -969,6 +1337,48 @@ namespace Funplay.Editor.MCP.Server
             return Path.GetDirectoryName(Application.dataPath) ?? Application.dataPath;
         }
 
+        /// <summary>
+        /// The path Claude Code actually uses as the <c>projects["&lt;path&gt;"]</c> key: the git
+        /// repository root, not this Unity project's own directory. Verified empirically against the
+        /// official <c>claude mcp add --scope local</c> CLI, which -- run from a Unity project folder
+        /// that is itself a git subdirectory (a monorepo layout where the git root sits one or more
+        /// levels above the Unity project) -- writes to <c>projects[gitRoot]</c>, not
+        /// <c>projects[unityProjectPath]</c>. Writing under the Unity project path instead leaves the
+        /// entry at a key Claude Code never reads for that session, so its tools silently never appear
+        /// even though the config and the server are both otherwise correct.
+        /// Walks upward from the Unity project directory looking for a <c>.git</c> entry (a directory
+        /// for a normal repo, a file for a submodule/worktree); returns the first ancestor that has one,
+        /// or falls back to the Unity project path itself if none is found (a project not under git).
+        /// </summary>
+        private static string GetProjectScopeKeyPath()
+        {
+            return FindGitRootOrSelf(GetProjectRootPath());
+        }
+
+        /// <summary>
+        /// Walks upward from <paramref name="startDirectory"/> looking for a <c>.git</c> entry (a
+        /// directory for a normal repo, a file for a submodule/worktree); returns the first ancestor
+        /// that has one, or <paramref name="startDirectory"/> itself if none is found within the walk.
+        /// Split out from <see cref="GetProjectScopeKeyPath"/> so the walk can be exercised in EditMode
+        /// tests against real temporary directories instead of <c>Application.dataPath</c>.
+        /// </summary>
+        internal static string FindGitRootOrSelf(string startDirectory)
+        {
+            var dir = startDirectory;
+            for (var depth = 0; depth < 64 && !string.IsNullOrEmpty(dir); depth++)
+            {
+                if (File.Exists(Path.Combine(dir, ".git")) || Directory.Exists(Path.Combine(dir, ".git")))
+                    return dir;
+
+                var parent = Directory.GetParent(dir);
+                if (parent == null)
+                    break;
+                dir = parent.FullName;
+            }
+
+            return startDirectory;
+        }
+
         private static string MapTargetNameToSkillsPlatformId(string targetName)
         {
             switch (targetName?.Trim())
@@ -1064,6 +1474,13 @@ namespace Funplay.Editor.MCP.Server
             public bool IsToml;
             public bool IncludeTypeField;
             public bool IsLMStudio;
+
+            /// <summary>
+            /// True only for Claude Code. Its config file supports a <c>projects["&lt;path&gt;"]</c>
+            /// section that Claude Code applies only to sessions opened at that path; every other
+            /// client here has no such concept and keeps writing at the config's top level.
+            /// </summary>
+            public bool UseProjectScope;
         }
     }
 }
