@@ -653,45 +653,228 @@ namespace Funplay.Editor.MCP.Server
                 if (string.IsNullOrEmpty(recordedKey) || !File.Exists(target.ConfigPath))
                     return;
 
-                var root = SimpleJsonHelper.Deserialize(File.ReadAllText(target.ConfigPath)) as Dictionary<string, object>;
-                if (root == null)
-                    return;
-
-                var rootKey = GetRootKey(target);
-
-                object migratedValue;
-                var migratedFrom = "the top level";
-                var didMigrate = TryTakeLoopbackEntry(FindNestedDictionary(root, rootKey), recordedKey, out migratedValue);
-
-                if (!didMigrate)
+                string migratedFrom;
+                if (!TryMigrateLegacyClaudeCodeEntryFile(
+                        target.ConfigPath,
+                        recordedKey,
+                        GetProjectRootPath(),
+                        GetProjectScopeKeyPath(),
+                        out migratedFrom))
                 {
-                    // Also self-heal an entry this project wrote under its own Unity project path before
-                    // GetProjectScopeKeyPath() existed -- wrong whenever the git root sits above the Unity
-                    // project directory (a monorepo layout), so Claude Code never read it either.
-                    var legacyPath = GetProjectRootPath();
-                    if (!string.Equals(legacyPath, GetProjectScopeKeyPath(), StringComparison.Ordinal))
-                    {
-                        var projects = FindNestedDictionary(root, "projects");
-                        var legacyEntry = projects != null ? FindNestedDictionary(projects, legacyPath) : null;
-                        var legacyServers = legacyEntry != null ? FindNestedDictionary(legacyEntry, rootKey) : null;
-                        didMigrate = TryTakeLoopbackEntry(legacyServers, recordedKey, out migratedValue);
-                        migratedFrom = $"projects[\"{legacyPath}\"]";
-                    }
+                    return;
                 }
 
-                if (!didMigrate)
-                    return; // Nothing of ours to migrate: never configured here, already migrated, or hand-edited.
-
-                GetOrCreateProjectScopedServers(root, rootKey)[recordedKey] = migratedValue;
-
-                File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
                 PluginDebugLogger.Log(
-                    $"[Funplay MCP Server] Migrated Claude Code entry \"{recordedKey}\" out of {migratedFrom} of " +
+                    $"[Funplay MCP Server] Migrated Claude Code entry \"{recordedKey}\" out of {migratedFrom} in " +
                     $"{target.ConfigPath} into this project's correct projects[...] scope.");
             }
             catch (Exception ex)
             {
                 PluginDebugLogger.Log("[Funplay MCP Server] Claude Code config scope migration skipped: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Migrates the recorded Funplay entry out of Claude Code's legacy global or Unity-project
+        /// scopes and into the git-root scope. The transform is written only if the config still
+        /// contains the exact text that was parsed, so a concurrent Claude process cannot have its
+        /// update silently overwritten. The final replacement is atomic and takes place in the same
+        /// directory as the config file.
+        /// </summary>
+        internal static bool TryMigrateLegacyClaudeCodeEntryFile(
+            string configPath,
+            string recordedKey,
+            string legacyProjectPath,
+            string projectScopePath,
+            out string migratedFrom)
+        {
+            migratedFrom = null;
+            if (string.IsNullOrEmpty(configPath) ||
+                string.IsNullOrEmpty(recordedKey) ||
+                !FunplayMCPServerKey.IsFunplayKey(recordedKey) ||
+                string.IsNullOrEmpty(projectScopePath) ||
+                !File.Exists(configPath))
+            {
+                return false;
+            }
+
+            var originalContent = File.ReadAllText(configPath);
+            var root = SimpleJsonHelper.Deserialize(originalContent) as Dictionary<string, object>;
+            if (root == null)
+                return false;
+
+            if (!TryMigrateLegacyClaudeCodeEntry(
+                    root,
+                    "mcpServers",
+                    recordedKey,
+                    legacyProjectPath,
+                    projectScopePath,
+                    out migratedFrom))
+            {
+                return false;
+            }
+
+            var wroteConfig = TryWriteTextAtomicallyIfUnchanged(
+                configPath,
+                originalContent,
+                SimpleJsonHelper.Serialize(root));
+            if (!wroteConfig)
+                migratedFrom = null;
+            return wroteConfig;
+        }
+
+        private static bool TryMigrateLegacyClaudeCodeEntry(
+            Dictionary<string, object> root,
+            string rootKey,
+            string recordedKey,
+            string legacyProjectPath,
+            string projectScopePath,
+            out string migratedFrom)
+        {
+            migratedFrom = null;
+
+            var topLevelServers = FindNestedDictionary(root, rootKey);
+            object topLevelValue;
+            var hasTopLevelEntry = TryGetLoopbackEntry(topLevelServers, recordedKey, out topLevelValue);
+
+            Dictionary<string, object> legacyServers = null;
+            object legacyValue = null;
+            var hasLegacyProjectEntry = false;
+            if (!string.IsNullOrEmpty(legacyProjectPath) &&
+                !string.Equals(legacyProjectPath, projectScopePath, StringComparison.Ordinal))
+            {
+                var projects = FindNestedDictionary(root, "projects");
+                var legacyEntry = projects != null ? FindNestedDictionary(projects, legacyProjectPath) : null;
+                legacyServers = legacyEntry != null ? FindNestedDictionary(legacyEntry, rootKey) : null;
+                hasLegacyProjectEntry = TryGetLoopbackEntry(legacyServers, recordedKey, out legacyValue);
+            }
+
+            if (!hasTopLevelEntry && !hasLegacyProjectEntry)
+                return false;
+
+            Dictionary<string, object> destinationServers;
+            if (!TryGetOrCreateProjectScopedServersForMigration(
+                    root, rootKey, projectScopePath, out destinationServers))
+            {
+                return false;
+            }
+
+            // Preserve a destination entry that already exists. It may have been reconfigured more
+            // recently or deliberately edited by the user; a stale source must never overwrite it.
+            if (!destinationServers.ContainsKey(recordedKey))
+            {
+                // The Unity-project scope was the newer of the two legacy layouts, so prefer its
+                // endpoint when both stale copies exist.
+                destinationServers[recordedKey] = hasLegacyProjectEntry ? legacyValue : topLevelValue;
+            }
+
+            var sources = new List<string>();
+            if (hasTopLevelEntry)
+            {
+                topLevelServers.Remove(recordedKey);
+                sources.Add("the top level");
+            }
+
+            if (hasLegacyProjectEntry)
+            {
+                legacyServers.Remove(recordedKey);
+                sources.Add($"projects[\"{legacyProjectPath}\"]");
+            }
+
+            migratedFrom = string.Join(" and ", sources);
+            return true;
+        }
+
+        /// <summary>
+        /// Creates the destination dictionaries only when every existing value on the path is also
+        /// a dictionary. Automatic startup migration must not replace malformed or foreign config
+        /// values merely to make room for Funplay.
+        /// </summary>
+        private static bool TryGetOrCreateProjectScopedServersForMigration(
+            Dictionary<string, object> root,
+            string rootKey,
+            string projectScopePath,
+            out Dictionary<string, object> servers)
+        {
+            servers = null;
+
+            Dictionary<string, object> projects;
+            if (!TryGetOrCreateNestedDictionaryForMigration(root, "projects", out projects))
+                return false;
+
+            Dictionary<string, object> projectEntry;
+            if (!TryGetOrCreateNestedDictionaryForMigration(projects, projectScopePath, out projectEntry))
+                return false;
+
+            return TryGetOrCreateNestedDictionaryForMigration(projectEntry, rootKey, out servers);
+        }
+
+        private static bool TryGetOrCreateNestedDictionaryForMigration(
+            Dictionary<string, object> parent,
+            string key,
+            out Dictionary<string, object> child)
+        {
+            object existing;
+            if (parent.TryGetValue(key, out existing))
+            {
+                child = existing as Dictionary<string, object>;
+                return child != null;
+            }
+
+            child = new Dictionary<string, object>();
+            parent[key] = child;
+            return true;
+        }
+
+        private static bool TryGetLoopbackEntry(
+            Dictionary<string, object> servers, string key, out object value)
+        {
+            value = null;
+            return servers != null &&
+                   servers.TryGetValue(key, out value) &&
+                   IsLoopbackEntry(value);
+        }
+
+        /// <summary>
+        /// Best-effort compare-and-swap for a JSON config. A temporary file in the destination
+        /// directory is fully written first, then atomically replaces the original. Symbolic links
+        /// are skipped because replacing one would replace the link itself rather than its target.
+        /// </summary>
+        internal static bool TryWriteTextAtomicallyIfUnchanged(
+            string path, string expectedContent, string updatedContent)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return false;
+
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                return false;
+
+            if (!string.Equals(File.ReadAllText(path), expectedContent, StringComparison.Ordinal))
+                return false;
+
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory))
+                return false;
+
+            var tempPath = Path.Combine(
+                directory,
+                "." + Path.GetFileName(path) + ".funplay-" + Guid.NewGuid().ToString("N") + ".tmp");
+
+            try
+            {
+                File.WriteAllText(tempPath, updatedContent, new UTF8Encoding(false));
+
+                // Narrow the race window once more after the potentially expensive temp write.
+                if (!string.Equals(File.ReadAllText(path), expectedContent, StringComparison.Ordinal))
+                    return false;
+
+                File.Replace(tempPath, path, null);
+                return true;
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
             }
         }
 
@@ -735,25 +918,6 @@ namespace Funplay.Editor.MCP.Server
                 return false;
 
             return IsLoopbackUrl(url as string);
-        }
-
-        /// <summary>
-        /// Removes <paramref name="key"/> from <paramref name="servers"/> and returns its value via
-        /// <paramref name="value"/>, but only if it is still a loopback entry (never hand-edited since
-        /// Funplay wrote it). Used by <see cref="TryMigrateLegacyClaudeCodeEntryOnce"/> to lift one
-        /// specific legacy entry out of whichever stale location it was written to.
-        /// </summary>
-        private static bool TryTakeLoopbackEntry(Dictionary<string, object> servers, string key, out object value)
-        {
-            value = null;
-            if (servers == null || !servers.TryGetValue(key, out value))
-                return false;
-
-            if (!IsLoopbackEntry(value))
-                return false;
-
-            servers.Remove(key);
-            return true;
         }
 
         /// <summary>Returns the entry name written.</summary>
