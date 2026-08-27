@@ -456,12 +456,17 @@ publish_github() {
   [[ "$PUBLISH_GITHUB" == 1 ]] || return 0
   require_command gh
 
+  local assets=("$PACKAGE_OUTPUT")
+  local nupkg="$OUT_DIR/funplay.unity.mcp.$VERSION.nupkg"
+  [[ -f "$nupkg" ]] && assets+=("$nupkg")
+  [[ -f "$SHA_FILE" ]] && assets+=("$SHA_FILE")
+
   info "Publishing GitHub Release v$VERSION"
   if gh release view "v$VERSION" -R "$REPO" >/dev/null 2>&1; then
-    run gh release upload "v$VERSION" "$PACKAGE_OUTPUT" -R "$REPO" --clobber
+    run gh release upload "v$VERSION" "${assets[@]}" -R "$REPO" --clobber
     run gh release edit "v$VERSION" -R "$REPO" --notes-file "$NOTES_FILE"
   else
-    run gh release create "v$VERSION" "$PACKAGE_OUTPUT" -R "$REPO" --title "v$VERSION" --notes-file "$NOTES_FILE"
+    run gh release create "v$VERSION" "${assets[@]}" -R "$REPO" --title "v$VERSION" --notes-file "$NOTES_FILE"
   fi
 }
 
