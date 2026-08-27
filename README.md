@@ -105,7 +105,7 @@ Use the built-in **One-Click MCP Configuration** in the `Funplay > MCP Server` w
 
 Select your target client, click **Configure**, and the package writes the recommended MCP config entry for you.
 
-For Claude Code, Cursor, and Codex, click **Configure + Skills** to also install both built-in project skills.
+For Claude Code, Cursor, Codex, and OpenCode, click **Configure + Skills** to also install both built-in project skills.
 
 If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms and install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills. The UI skill covers responsive portrait and landscape uGUI work.
 
@@ -234,6 +234,25 @@ url = "http://127.0.0.1:<port>/"
 </details>
 
 <details>
+<summary>OpenCode</summary>
+
+Written to the repository's own `.opencode/opencode.json` (not the global config), so only OpenCode sessions started inside this repo see this editor's tools.
+
+```json
+{
+  "mcp": {
+    "funplay-<project>": {
+      "type": "remote",
+      "url": "http://127.0.0.1:<port>/",
+      "enabled": true
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 Use the same JSON structure as Cursor unless your local Windsurf version requires a different MCP config format.
@@ -283,7 +302,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
 - **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
-- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, and similar clients directly from the Unity window
+- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
 - **Project Skills Manager** — Configure project-level skills for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - **MCP Settings** — Adjust `execute_code` safety defaults and enable verbose plugin debug logging when troubleshooting MCP connections or tool execution

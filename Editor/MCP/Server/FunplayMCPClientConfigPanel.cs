@@ -105,7 +105,7 @@ namespace Funplay.Editor.MCP.Server
 
             var skillsHint = new Label(skillsSupported
                 ? "Configure + Skills also installs the project MCP workflow skill."
-                : "Project skills are currently available for Claude Code, Cursor, and Codex.");
+                : "Project skills are currently available for Claude Code, Cursor, Codex, and OpenCode.");
             skillsHint.style.fontSize = 10;
             skillsHint.style.color = new Color(0.6f, 0.6f, 0.6f);
             skillsHint.style.marginBottom = 4;
@@ -433,6 +433,15 @@ namespace Funplay.Editor.MCP.Server
                     ConfigPath = Path.Combine(homePath, ".codex", "config.toml"),
                     IsToml = true,
                 },
+                new MCPConfigTarget
+                {
+                    Name = "OpenCode",
+                    ConfigPath = GetOpenCodeConfigPath(),
+                    RootKey = "mcp",
+                    IncludeTypeField = true,
+                    TypeFieldValue = "remote",
+                    IncludeEnabledField = true
+                },
             };
         }
 
@@ -473,7 +482,7 @@ namespace Funplay.Editor.MCP.Server
                     EditorUtility.DisplayDialog(
                         "MCP Configuration",
                         $"MCP configuration written to:\n{target.ConfigPath}\n\n" +
-                        "Project skills are currently available for Claude Code, Cursor, and Codex.",
+                        "Project skills are currently available for Claude Code, Cursor, Codex, and OpenCode.",
                         "OK");
 
                     _rebuildWindow?.Invoke();
@@ -582,7 +591,7 @@ namespace Funplay.Editor.MCP.Server
 
             Dictionary<string, object> root = null;
             if (File.Exists(target.ConfigPath))
-                root = SimpleJsonHelper.Deserialize(File.ReadAllText(target.ConfigPath)) as Dictionary<string, object>;
+                root = ParseRewritableConfig(target, serverName, entry);
             root = root ?? new Dictionary<string, object>();
 
             var servers = target.UseProjectScope
@@ -594,6 +603,76 @@ namespace Funplay.Editor.MCP.Server
 
             File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
             return serverName;
+        }
+
+        /// <summary>
+        /// Reads an existing config file, but only when its full contents survive a
+        /// <see cref="SimpleJsonHelper"/> round-trip. The whole file is rewritten from what the parse
+        /// returns, and that parser is strict-JSON only: a config carrying JSONC comments (legal in
+        /// OpenCode's <c>opencode.json</c> and VS Code's <c>mcp.json</c>, both of which are read with
+        /// real JSONC parsers) stops the key scan dead at the comment, so writing the parse result
+        /// back would silently delete every key past it -- providers, models, keybinds, agents. Rather
+        /// than clobber a file it cannot represent, this reports what to add by hand and changes
+        /// nothing, the same "stop instead of destroy" stance <c>WriteManagedBlock</c> takes for a
+        /// legacy AGENTS.md. Returns null for an empty file (nothing to preserve).
+        /// </summary>
+        private Dictionary<string, object> ParseRewritableConfig(
+            MCPConfigTarget target, string serverName, Dictionary<string, object> entry)
+        {
+            var content = File.ReadAllText(target.ConfigPath);
+            if (string.IsNullOrWhiteSpace(content))
+                return null;
+
+            string problem = null;
+            Dictionary<string, object> parsed = null;
+
+            if (ContainsJsonComment(content))
+                problem = "it contains JSON comments, which Funplay's strict-JSON writer cannot preserve";
+            else
+            {
+                parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
+                if (parsed == null)
+                    problem = "it could not be read as a JSON object";
+            }
+
+            if (problem == null)
+                return parsed;
+
+            throw new InvalidOperationException(
+                $"'{target.ConfigPath}' was left unchanged because {problem}. " +
+                $"Add this entry by hand under \"{GetRootKey(target)}\" instead:\n\n" +
+                $"\"{serverName}\": {SimpleJsonHelper.Serialize(entry)}");
+        }
+
+        /// <summary>
+        /// True if <paramref name="content"/> has a <c>//</c> or <c>/*</c> comment outside a string
+        /// literal. Deliberately only detects them -- rewriting a commented file correctly would take
+        /// a real JSONC parser, and the point here is to refuse, not to reformat.
+        /// Internal so the scan can be exercised in EditMode tests without a config file.
+        /// </summary>
+        internal static bool ContainsJsonComment(string content)
+        {
+            var inString = false;
+            for (var i = 0; i < content.Length; i++)
+            {
+                var c = content[i];
+
+                if (inString)
+                {
+                    if (c == '\\')
+                        i++;
+                    else if (c == '"')
+                        inString = false;
+                    continue;
+                }
+
+                if (c == '"')
+                    inString = true;
+                else if (c == '/' && i + 1 < content.Length && (content[i + 1] == '/' || content[i + 1] == '*'))
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -712,6 +791,17 @@ namespace Funplay.Editor.MCP.Server
             }
 
             var originalContent = File.ReadAllText(configPath);
+
+            // Same "stop instead of destroy" guard ConfigureJsonTarget applies through
+            // ParseRewritableConfig: the file is rewritten from a strict-JSON parse, so one carrying
+            // JSONC comments would lose every key past the first comment. This path runs
+            // unattended at editor startup and has no way to ask, so it migrates nothing rather
+            // than truncate a config it cannot reproduce; clicking Configure reports the entry to
+            // add by hand. Claude Code writes ~/.claude.json itself and does not put comments in
+            // it, so this is a guard against a hand-edited file, not an expected shape.
+            if (ContainsJsonComment(originalContent))
+                return false;
+
             var root = SimpleJsonHelper.Deserialize(originalContent) as Dictionary<string, object>;
             if (root == null)
                 return false;
@@ -1191,7 +1281,10 @@ namespace Funplay.Editor.MCP.Server
             };
 
             if (target.IncludeTypeField)
-                entry["type"] = "http";
+                entry["type"] = string.IsNullOrEmpty(target.TypeFieldValue) ? "http" : target.TypeFieldValue;
+
+            if (target.IncludeEnabledField)
+                entry["enabled"] = true;
 
             return entry;
         }
@@ -1354,8 +1447,8 @@ namespace Funplay.Editor.MCP.Server
         /// The path Claude Code actually uses as the <c>projects["&lt;path&gt;"]</c> key: the git
         /// repository root, not this Unity project's own directory. Verified empirically against the
         /// official <c>claude mcp add --scope local</c> CLI, which -- run from a Unity project folder
-        /// that is itself a git subdirectory (a monorepo layout where the git root sits one or more
-        /// levels above the Unity project) -- writes to <c>projects[gitRoot]</c>, not
+        /// that is itself a git subdirectory (a monorepo layout, e.g. this repo, where the git root is
+        /// the parent of the Unity project) -- writes to <c>projects[gitRoot]</c>, not
         /// <c>projects[unityProjectPath]</c>. Writing under the Unity project path instead leaves the
         /// entry at a key Claude Code never reads for that session, so its tools silently never appear
         /// even though the config and the server are both otherwise correct.
@@ -1398,6 +1491,8 @@ namespace Funplay.Editor.MCP.Server
             {
                 case "Codex":
                     return "codex";
+                case "OpenCode":
+                    return "opencode";
                 case "Claude Code":
                     return "claude";
                 case "Cursor":
@@ -1405,6 +1500,29 @@ namespace Funplay.Editor.MCP.Server
                 default:
                     return null;
             }
+        }
+
+        /// <summary>
+        /// OpenCode's entry goes into this repository's own <c>.opencode/opencode.json</c>, not the
+        /// global <c>~/.config/opencode/opencode.json</c>. OpenCode merges every config location it
+        /// finds (global <c>config.json</c> + <c>opencode.json</c> + <c>opencode.jsonc</c>, then the
+        /// project's, then <c>.opencode</c> directories, later ones overriding conflicting keys), and
+        /// it discovers the project file by walking upward from the directory the session was started
+        /// in -- so a file at the repository root is reachable from anywhere inside the repo, while a
+        /// global entry is visible to *every* session on the machine regardless of which project it
+        /// was opened in. That global visibility is the same cross-project leak project-scoping the
+        /// Claude Code entry fixes (see <see cref="GetOrCreateProjectScopedServers"/>): with two
+        /// Funplay projects configured, whichever Unity Editor happens to be running would expose its
+        /// tools inside an unrelated project's OpenCode session, indistinguishable from that project's
+        /// own entry. OpenCode is written per project for the same reason.
+        /// The repository root is used rather than the Unity project directory so the entry is found
+        /// whether OpenCode is started at the repo root or inside the Unity project folder (a monorepo
+        /// layout, e.g. this repo, where the git root is the Unity project's parent); the walk is
+        /// upward only, so the reverse placement would miss.
+        /// </summary>
+        private static string GetOpenCodeConfigPath()
+        {
+            return Path.Combine(GetProjectScopeKeyPath(), ".opencode", "opencode.json");
         }
 
         private static string GetUserHomePath()
@@ -1518,6 +1636,19 @@ namespace Funplay.Editor.MCP.Server
             public bool IsToml;
             public bool IncludeTypeField;
             public bool IsLMStudio;
+
+            /// <summary>
+            /// Value written for the <c>type</c> field when <see cref="IncludeTypeField"/> is set.
+            /// Empty means "http" (the Claude Code / VS Code shape); OpenCode uses "remote".
+            /// </summary>
+            public string TypeFieldValue;
+
+            /// <summary>
+            /// True for OpenCode, whose documented remote-server example spells the flag out
+            /// (<c>{"type":"remote","url":...,"enabled":true}</c>). The field is optional in its schema
+            /// and its default is not documented, so it is written explicitly rather than relied on.
+            /// </summary>
+            public bool IncludeEnabledField;
 
             /// <summary>
             /// True only for Claude Code. Its config file supports a <c>projects["&lt;path&gt;"]</c>

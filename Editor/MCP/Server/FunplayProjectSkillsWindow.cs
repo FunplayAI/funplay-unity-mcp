@@ -102,7 +102,7 @@ namespace Funplay.Editor.MCP.Server
             var section = CreateSection();
             section.Add(CreateSectionHeader("Current Platform"));
 
-            _platformTargets = new[] { "Claude Code", "Cursor", "VS Code", "Trae", "Kiro", "Codex" };
+            _platformTargets = new[] { "Claude Code", "Cursor", "VS Code", "Trae", "Kiro", "Codex", "OpenCode" };
             _selectedTargetIndex = Mathf.Clamp(_selectedTargetIndex, 0, _platformTargets.Length - 1);
             var persistedTargetName = _settingsController.MCPSelectedConfigTarget;
             if (!string.IsNullOrWhiteSpace(persistedTargetName))
@@ -136,7 +136,7 @@ namespace Funplay.Editor.MCP.Server
 
             if (!currentPlatformSupported)
             {
-                section.Add(CreateHint("Project skills integration is not available for this platform yet. Supported platforms: Codex, Claude Code, Cursor.", new Color(1f, 0.75f, 0.45f)));
+                section.Add(CreateHint("Project skills integration is not available for this platform yet. Supported platforms: Codex, Claude Code, Cursor, OpenCode.", new Color(1f, 0.75f, 0.45f)));
             }
 
             _mainContainer.Add(section);
@@ -331,7 +331,7 @@ namespace Funplay.Editor.MCP.Server
                 {
                     EditorUtility.DisplayDialog(
                         "Project Skills Configuration",
-                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select Codex, Claude Code, or Cursor.",
+                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select Codex, Claude Code, Cursor, or OpenCode.",
                         "OK");
                     return;
                 }
@@ -388,7 +388,7 @@ namespace Funplay.Editor.MCP.Server
                 {
                     EditorUtility.DisplayDialog(
                         "Project Skills Upgrade",
-                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select Codex, Claude Code, or Cursor.",
+                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select Codex, Claude Code, Cursor, or OpenCode.",
                         "OK");
                     return;
                 }
@@ -471,6 +471,8 @@ namespace Funplay.Editor.MCP.Server
             {
                 case "Codex":
                     return "codex";
+                case "OpenCode":
+                    return "opencode";
                 case "Claude Code":
                     return "claude";
                 case "Cursor":

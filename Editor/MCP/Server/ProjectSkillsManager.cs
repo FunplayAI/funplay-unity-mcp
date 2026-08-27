@@ -33,7 +33,7 @@ namespace Funplay.Editor.MCP.Server
         private const string CodexManagedNotice = "This section is managed by Funplay MCP for Unity. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
         private const string ClaudeManagedNotice = "This section is managed by Funplay MCP for Unity for Claude Code. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
 
-        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor" };
+        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor", "opencode" };
 
         private static readonly SkillDefinition[] SkillCatalog =
         {
@@ -181,6 +181,20 @@ namespace Funplay.Editor.MCP.Server
             return Path.Combine(projectRoot, ".codex", "skills");
         }
 
+        /// <summary>
+        /// OpenCode discovers project skills under <c>.opencode/</c>. Its documentation gives this
+        /// directory an optional plural -- <c>.opencode/skill(s)/&lt;name&gt;/SKILL.md</c>, the same
+        /// way it spells the sibling <c>agent(s)</c>, <c>command(s)</c> and <c>plugin(s)</c> ones --
+        /// and the plural is the form its own config example and documented skills paths use, so
+        /// that is what gets written here. Worth knowing when checking that a write landed:
+        /// OpenCode also auto-loads <c>~/.claude/skills/</c> and <c>~/.agents/skills/</c>, so a
+        /// session can list skills that did not come from this project at all.
+        /// </summary>
+        internal static string GetOpenCodeSkillsRoot(string projectRoot)
+        {
+            return Path.Combine(projectRoot, ".opencode", "skills");
+        }
+
         internal static string GetClaudeSkillsRoot(string projectRoot)
         {
             return Path.Combine(projectRoot, ".claude", "skills");
@@ -197,9 +211,11 @@ namespace Funplay.Editor.MCP.Server
             SaveManifest(projectRoot, manifest);
 
             var normalized = LoadManifest(projectRoot);
+            SyncAgentsInstructions(projectRoot, normalized);
             SyncCodex(projectRoot, normalized);
             SyncClaude(projectRoot, normalized);
             SyncCursor(projectRoot, normalized);
+            SyncOpenCode(projectRoot, normalized);
         }
 
         internal static bool IsPlatformConfigured(string projectRoot, string platformId)
@@ -301,34 +317,51 @@ namespace Funplay.Editor.MCP.Server
                 case "cursor":
                     paths.Add(GetCursorRulesPath(projectRoot));
                     break;
+                case "opencode":
+                    paths.Add(GetCodexAgentsPath(projectRoot));
+                    paths.Add(GetOpenCodeSkillsRoot(projectRoot));
+                    break;
             }
 
             return paths;
         }
 
+        // AGENTS.md is shared by Codex and OpenCode (both read it natively), so the single managed
+        // block is written while EITHER platform is enabled and removed only when BOTH are disabled.
+        // Splitting it per platform would need two blocks in one file, which WriteManagedBlock's
+        // single begin..end marker model cannot represent.
+        private static void SyncAgentsInstructions(string projectRoot, ProjectSkillsManifest manifest)
+        {
+            var enabled =
+                manifest.platforms.Contains("codex", StringComparer.OrdinalIgnoreCase) ||
+                manifest.platforms.Contains("opencode", StringComparer.OrdinalIgnoreCase);
+            var agentsPath = GetCodexAgentsPath(projectRoot);
+
+            if (!enabled)
+            {
+                RemoveManagedBlock(agentsPath, "# AGENTS.md", BuildLegacyCodexAgentsContentVariants(projectRoot, manifest));
+                return;
+            }
+
+            WriteManagedBlock(
+                agentsPath,
+                "# AGENTS.md",
+                BuildAgentsManagedBlock(projectRoot, manifest),
+                BuildLegacyCodexAgentsContentVariants(projectRoot, manifest));
+        }
+
         private static void SyncCodex(string projectRoot, ProjectSkillsManifest manifest)
         {
             var enabled = manifest.platforms.Contains("codex", StringComparer.OrdinalIgnoreCase);
-            var agentsPath = GetCodexAgentsPath(projectRoot);
             var skillsRoot = GetCodexSkillsRoot(projectRoot);
 
             if (!enabled)
             {
-                RemoveManagedBlock(agentsPath, "# AGENTS.md", BuildLegacyCodexAgentsContent(projectRoot, manifest));
                 DeleteManagedSkillDirectories(skillsRoot);
                 return;
             }
 
             Directory.CreateDirectory(skillsRoot);
-
-            // Manage only the delimited begin..end block; hand-authored content elsewhere in
-            // AGENTS.md is preserved (created/appended if the file has no block yet).
-            WriteManagedBlock(
-                agentsPath,
-                "# AGENTS.md",
-                BuildCodexManagedBlock(projectRoot, manifest),
-                BuildLegacyCodexAgentsContent(projectRoot, manifest));
-
             WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.Codex);
         }
 
@@ -371,6 +404,21 @@ namespace Funplay.Editor.MCP.Server
 
             Directory.CreateDirectory(rulesRoot);
             WriteManagedCursorRules(rulesRoot, manifest);
+        }
+
+        private static void SyncOpenCode(string projectRoot, ProjectSkillsManifest manifest)
+        {
+            var enabled = manifest.platforms.Contains("opencode", StringComparer.OrdinalIgnoreCase);
+            var skillsRoot = GetOpenCodeSkillsRoot(projectRoot);
+
+            if (!enabled)
+            {
+                DeleteManagedSkillDirectories(skillsRoot);
+                return;
+            }
+
+            Directory.CreateDirectory(skillsRoot);
+            WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.OpenCode);
         }
 
         private static void WriteManagedSkillDirectories(string skillsRoot, ProjectSkillsManifest manifest, SkillPlatform platform)
@@ -429,7 +477,7 @@ namespace Funplay.Editor.MCP.Server
         //   - begin marker, no end      -> migrate an exact legacy generated file; otherwise stop
         //                                  with a manual-migration error rather than clobber content
         //   - no begin marker           -> append the block below the existing user content
-        private static void WriteManagedBlock(string path, string defaultTitle, string block, string legacyContent)
+        private static void WriteManagedBlock(string path, string defaultTitle, string block, params string[] legacyContents)
         {
             if (!File.Exists(path))
             {
@@ -455,7 +503,7 @@ namespace Funplay.Editor.MCP.Server
 
             if (beginCount == 1 && endCount == 0)
             {
-                if (ManagedTextEquals(content, legacyContent))
+                if (MatchesAnyLegacyContent(content, legacyContents))
                 {
                     File.WriteAllText(path, defaultTitle + "\n\n" + block + "\n");
                     return;
@@ -478,7 +526,7 @@ namespace Funplay.Editor.MCP.Server
         // block and keep the user's content. If nothing but a bare title (or whitespace) remains,
         // the file was Funplay-only, so delete it. Exact legacy generated files can also be safely
         // deleted; edited legacy files are left untouched and reported for manual cleanup.
-        private static void RemoveManagedBlock(string path, string defaultTitle, string legacyContent)
+        private static void RemoveManagedBlock(string path, string defaultTitle, params string[] legacyContents)
         {
             if (!File.Exists(path))
                 return;
@@ -496,7 +544,7 @@ namespace Funplay.Editor.MCP.Server
 
             if (beginCount == 1 && endCount == 0)
             {
-                if (ManagedTextEquals(content, legacyContent))
+                if (MatchesAnyLegacyContent(content, legacyContents))
                 {
                     File.Delete(path);
                     return;
@@ -541,6 +589,25 @@ namespace Funplay.Editor.MCP.Server
         private static bool ManagedTextEquals(string left, string right)
         {
             return string.Equals(NormalizeManagedText(left), NormalizeManagedText(right), StringComparison.Ordinal);
+        }
+
+        // A legacy (begin-marker-only) file is safe to rewrite wholesale only if it is byte-identical
+        // to something Funplay generated. `legacyContents` therefore carries the current rendering AND
+        // the renderings older plugin versions produced: the comparison is against text, so editing the
+        // managed block's wording would otherwise make every not-yet-migrated file on disk look
+        // hand-authored and hard-fail the migration.
+        private static bool MatchesAnyLegacyContent(string content, string[] legacyContents)
+        {
+            if (legacyContents == null)
+                return false;
+
+            foreach (var legacy in legacyContents)
+            {
+                if (ManagedTextEquals(content, legacy))
+                    return true;
+            }
+
+            return false;
         }
 
         private static string NormalizeManagedText(string value)
@@ -620,6 +687,17 @@ namespace Funplay.Editor.MCP.Server
                     {
                         result.Add(new ExpectedSkillVersionFile(
                             Path.Combine(GetCursorRulesPath(projectRoot), $"funplay-{skill.Id}.mdc"),
+                            skill.Id,
+                            skill.Version,
+                            BuildSkillVersionMarker(skill)));
+                    }
+                    break;
+                case "opencode":
+                    AddProjectVersionFile(result, GetCodexAgentsPath(projectRoot), skills);
+                    foreach (var skill in skills)
+                    {
+                        result.Add(new ExpectedSkillVersionFile(
+                            Path.Combine(GetOpenCodeSkillsRoot(projectRoot), $"funplay-{skill.Id}", "SKILL.md"),
                             skill.Id,
                             skill.Version,
                             BuildSkillVersionMarker(skill)));
@@ -764,7 +842,8 @@ namespace Funplay.Editor.MCP.Server
             return content.Substring(start, end - start).Trim();
         }
 
-        private static string BuildCodexManagedBlock(string projectRoot, ProjectSkillsManifest manifest)
+        // Shared by Codex and OpenCode (both read AGENTS.md); see SyncAgentsInstructions.
+        private static string BuildAgentsManagedBlock(string projectRoot, ProjectSkillsManifest manifest)
         {
             var installed = GetInstalledSkills(manifest);
             return
@@ -779,9 +858,9 @@ $@"{ManagedMarker}
 
 {string.Join("\n", installed.Select(skill => $"- `funplay-{skill.Id}` v{skill.Version} - {skill.Description}"))}
 
-## Codex workflow rules
+## Agent workflow rules
 
-- Prefer project-local Funplay skills under `.codex/skills/`.
+- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.
 - Use `execute_code` as the primary Unity automation tool. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo automatically.
 - Confirm the Unity project root, active scene, and real object/prefab/asset path before edits. Treat user-provided object names as hints, not paths.
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
@@ -858,9 +937,31 @@ $@"{ManagedMarker}
 
         private static string BuildLegacyCodexAgentsContent(string projectRoot, ProjectSkillsManifest manifest)
         {
-            var block = RemoveManagedEndMarker(BuildCodexManagedBlock(projectRoot, manifest))
+            var block = RemoveManagedEndMarker(BuildAgentsManagedBlock(projectRoot, manifest))
                 .Replace(CodexManagedNotice, "This file is managed by Funplay MCP for Unity.");
             return "# AGENTS.md\n" + block + "\n";
+        }
+
+        /// <summary>
+        /// Every rendering of the legacy AGENTS.md a released plugin version could have written, newest
+        /// first. Only the wording differs between them, so each older rendering is expressed as a
+        /// reverse substitution on the current one rather than as a second frozen copy of the whole
+        /// block -- append a new entry here whenever <see cref="BuildAgentsManagedBlock"/>'s text
+        /// changes, or files still carrying the previous wording stop migrating.
+        /// </summary>
+        private static string[] BuildLegacyCodexAgentsContentVariants(
+            string projectRoot, ProjectSkillsManifest manifest)
+        {
+            var current = BuildLegacyCodexAgentsContent(projectRoot, manifest);
+
+            // <= 0.6.2: the block predates OpenCode support and was worded for Codex alone.
+            var codexOnly = current
+                .Replace("## Agent workflow rules", "## Codex workflow rules")
+                .Replace(
+                    "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.",
+                    "- Prefer project-local Funplay skills under `.codex/skills/`.");
+
+            return new[] { current, codexOnly };
         }
 
         private static string BuildLegacyClaudeInstructionsContent(string projectRoot, ProjectSkillsManifest manifest)
@@ -1481,7 +1582,8 @@ $@"
         {
             Codex,
             Claude,
-            Cursor
+            Cursor,
+            OpenCode
         }
 
         [Serializable]

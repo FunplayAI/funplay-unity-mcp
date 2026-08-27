@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- **OpenCode** is now a first-class client for both the MCP client config panel and Project Skills. Its MCP entry is written to this repository's own `.opencode/opencode.json` (`{"type":"remote","url":...,"enabled":true}` under `mcp`) rather than the global `~/.config/opencode/opencode.json`: OpenCode merges every config location it finds and discovers the project file by walking upward from the directory the session started in, so a file at the repository root is reachable from anywhere inside the repo while a global entry would be visible to *every* OpenCode session on the machine — the same cross-project leak project-scoping the Claude Code entry fixes below. Project Skills write `SKILL.md` files to `.opencode/skills/` -- OpenCode documents both spellings for its project directories (`agent(s)`, `command(s)`, `plugin(s)`, `skill(s)`), and the plural is the form its own config example and skills paths use -- and share the `AGENTS.md` managed block with Codex, since both clients read that file natively: the block is written while either platform is enabled and removed only when both are disabled.
+
+### Fixed
+- The client config panel no longer rewrites a JSON config file whose contents its writer cannot reproduce. The whole file is re-serialized from a strict-JSON parse, so a config carrying JSONC comments — legal in OpenCode's `opencode.json` and VS Code's `mcp.json`, both of which are read with real JSONC parsers — stopped the key scan at the comment and silently dropped every key past it (providers, models, keybinds, agents) on write, behind a "configuration written" dialog. Such a file, and any file that does not parse as a JSON object, is now left untouched with an error naming the entry to add by hand. The same guard covers the unattended startup migration below, which rewrites `~/.claude.json` the same way but cannot ask: it migrates nothing rather than truncate a commented file.
+
 ## [0.6.3] - 2026-08-27
 
 ### Added

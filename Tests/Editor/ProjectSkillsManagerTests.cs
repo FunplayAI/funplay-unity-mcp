@@ -350,6 +350,125 @@ namespace Funplay.Editor.Tests
             }
         }
 
+        /// <summary>
+        /// OpenCode only scans <c>.opencode/skills/</c> (plural) -- "It loads any matching
+        /// `skills/*/SKILL.md` in `.opencode/`" per its own docs. A singular <c>skill</c> directory is
+        /// never read and the miss is completely silent, so the literal path is asserted here rather
+        /// than derived from the same helper the writer uses.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_WritesOpenCodeSkillsToThePluralDirectory()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "opencode" }, Array.Empty<string>());
+
+                var expected = Path.Combine(
+                    projectRoot, ".opencode", "skills", "funplay-unity-mcp-workflow", "SKILL.md");
+
+                Assert.IsTrue(File.Exists(expected), expected);
+                Assert.IsFalse(
+                    Directory.Exists(Path.Combine(projectRoot, ".opencode", "skill")),
+                    "OpenCode never scans a singular '.opencode/skill' directory.");
+                Assert.AreEqual(
+                    Path.Combine(projectRoot, ".opencode", "skills"),
+                    ProjectSkillsManager.GetOpenCodeSkillsRoot(projectRoot));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        /// <summary>
+        /// AGENTS.md is read natively by both Codex and OpenCode, so its single managed block has to
+        /// outlive either platform being switched off on its own, and go away only when both are. The
+        /// per-platform skill directories still have to track their own platform.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_KeepsSharedAgentsBlockUntilBothAgentPlatformsAreDisabled()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(projectRoot);
+                var codexSkill = GetCodexWorkflowSkillPath(projectRoot);
+                var openCodeSkill = Path.Combine(
+                    ProjectSkillsManager.GetOpenCodeSkillsRoot(projectRoot),
+                    "funplay-unity-mcp-workflow",
+                    "SKILL.md");
+
+                ProjectSkillsManager.ApplyConfiguration(
+                    projectRoot, new[] { "codex", "opencode" }, Array.Empty<string>());
+                Assert.IsTrue(File.Exists(agentsPath));
+                Assert.IsTrue(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(openCodeSkill));
+
+                // OpenCode off, Codex still on: shared block stays, OpenCode's own skills go.
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsTrue(File.Exists(codexSkill));
+                Assert.IsFalse(File.Exists(openCodeSkill));
+
+                // Codex off, OpenCode on: same in the other direction.
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "opencode" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsFalse(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(openCodeSkill));
+
+                // Both off: the Funplay-only AGENTS.md is removed.
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, Array.Empty<string>(), Array.Empty<string>());
+                Assert.IsFalse(File.Exists(agentsPath));
+                Assert.IsFalse(File.Exists(openCodeSkill));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        /// <summary>
+        /// A legacy (begin-marker-only) AGENTS.md is matched against generated text, so every wording
+        /// a released version produced has to stay recognised. This pins the pre-OpenCode Codex-only
+        /// wording, which the managed block no longer emits.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_MigratesLegacyFileWrittenWithTheOlderCodexOnlyWording()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                var manifest = CreateManifest("codex");
+                ProjectSkillsManager.SaveManifest(projectRoot, manifest);
+                manifest = ProjectSkillsManager.LoadManifest(projectRoot);
+
+                var variants = BuildLegacyCodexContentVariants(projectRoot, manifest);
+                Assert.Greater(variants.Length, 1, "The pre-OpenCode wording must still be accepted.");
+
+                var codexOnly = variants.Last();
+                StringAssert.Contains("## Codex workflow rules", codexOnly);
+                StringAssert.DoesNotContain("## Agent workflow rules", codexOnly);
+
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(projectRoot);
+                File.WriteAllText(agentsPath, codexOnly);
+
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
+
+                var migrated = File.ReadAllText(agentsPath);
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, migrated);
+                StringAssert.Contains("## Agent workflow rules", migrated);
+                Assert.AreEqual(1, CountOccurrences(migrated, ProjectSkillsManager.ManagedMarker));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
         private static string GetCodexWorkflowSkillPath(string projectRoot)
         {
             return Path.Combine(
@@ -365,6 +484,17 @@ namespace Funplay.Editor.Tests
                 platforms = platforms.ToList(),
                 optionalSkills = new System.Collections.Generic.List<string>()
             };
+        }
+
+        private static string[] BuildLegacyCodexContentVariants(
+            string projectRoot,
+            ProjectSkillsManager.ProjectSkillsManifest manifest)
+        {
+            var method = typeof(ProjectSkillsManager).GetMethod(
+                "BuildLegacyCodexAgentsContentVariants",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            return (string[])method.Invoke(null, new object[] { projectRoot, manifest });
         }
 
         private static string BuildLegacyCodexContent(
