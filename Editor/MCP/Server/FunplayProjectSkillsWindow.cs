@@ -102,7 +102,7 @@ namespace Funplay.Editor.MCP.Server
             var section = CreateSection();
             section.Add(CreateSectionHeader("Current Platform"));
 
-            _platformTargets = new[] { "Claude Code", "Cursor", "VS Code", "Trae", "Kiro", "Codex", "OpenCode" };
+            _platformTargets = new[] { "Claude Code", "Cursor", "VS Code", "Trae", "Kiro", "Codex", "OpenCode", "DeepSeek Harness" };
             _selectedTargetIndex = Mathf.Clamp(_selectedTargetIndex, 0, _platformTargets.Length - 1);
             var persistedTargetName = _settingsController.MCPSelectedConfigTarget;
             if (!string.IsNullOrWhiteSpace(persistedTargetName))
@@ -477,6 +477,8 @@ namespace Funplay.Editor.MCP.Server
                     return "claude";
                 case "Cursor":
                     return "cursor";
+                case "DeepSeek Harness":
+                    return "dsh";
                 default:
                     return null;
             }

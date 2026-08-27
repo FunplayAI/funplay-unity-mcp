@@ -33,7 +33,7 @@ namespace Funplay.Editor.MCP.Server
         private const string CodexManagedNotice = "This section is managed by Funplay MCP for Unity. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
         private const string ClaudeManagedNotice = "This section is managed by Funplay MCP for Unity for Claude Code. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
 
-        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor", "opencode" };
+        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor", "opencode", "dsh" };
 
         private static readonly SkillDefinition[] SkillCatalog =
         {
@@ -200,6 +200,20 @@ namespace Funplay.Editor.MCP.Server
             return Path.Combine(projectRoot, ".claude", "skills");
         }
 
+        /// <summary>
+        /// DeepSeek Harness discovers project skills at <c>&lt;projectRoot&gt;/.dsh/skills</c> (its
+        /// rank-100 "project-dsh" root), where ITS project root is the nearest ancestor containing a
+        /// <c>.git</c> entry -- not the directory the session was started in. In the monorepo layout
+        /// (git root above the Unity project folder) writing under this Unity project's own directory
+        /// would land at a path DSH never scans, silently. The skills are therefore written at the
+        /// discovered repository root, the same walk <see cref="FunplayMCPClientConfigPanel"/>
+        /// uses for Claude Code's projects["&lt;path&gt;"] key.
+        /// </summary>
+        internal static string GetDshSkillsRoot(string projectRoot)
+        {
+            return Path.Combine(FunplayMCPClientConfigPanel.FindGitRootOrSelf(projectRoot), ".dsh", "skills");
+        }
+
         internal static void ApplyConfiguration(string projectRoot, IEnumerable<string> selectedPlatforms, IEnumerable<string> selectedOptionalSkills)
         {
             var manifest = new ProjectSkillsManifest
@@ -216,6 +230,7 @@ namespace Funplay.Editor.MCP.Server
             SyncClaude(projectRoot, normalized);
             SyncCursor(projectRoot, normalized);
             SyncOpenCode(projectRoot, normalized);
+            SyncDsh(projectRoot, normalized);
         }
 
         internal static bool IsPlatformConfigured(string projectRoot, string platformId)
@@ -321,20 +336,25 @@ namespace Funplay.Editor.MCP.Server
                     paths.Add(GetCodexAgentsPath(projectRoot));
                     paths.Add(GetOpenCodeSkillsRoot(projectRoot));
                     break;
+                case "dsh":
+                    paths.Add(GetCodexAgentsPath(projectRoot));
+                    paths.Add(GetDshSkillsRoot(projectRoot));
+                    break;
             }
 
             return paths;
         }
 
-        // AGENTS.md is shared by Codex and OpenCode (both read it natively), so the single managed
-        // block is written while EITHER platform is enabled and removed only when BOTH are disabled.
-        // Splitting it per platform would need two blocks in one file, which WriteManagedBlock's
-        // single begin..end marker model cannot represent.
+        // AGENTS.md is shared by Codex, OpenCode and DeepSeek Harness (all three read it natively),
+        // so the single managed block is written while ANY of them is enabled and removed only when
+        // ALL are disabled. Splitting it per platform would need two blocks in one file, which
+        // WriteManagedBlock's single begin..end marker model cannot represent.
         private static void SyncAgentsInstructions(string projectRoot, ProjectSkillsManifest manifest)
         {
             var enabled =
                 manifest.platforms.Contains("codex", StringComparer.OrdinalIgnoreCase) ||
-                manifest.platforms.Contains("opencode", StringComparer.OrdinalIgnoreCase);
+                manifest.platforms.Contains("opencode", StringComparer.OrdinalIgnoreCase) ||
+                manifest.platforms.Contains("dsh", StringComparer.OrdinalIgnoreCase);
             var agentsPath = GetCodexAgentsPath(projectRoot);
 
             if (!enabled)
@@ -419,6 +439,21 @@ namespace Funplay.Editor.MCP.Server
 
             Directory.CreateDirectory(skillsRoot);
             WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.OpenCode);
+        }
+
+        private static void SyncDsh(string projectRoot, ProjectSkillsManifest manifest)
+        {
+            var enabled = manifest.platforms.Contains("dsh", StringComparer.OrdinalIgnoreCase);
+            var skillsRoot = GetDshSkillsRoot(projectRoot);
+
+            if (!enabled)
+            {
+                DeleteManagedSkillDirectories(skillsRoot);
+                return;
+            }
+
+            Directory.CreateDirectory(skillsRoot);
+            WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.Dsh);
         }
 
         private static void WriteManagedSkillDirectories(string skillsRoot, ProjectSkillsManifest manifest, SkillPlatform platform)
@@ -703,6 +738,17 @@ namespace Funplay.Editor.MCP.Server
                             BuildSkillVersionMarker(skill)));
                     }
                     break;
+                case "dsh":
+                    AddProjectVersionFile(result, GetCodexAgentsPath(projectRoot), skills);
+                    foreach (var skill in skills)
+                    {
+                        result.Add(new ExpectedSkillVersionFile(
+                            Path.Combine(GetDshSkillsRoot(projectRoot), $"funplay-{skill.Id}", "SKILL.md"),
+                            skill.Id,
+                            skill.Version,
+                            BuildSkillVersionMarker(skill)));
+                    }
+                    break;
             }
 
             return result;
@@ -860,7 +906,7 @@ $@"{ManagedMarker}
 
 ## Agent workflow rules
 
-- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.
+- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness.
 - Use `execute_code` as the primary Unity automation tool. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo automatically.
 - Confirm the Unity project root, active scene, and real object/prefab/asset path before edits. Treat user-provided object names as hints, not paths.
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
@@ -954,14 +1000,21 @@ $@"{ManagedMarker}
         {
             var current = BuildLegacyCodexAgentsContent(projectRoot, manifest);
 
+            // Pre-DSH: the block named Codex and OpenCode before DeepSeek Harness joined the shared
+            // AGENTS.md block. Files on disk still carrying this wording must keep migrating.
+            var preDsh = current
+                .Replace(
+                    "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness.",
+                    "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.");
+
             // <= 0.6.2: the block predates OpenCode support and was worded for Codex alone.
-            var codexOnly = current
+            var codexOnly = preDsh
                 .Replace("## Agent workflow rules", "## Codex workflow rules")
                 .Replace(
                     "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.",
                     "- Prefer project-local Funplay skills under `.codex/skills/`.");
 
-            return new[] { current, codexOnly };
+            return new[] { current, preDsh, codexOnly };
         }
 
         private static string BuildLegacyClaudeInstructionsContent(string projectRoot, ProjectSkillsManifest manifest)
@@ -1583,7 +1636,8 @@ $@"
             Codex,
             Claude,
             Cursor,
-            OpenCode
+            OpenCode,
+            Dsh
         }
 
         [Serializable]

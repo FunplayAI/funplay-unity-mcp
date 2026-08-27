@@ -469,6 +469,121 @@ namespace Funplay.Editor.Tests
             }
         }
 
+        /// <summary>
+        /// DeepSeek Harness resolves ITS project root as the nearest ancestor containing a
+        /// <c>.git</c> entry and scans <c>&lt;that&gt;/.dsh/skills</c> -- so in a monorepo (git root
+        /// above the Unity project folder) the skills must land at the repository root, never inside
+        /// this Unity project's own directory, where DSH would silently never find them.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_WritesDshSkillsToTheGitRootDshDirectory()
+        {
+            var tempRoot = CreateTempProjectPath();
+            // Anchor the walk deterministically: without a .git anywhere below, FindGitRootOrSelf
+            // could escape into whatever ancestor of the temp directory happens to be a repository.
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+            var unityProject = Path.Combine(repoRoot, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(unityProject, new[] { "dsh" }, Array.Empty<string>());
+
+                var expected = Path.Combine(
+                    repoRoot, ".dsh", "skills", "funplay-unity-mcp-workflow", "SKILL.md");
+                Assert.IsTrue(File.Exists(expected), expected);
+                AssertStandardSkillFrontmatter(expected);
+
+                Assert.IsFalse(Directory.Exists(Path.Combine(unityProject, ".dsh")),
+                    "Skills belong at the git root DSH scans, not the Unity project folder.");
+
+                // Instructions keep following the same convention as every other platform: written
+                // next to the project root the panel passes. DSH's instruction loader reads
+                // AGENTS.md in each directory between its project root and the session cwd, so a
+                // session opened inside the Unity project folder picks it up there.
+                StringAssert.Contains(
+                    ProjectSkillsManager.ManagedEndMarker,
+                    File.ReadAllText(ProjectSkillsManager.GetCodexAgentsPath(unityProject)),
+                    "The shared AGENTS.md block is written beside the other platforms' instruction files.");
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        /// <summary>
+        /// AGENTS.md is shared by Codex, OpenCode and DeepSeek Harness; the managed block must stay
+        /// while any one of them remains enabled, and each platform's own skill directory tracks its
+        /// own toggle.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_DshSharesTheAgentsBlockAndTracksItsOwnSkillDirectory()
+        {
+            var tempRoot = CreateTempProjectPath();
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+            try
+            {
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(repoRoot);
+                var dshSkill = Path.Combine(
+                    ProjectSkillsManager.GetDshSkillsRoot(repoRoot),
+                    "funplay-unity-mcp-workflow",
+                    "SKILL.md");
+                var codexSkill = GetCodexWorkflowSkillPath(repoRoot);
+
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, new[] { "codex", "dsh" }, Array.Empty<string>());
+                Assert.IsTrue(File.Exists(agentsPath));
+                Assert.IsTrue(File.Exists(dshSkill));
+                Assert.IsTrue(File.Exists(codexSkill));
+
+                // Codex off, DSH still on: shared block stays, Codex's own skills go.
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, new[] { "dsh" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsFalse(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(dshSkill));
+
+                // All agent platforms off: the Funplay-only AGENTS.md is removed.
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, Array.Empty<string>(), Array.Empty<string>());
+                Assert.IsFalse(File.Exists(agentsPath));
+                Assert.IsFalse(File.Exists(dshSkill));
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        /// <summary>
+        /// The AGENTS.md wording gained the DeepSeek Harness bullet when DSH joined the shared block;
+        /// files generated with the previous (Codex + OpenCode) wording must still migrate.
+        /// </summary>
+        [Test]
+        public void LegacyVariants_StillRecognizeThePreDshWording()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                var manifest = CreateManifest("codex", "opencode", "dsh");
+                var variants = BuildLegacyCodexContentVariants(projectRoot, manifest);
+
+                Assert.GreaterOrEqual(variants.Length, 3, "The pre-DSH wording must still be accepted.");
+                var preDsh = variants[1];
+                StringAssert.Contains("`.opencode/skills/`", preDsh);
+                StringAssert.DoesNotContain("DeepSeek Harness", preDsh);
+
+                var current = variants[0];
+                StringAssert.Contains("`.dsh/skills/`", current);
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
         private static string GetCodexWorkflowSkillPath(string projectRoot)
         {
             return Path.Combine(

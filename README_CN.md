@@ -105,7 +105,7 @@ openupm add com.gamebooom.unity.mcp
 
 选择目标客户端后点击 **Configure**，插件会直接帮你写入推荐的 MCP 配置项。
 
-对于 Claude Code、Cursor、Codex 和 OpenCode，也可以点击 **Configure + Skills**，同时安装两个内置项目 skills。
+对于 Claude Code、Cursor、Codex、OpenCode 和 DeepSeek Harness，也可以点击 **Configure + Skills**，同时安装两个内置项目 skills。
 
 如果你希望为当前 Unity 项目配置项目级 AI 指引，可以打开 **Funplay → Project Skills**，为支持的平台安装内置的 `unity-mcp-workflow` 和 `unity-ui-composition` skills，其中 UI skill 用于竖屏、横屏响应式 uGUI 工作。
 
@@ -253,6 +253,26 @@ url = "http://127.0.0.1:<port>/"
 </details>
 
 <details>
+<summary>DeepSeek Harness</summary>
+
+以带分隔标记的托管块写入每个 DeepSeek Harness profile 的 `~/.dsh/profiles/<profile>/cordis.patch.yml`：DSH 每次启动通过 `--profile` 组合插件，对外并不暴露某个“当前生效”的 profile。重新配置时托管块之外的内容原样保留，手工删除该块即可卸载。
+
+```yaml
+# >>> funplay-mcp:funplay-<project> begin (managed by Funplay MCP -- reconfigure from Unity > Funplay > MCP Server)
+# Funplay Unity MCP endpoint served by this editor; tools appear as mcp__funplay-<project>__<tool>.
+- insert:
+    - id: mcp-funplay-<project>
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: funplay-<project>
+        transport: streamable-http
+        url: http://127.0.0.1:<port>/
+# <<< funplay-mcp:funplay-<project> end
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 除非你本地 Windsurf 版本要求不同的 MCP 配置格式，否则可直接使用与 Cursor 相同的 JSON 结构。
@@ -304,7 +324,7 @@ url = "http://127.0.0.1:<port>/"
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
 - **输入模拟 + 截图验证** — 在 Play Mode 中模拟键盘/鼠标，再用 Game View / Scene View 截图验证结果
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
-- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode 等客户端生成 MCP 配置
+- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
 - **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含内置的 `unity-mcp-workflow` 与 `unity-ui-composition` 指引
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志

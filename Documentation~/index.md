@@ -9,7 +9,7 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 3. Start the server and use the built-in one-click client configuration
 4. Connect your AI client to the endpoint shown in the window (`http://127.0.0.1:<port>/`, derived per project unless you pin a port)
 5. Open **Funplay > Tool Exposure** to edit the exact tools exposed by `core` or `full`
-6. For Claude Code, Cursor, Codex, and OpenCode, use **Configure + Skills** or open **Funplay > Project Skills** to install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills
+6. For Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness, use **Configure + Skills** or open **Funplay > Project Skills** to install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills
 7. Open **Funplay > Plugin Settings** to adjust debug logging when troubleshooting
 
 ## Guides
@@ -26,7 +26,7 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 - Reflection-based tool discovery via `[ToolProvider]`
 - One-click local MCP config generation for supported clients, including Kimi Code and LM Studio
 - Separate tool exposure window for editing which tools `core` and `full` expose
-- One-click MCP config plus project workflow skill setup for Claude Code, Cursor, Codex, and OpenCode
+- One-click MCP config plus project workflow skill setup for Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness
 - Project skills management for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - Dedicated plugin settings window with a debug logging toggle that is enabled by default
 - Persisted MCP server settings in `UserSettings/FunplayMcpSettings.json`
