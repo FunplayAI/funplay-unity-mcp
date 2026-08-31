@@ -11,7 +11,7 @@ wrapper packing, and opt-in publishing flags for GitHub, NuGet, and the MCP Regi
 - [ ] `git status` is clean except for the files intended for the release
 - [ ] No local junk is present (`.idea/`, `.DS_Store`, temporary exports, local test files)
 - [ ] `package.json` version matches the intended release
-- [ ] `CHANGELOG.md` includes the release notes for the target version
+- [ ] `CHANGELOG.md` includes the release notes for the target version, with explicit links to every included PR and fixed/closed issue (or an explicit "None") and credits for contributors/reporters
 - [ ] `README.md`, `README_CN.md`, and `Documentation~/index.md` match the current product behavior
 
 ## 2. Unity Smoke Test
@@ -55,7 +55,7 @@ wrapper packing, and opt-in publishing flags for GitHub, NuGet, and the MCP Regi
 
 - [ ] Commit the release changes with a clear release-oriented message
 - [ ] Create and push the release tag
-- [ ] Create the GitHub Release notes
+- [ ] Create the GitHub Release notes and verify they preserve the Changelog's PR/issue links and contributor/reporter credits
 - [ ] Verify the public repository renders the README and package documentation correctly
 
 ## 7. Post-Release

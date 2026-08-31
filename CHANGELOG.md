@@ -15,6 +15,14 @@
 - The client config panel no longer rewrites a JSON config file whose contents its writer cannot reproduce. The whole file is re-serialized from a strict-JSON parse, so a config carrying JSONC comments — legal in OpenCode's `opencode.json` and VS Code's `mcp.json`, both of which are read with real JSONC parsers — stopped the key scan at the comment and silently dropped every key past it (providers, models, keybinds, agents) on write, behind a "configuration written" dialog. Such a file, and any file that does not parse as a JSON object, is now left untouched with an error naming the entry to add by hand. The same guard covers the unattended startup migration below, which rewrites `~/.claude.json` the same way but cannot ask: it migrates nothing rather than truncate a commented file.
 - `capture_scene_view` now accepts `include_ui` (default `true`) and composites active Screen Space Overlay canvases from the current Scene or Prefab Stage while preserving an opt-out for the previous camera-only capture. Canvas render mode, camera, and plane distance are restored exactly after capture, including exceptional paths, so taking a screenshot does not dirty or mutate the UI being inspected.
 
+### Pull requests and issues
+- Merged [PR #53](https://github.com/FunplayAI/funplay-unity-mcp/pull/53): added first-class OpenCode and DeepSeek Harness configuration and Project Skills support, including the JSONC rewrite safety guard.
+- Fixed and closed [Issue #54](https://github.com/FunplayAI/funplay-unity-mcp/issues/54): `capture_scene_view` now captures Canvas UI by default and supports `include_ui=false`.
+
+### Contributors
+- Thanks [@dehuaichendragonplus](https://github.com/dehuaichendragonplus) for PR #53.
+- Thanks [@solaceyyyy](https://github.com/solaceyyyy) for reporting Issue #54.
+
 ## [0.6.3] - 2026-08-27
 
 ### Added
