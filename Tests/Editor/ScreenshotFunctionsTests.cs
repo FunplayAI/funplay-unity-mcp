@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using Funplay.Editor.MCP.Server;
 using Funplay.Editor.Tools.Builtins;
 using NUnit.Framework;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Funplay.Editor.Tests
 {
@@ -182,6 +184,80 @@ namespace Funplay.Editor.Tests
 
             Assert.IsNotNull(method);
             Assert.AreEqual(typeof(Task<string>), method.ReturnType);
+        }
+
+        [Test]
+        public void CaptureSceneView_IncludesUiByDefaultAndExposesOptOut()
+        {
+            var method = typeof(ScreenshotFunctions).GetMethod(
+                "CaptureSceneView",
+                BindingFlags.Public | BindingFlags.Static);
+
+            Assert.IsNotNull(method);
+            var parameter = method.GetParameters().Single(p => p.Name == "include_ui");
+            Assert.AreEqual(typeof(bool), parameter.ParameterType);
+            Assert.AreEqual(true, parameter.DefaultValue);
+        }
+
+        [Test]
+        public void OverlayCanvasCapture_RestoresEveryMutatedCanvasProperty()
+        {
+            var canvasObject = new GameObject("Overlay Canvas", typeof(Canvas));
+            var originalCameraObject = new GameObject("Original Camera", typeof(Camera));
+            var captureCameraObject = new GameObject("Capture Camera", typeof(Camera));
+
+            try
+            {
+                var canvas = canvasObject.GetComponent<Canvas>();
+                var originalCamera = originalCameraObject.GetComponent<Camera>();
+                var captureCamera = captureCameraObject.GetComponent<Camera>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvas.worldCamera = originalCamera;
+                canvas.planeDistance = 37.5f;
+
+                var states = ScreenshotFunctions.PrepareOverlayCanvasesForCapture(
+                    captureCamera,
+                    candidate => candidate == canvas);
+
+                Assert.AreEqual(1, states.Count);
+                Assert.AreEqual(RenderMode.ScreenSpaceCamera, canvas.renderMode);
+                Assert.AreEqual(captureCamera, canvas.worldCamera);
+                Assert.AreEqual(captureCamera.nearClipPlane + 0.1f, canvas.planeDistance, 0.0001f);
+
+                ScreenshotFunctions.RestoreOverlayCanvasesAfterCapture(states);
+
+                Assert.AreEqual(RenderMode.ScreenSpaceOverlay, canvas.renderMode);
+                Assert.AreEqual(originalCamera, canvas.worldCamera);
+                Assert.AreEqual(37.5f, canvas.planeDistance, 0.0001f);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(canvasObject);
+                UnityEngine.Object.DestroyImmediate(originalCameraObject);
+                UnityEngine.Object.DestroyImmediate(captureCameraObject);
+            }
+        }
+
+        [Test]
+        public void ShouldIncludeCanvasInSceneView_ExcludesOtherStages()
+        {
+            var mainStageObject = new GameObject("Main Stage Canvas", typeof(Canvas));
+            var previewScene = EditorSceneManager.NewPreviewScene();
+            var previewObject = new GameObject("Preview Canvas", typeof(Canvas));
+            SceneManager.MoveGameObjectToScene(previewObject, previewScene);
+
+            try
+            {
+                Assert.IsTrue(ScreenshotFunctions.ShouldIncludeCanvasInSceneView(
+                    mainStageObject.GetComponent<Canvas>()));
+                Assert.IsFalse(ScreenshotFunctions.ShouldIncludeCanvasInSceneView(
+                    previewObject.GetComponent<Canvas>()));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(mainStageObject);
+                EditorSceneManager.ClosePreviewScene(previewScene);
+            }
         }
 
         [Test]

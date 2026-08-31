@@ -10,6 +10,7 @@ using DescriptionAttribute = System.ComponentModel.DescriptionAttribute;
 using Funplay.Editor.Tools.Helpers;
 using Newtonsoft.Json;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace Funplay.Editor.Tools.Builtins
@@ -265,12 +266,14 @@ namespace Funplay.Editor.Tools.Builtins
                 saveToFile: save_to_file, outputPath: output_path, defaultBaseName: "simulator-view");
         }
 
-        [Description("Capture a screenshot of the Scene View (the editor's scene camera perspective). Returns a base64-encoded PNG image, " +
-                     "or a saved file path when save_to_file=true.")]
+        [Description("Capture a screenshot of the Scene View (the editor's scene camera perspective). By default, active Screen Space Overlay canvases " +
+                     "from the current Stage are composited into the image; set include_ui=false for the previous camera-only behavior. " +
+                     "Returns a base64-encoded PNG image, or a saved file path when save_to_file=true.")]
         [ReadOnlyTool]
         public static string CaptureSceneView(
             [ToolParam("Width of the screenshot in pixels", Required = false)] int width = 0,
             [ToolParam("Height of the screenshot in pixels", Required = false)] int height = 0,
+            [ToolParam("Composite active Screen Space Overlay canvases from the current Scene or Prefab Stage.", Required = false)] bool include_ui = true,
             [ToolParam(SaveToFileParamDescription, Required = false)] bool save_to_file = false,
             [ToolParam(OutputPathParamDescription, Required = false)] string output_path = null)
         {
@@ -293,7 +296,10 @@ namespace Funplay.Editor.Tools.Builtins
 
             try
             {
-                return FinishCapture(CaptureFromCameraPngBytes(camera, width, height), save_to_file, output_path, "scene-view");
+                var png = include_ui
+                    ? CaptureWithUIPngBytes(camera, width, height, ShouldIncludeCanvasInSceneView)
+                    : CaptureFromCameraPngBytes(camera, width, height);
+                return FinishCapture(png, save_to_file, output_path, "scene-view");
             }
             catch (Exception ex)
             {
@@ -1402,31 +1408,25 @@ namespace Funplay.Editor.Tools.Builtins
         /// Captures the game view including ScreenSpaceOverlay UI by temporarily
         /// switching overlay canvases to ScreenSpaceCamera during render.
         /// </summary>
-        private static byte[] CaptureWithUIPngBytes(Camera camera, int width, int height)
+        internal static byte[] CaptureWithUIPngBytes(
+            Camera camera,
+            int width,
+            int height,
+            Func<Canvas, bool> canvasFilter = null)
         {
             RenderTexture renderTexture = null;
             RenderTexture previousTarget = null;
             RenderTexture previousActive = null;
             Texture2D screenshot = null;
-            var overlayCanvases = new List<Canvas>();
+            List<OverlayCanvasCaptureState> overlayCanvasStates = null;
 
             try
             {
                 renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
                 renderTexture.Create();
 
-                // Find all ScreenSpaceOverlay canvases and temporarily switch to ScreenSpaceCamera
-                var allCanvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
-                foreach (var canvas in allCanvases)
-                {
-                    if (canvas.renderMode == RenderMode.ScreenSpaceOverlay && canvas.gameObject.activeInHierarchy)
-                    {
-                        overlayCanvases.Add(canvas);
-                        canvas.renderMode = RenderMode.ScreenSpaceCamera;
-                        canvas.worldCamera = camera;
-                        canvas.planeDistance = camera.nearClipPlane + 0.1f;
-                    }
-                }
+                overlayCanvasStates = PrepareOverlayCanvasesForCapture(camera, canvasFilter);
+                Canvas.ForceUpdateCanvases();
 
                 previousTarget = camera.targetTexture;
                 previousActive = RenderTexture.active;
@@ -1441,15 +1441,8 @@ namespace Funplay.Editor.Tools.Builtins
             }
             finally
             {
-                // Restore overlay canvases
-                foreach (var canvas in overlayCanvases)
-                {
-                    if (canvas != null)
-                    {
-                        canvas.worldCamera = null;
-                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                    }
-                }
+                RestoreOverlayCanvasesAfterCapture(overlayCanvasStates);
+                Canvas.ForceUpdateCanvases();
 
                 if (camera != null)
                     camera.targetTexture = previousTarget;
@@ -1464,6 +1457,88 @@ namespace Funplay.Editor.Tools.Builtins
                 if (screenshot != null)
                     UnityEngine.Object.DestroyImmediate(screenshot);
             }
+        }
+
+        internal sealed class OverlayCanvasCaptureState
+        {
+            internal Canvas Canvas;
+            internal RenderMode RenderMode;
+            internal Camera WorldCamera;
+            internal float PlaneDistance;
+        }
+
+        internal static List<OverlayCanvasCaptureState> PrepareOverlayCanvasesForCapture(
+            Camera camera,
+            Func<Canvas, bool> canvasFilter = null)
+        {
+            if (camera == null)
+                throw new ArgumentNullException(nameof(camera));
+
+            var states = new List<OverlayCanvasCaptureState>();
+            try
+            {
+                var allCanvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+                foreach (var canvas in allCanvases)
+                {
+                    if (canvas == null ||
+                        canvas.renderMode != RenderMode.ScreenSpaceOverlay ||
+                        !canvas.gameObject.activeInHierarchy ||
+                        (canvasFilter != null && !canvasFilter(canvas)))
+                    {
+                        continue;
+                    }
+
+                    states.Add(new OverlayCanvasCaptureState
+                    {
+                        Canvas = canvas,
+                        RenderMode = canvas.renderMode,
+                        WorldCamera = canvas.worldCamera,
+                        PlaneDistance = canvas.planeDistance
+                    });
+
+                    canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                    canvas.worldCamera = camera;
+                    canvas.planeDistance = camera.nearClipPlane + 0.1f;
+                }
+
+                return states;
+            }
+            catch
+            {
+                RestoreOverlayCanvasesAfterCapture(states);
+                throw;
+            }
+        }
+
+        internal static void RestoreOverlayCanvasesAfterCapture(
+            IReadOnlyList<OverlayCanvasCaptureState> states)
+        {
+            if (states == null)
+                return;
+
+            for (var i = states.Count - 1; i >= 0; i--)
+            {
+                var state = states[i];
+                var canvas = state?.Canvas;
+                if (canvas == null)
+                    continue;
+
+                canvas.renderMode = state.RenderMode;
+                canvas.worldCamera = state.WorldCamera;
+                canvas.planeDistance = state.PlaneDistance;
+            }
+        }
+
+        internal static bool ShouldIncludeCanvasInSceneView(Canvas canvas)
+        {
+            if (canvas == null)
+                return false;
+
+            var scene = canvas.gameObject.scene;
+            if (!scene.IsValid() || !scene.isLoaded)
+                return false;
+
+            return StageUtility.GetCurrentStageHandle().Contains(canvas.gameObject);
         }
 
         private static byte[] CaptureFromCameraPngBytes(Camera camera, int width, int height)
