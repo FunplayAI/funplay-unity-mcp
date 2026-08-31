@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.3"
+    "com.gamebooom.unity.mcp": "0.6.4"
   }
 }
 ```
