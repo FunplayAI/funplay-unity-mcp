@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `unity-ui-composition` Project Skill v1.0.2 now inspects and follows each project's prevailing `UnityEngine.UI.Text` or `TextMeshProUGUI` convention, defaults new projects to `TextMeshProUGUI`, preserves existing text component types during unrelated UI work, prohibits adding `Outline`, `Shadow`, or similar mesh effects as unrequested decoration, makes authored prefabs the default for reusable user-facing UI, and retains the bind-before-enable lifecycle guidance only for exceptional runtime-created `TMP_InputField` controls.
+
 ## [0.6.3] - 2026-08-27
 
 ### Added
