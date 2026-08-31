@@ -201,6 +201,24 @@ namespace Funplay.Editor
         }
 
         [Test]
+        public void CommentedJsonIsLeftUntouched()
+        {
+            // Rewriting the file from a strict-JSON parse would drop everything past the comment,
+            // so a hand-commented config is left exactly as it is instead of being truncated.
+            const string original = "{\n  // hand-added\n  \"mcpServers\": {\n" +
+                                    "    \"" + RecordedKey + "\": { \"url\": \"http://127.0.0.1:8675/\" }\n" +
+                                    "  },\n  \"tipsHistory\": {}\n}";
+            File.WriteAllText(_configPath, original);
+
+            string migratedFrom;
+            Assert.IsFalse(FunplayMCPClientConfigPanel.TryMigrateLegacyClaudeCodeEntryFile(
+                _configPath, RecordedKey, LegacyProjectPath, ProjectScopePath, out migratedFrom));
+
+            Assert.IsNull(migratedFrom);
+            Assert.AreEqual(original, File.ReadAllText(_configPath));
+        }
+
+        [Test]
         public void AtomicWriteReplacesTheExpectedFileAndRemovesItsTemporaryFile()
         {
             File.WriteAllText(_configPath, "old");

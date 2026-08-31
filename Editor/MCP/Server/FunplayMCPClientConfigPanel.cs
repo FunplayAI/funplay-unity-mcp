@@ -23,6 +23,8 @@ namespace Funplay.Editor.MCP.Server
         private Label _configStatusLabel;
         private Label _configPathLabel;
 
+        private const string DeepSeekHarnessTargetName = "DeepSeek Harness";
+
         public FunplayMCPClientConfigPanel(
             ISettingsController settings,
             MCPServerService server,
@@ -105,7 +107,7 @@ namespace Funplay.Editor.MCP.Server
 
             var skillsHint = new Label(skillsSupported
                 ? "Configure + Skills also installs the project MCP workflow skill."
-                : "Project skills are currently available for Claude Code, Cursor, and Codex.");
+                : "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness.");
             skillsHint.style.fontSize = 10;
             skillsHint.style.color = new Color(0.6f, 0.6f, 0.6f);
             skillsHint.style.marginBottom = 4;
@@ -158,6 +160,28 @@ namespace Funplay.Editor.MCP.Server
                 _configPathLabel.text = hasExistingConfig
                     ? "Existing config: " + string.Join(" | ", existingPaths)
                     : "LM Studio config path varies by version. Configure uses lmstudio://add_mcp and does not create guessed paths.";
+                return;
+            }
+
+            if (target.IsDeepSeekHarness)
+            {
+                // RefreshStatus runs inside AddTo, so an exception here aborts the rest of the
+                // window build (the activity panel never gets added) and repeats on every rebuild.
+                // A patch file with a broken managed block is exactly the state this target invites
+                // -- deleting the block by hand is the documented uninstall -- so the failure is
+                // reported in the label the user is already looking at, never thrown. Reading is
+                // best-effort here; only Configure refuses to touch a file it cannot parse.
+                try
+                {
+                    DescribeDeepSeekHarnessStatus();
+                }
+                catch (Exception ex)
+                {
+                    _configStatusLabel.text = "Status: patch file needs attention";
+                    _configStatusLabel.style.color = new Color(1f, 0.6f, 0.4f);
+                    _configPathLabel.text = ex.Message;
+                }
+
                 return;
             }
 
@@ -433,6 +457,21 @@ namespace Funplay.Editor.MCP.Server
                     ConfigPath = Path.Combine(homePath, ".codex", "config.toml"),
                     IsToml = true,
                 },
+                new MCPConfigTarget
+                {
+                    Name = "OpenCode",
+                    ConfigPath = GetOpenCodeConfigPath(),
+                    RootKey = "mcp",
+                    IncludeTypeField = true,
+                    TypeFieldValue = "remote",
+                    IncludeEnabledField = true
+                },
+                new MCPConfigTarget
+                {
+                    Name = DeepSeekHarnessTargetName,
+                    ConfigPath = FunplayDeepSeekHarnessPatch.GetDisplayPath(homePath),
+                    IsDeepSeekHarness = true,
+                },
             };
         }
 
@@ -440,14 +479,15 @@ namespace Funplay.Editor.MCP.Server
         {
             try
             {
-                WriteMCPConfigurationForTarget(target);
+                var customMessage = WriteMCPConfigurationForTarget(target);
 
-                var message = target.IsLMStudio
-                    ? BuildLMStudioConfiguredMessage()
-                    : $"MCP configuration written to:\n{target.ConfigPath}\n\n" +
-                      (string.IsNullOrEmpty(target.ActivationHint)
-                          ? $"Please restart {target.Name} for it to take effect."
-                          : target.ActivationHint);
+                var message = customMessage ??
+                              (target.IsLMStudio
+                                  ? BuildLMStudioConfiguredMessage()
+                                  : $"MCP configuration written to:\n{target.ConfigPath}\n\n" +
+                                    (string.IsNullOrEmpty(target.ActivationHint)
+                                        ? $"Please restart {target.Name} for it to take effect."
+                                        : target.ActivationHint));
 
                 EditorUtility.DisplayDialog("MCP Configuration", message, "OK");
                 _rebuildWindow?.Invoke();
@@ -465,15 +505,17 @@ namespace Funplay.Editor.MCP.Server
         {
             try
             {
-                WriteMCPConfigurationForTarget(target);
+                var customMessage = WriteMCPConfigurationForTarget(target);
 
                 var platformId = MapTargetNameToSkillsPlatformId(target.Name);
                 if (string.IsNullOrEmpty(platformId))
                 {
+                    var configSummary = customMessage ??
+                                        $"MCP configuration written to:\n{target.ConfigPath}";
                     EditorUtility.DisplayDialog(
                         "MCP Configuration",
-                        $"MCP configuration written to:\n{target.ConfigPath}\n\n" +
-                        "Project skills are currently available for Claude Code, Cursor, and Codex.",
+                        configSummary + "\n\n" +
+                        "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness.",
                         "OK");
 
                     _rebuildWindow?.Invoke();
@@ -505,7 +547,11 @@ namespace Funplay.Editor.MCP.Server
             }
         }
 
-        private void WriteMCPConfigurationForTarget(MCPConfigTarget target)
+        /// <summary>
+        /// Writes this project's entry for <paramref name="target"/>. Returns a target-specific
+        /// completion message, or null to let the caller build the generic one.
+        /// </summary>
+        private string WriteMCPConfigurationForTarget(MCPConfigTarget target)
         {
             EnsureConfigurationEndpointIsSafe();
 
@@ -516,8 +562,11 @@ namespace Funplay.Editor.MCP.Server
                 var lmStudioKey = ConfigureLMStudioTarget(target);
                 if (!string.IsNullOrEmpty(lmStudioKey))
                     RecordWrittenServerKey(target, lmStudioKey);
-                return;
+                return null;
             }
+
+            if (target.IsDeepSeekHarness)
+                return ConfigureDeepSeekHarnessTarget(target);
 
             var dir = Path.GetDirectoryName(target.ConfigPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
@@ -528,6 +577,206 @@ namespace Funplay.Editor.MCP.Server
                 : ConfigureJsonTarget(target);
 
             RecordWrittenServerKey(target, writtenKey);
+            return null;
+        }
+
+        /// <summary>
+        /// DeepSeek Harness keeps one composition per profile under ~/.dsh/profiles, selected at
+        /// launch with --profile and with no single "active" one visible from outside, so the entry
+        /// is written into every existing profile's patch file -- one Configure click then covers a
+        /// developer who switches between the web backend and the desktop app. When ~/.dsh exists but
+        /// holds no profile at all (a fresh install), the default "web" profile is seeded.
+        /// Returns the completion message shown in the dialog.
+        /// </summary>
+        private string ConfigureDeepSeekHarnessTarget(MCPConfigTarget target)
+        {
+            var homePath = GetUserHomePath();
+            var patchPaths = FunplayDeepSeekHarnessPatch.GetProfilePatchPaths(homePath);
+            if (patchPaths.Count == 0)
+            {
+                if (!Directory.Exists(FunplayDeepSeekHarnessPatch.GetProfilesRoot(homePath)))
+                {
+                    throw new InvalidOperationException(
+                        "DeepSeek Harness was not found (~/.dsh does not exist). " +
+                        "Start it once so it creates its home directory, then Configure again.");
+                }
+
+                patchPaths.Add(FunplayDeepSeekHarnessPatch.GetDefaultPatchPath(homePath));
+            }
+
+            var serverKey = ResolveDeepSeekHarnessServerKey(patchPaths);
+            var url = GetServerUrl();
+            var supersededKey = _settings.GetLastClientConfigKey(DeepSeekHarnessTargetName);
+
+            var written = new List<string>();
+            foreach (var patchPath in patchPaths)
+            {
+                var content = ReadAllTextIfExists(patchPath);
+
+                // A rename (product folder changed, project hash added or dropped) retires the block
+                // this project wrote under its previous key; only our own managed span is removed,
+                // mirroring RemoveSupersededFunplayEntries for the JSON/TOML clients.
+                if (!string.IsNullOrEmpty(supersededKey) &&
+                    !string.Equals(supersededKey, serverKey, StringComparison.Ordinal))
+                {
+                    content = FunplayDeepSeekHarnessPatch.RemoveManagedBlock(content, supersededKey);
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(patchPath));
+                File.WriteAllText(
+                    patchPath,
+                    FunplayDeepSeekHarnessPatch.UpsertManagedBlock(content, serverKey, url));
+                written.Add(patchPath);
+
+                // Recorded as soon as one profile carries the key, not after the whole loop: a later
+                // profile failing to write must not leave the name unrecorded, or the next Configure
+                // would read the block just written as another project's and resolve to a hashed
+                // name -- adding a second live entry beside it instead of updating it.
+                if (written.Count == 1)
+                    RecordWrittenServerKey(target, serverKey);
+            }
+
+            var builder = new StringBuilder();
+            builder.AppendLine("MCP configuration written to:");
+            foreach (var path in written)
+                builder.AppendLine(path);
+            builder.AppendLine();
+            builder.AppendLine("Entry: mcp-" + serverKey + " (" +
+                               FunplayDeepSeekHarnessPatch.ClientPluginName +
+                               ", streamable HTTP)");
+            builder.AppendLine("Tools appear as mcp__" + serverKey + "__<tool>.");
+            builder.AppendLine("Restart DeepSeek Harness (or reload its profile) for the entry to take effect.");
+
+            foreach (var path in written)
+            {
+                if (FunplayDeepSeekHarnessPatch.HasServerNameOutsideManagedBlock(
+                        File.ReadAllText(path), serverKey))
+                {
+                    builder.AppendLine()
+                        .Append("⚠ \"").Append(path).Append("\" also contains a hand-written dsh-mcp-client entry ")
+                        .Append("with serverName \"").Append(serverKey).Append("\" outside Funplay's managed block. ")
+                        .AppendLine("Duplicate serverName values make DeepSeek Harness reject the later instance at load -- remove the manual entry.");
+                }
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Per-profile status for the panel's path label: each profile reports ok / stale / missing,
+        /// followed by the resolved entry name and endpoint. Also surfaces a hand-written entry that
+        /// duplicates our serverName, since that combination makes DSH reject the later instance.
+        /// </summary>
+        private void DescribeDeepSeekHarnessStatus()
+        {
+            var homePath = GetUserHomePath();
+            if (!Directory.Exists(FunplayDeepSeekHarnessPatch.GetProfilesRoot(homePath)))
+            {
+                _configStatusLabel.text = "Status: DeepSeek Harness not found (~/.dsh)";
+                _configStatusLabel.style.color = new Color(1f, 0.6f, 0.4f);
+                _configPathLabel.text =
+                    "Start DeepSeek Harness once so it creates ~/.dsh, then Configure.";
+                return;
+            }
+
+            var patchPaths = FunplayDeepSeekHarnessPatch.GetProfilePatchPaths(homePath);
+            var resolvedKey = ResolveDeepSeekHarnessServerKey(patchPaths);
+            var expectedUrl = GetServerUrl();
+
+            var configuredCount = 0;
+            var lines = new List<string>();
+            foreach (var patchPath in patchPaths)
+            {
+                var profileName = Path.GetFileName(Path.GetDirectoryName(patchPath));
+                var content = ReadAllTextIfExists(patchPath);
+
+                string blockUrl;
+                if (!FunplayDeepSeekHarnessPatch.TryGetManagedBlockUrl(content, resolvedKey, out blockUrl))
+                {
+                    lines.Add(profileName + ": no managed entry");
+                }
+                else if (string.Equals(blockUrl, expectedUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    lines.Add(profileName + ": ok (" + blockUrl + ")");
+                    configuredCount++;
+                }
+                else
+                {
+                    lines.Add(profileName + ": stale (" + blockUrl + " -> configure to update to " + expectedUrl + ")");
+                }
+
+                if (FunplayDeepSeekHarnessPatch.HasServerNameOutsideManagedBlock(content, resolvedKey))
+                {
+                    lines.Add("⚠ hand-written entry with serverName \"" + resolvedKey + "\" found in " +
+                              patchPath + " -- duplicate serverName makes DeepSeek Harness reject the later instance; remove it by hand");
+                }
+            }
+
+            var allConfigured = patchPaths.Count > 0 && configuredCount == patchPaths.Count;
+            _configStatusLabel.text = allConfigured ? "Status: Configured" : "Status: Not configured";
+            _configStatusLabel.style.color = allConfigured
+                ? new Color(0.4f, 1f, 0.4f)
+                : new Color(1f, 0.6f, 0.4f);
+
+            var details = patchPaths.Count > 0
+                ? string.Join("\n", lines.ToArray())
+                : "~/.dsh/profiles holds no profile yet; Configure seeds the default 'web' one.";
+            details += "\nEntry: mcp-" + resolvedKey + " (" +
+                       FunplayDeepSeekHarnessPatch.ClientPluginName + ") -> " + expectedUrl;
+
+            // Same collision note the JSON/TOML targets show: explain an unexpected hash suffix.
+            if (!string.Equals(resolvedKey, GetPreferredServerKey(), StringComparison.Ordinal))
+            {
+                details +=
+                    "\nA project hash was added because another project (or an earlier configuration " +
+                    $"of this one) already uses \"{GetPreferredServerKey()}\" in this config.";
+            }
+
+            _configPathLabel.text = details;
+        }
+
+        /// <summary>
+        /// Entry name to write into DSH, resolved against every funplay-named serverName across all
+        /// profile patch files -- DSH loads profiles side by side, so a name another project took in
+        /// any of them collides exactly like the JSON/TOML clients' per-file scan.
+        ///
+        /// The scan necessarily also sees this project's own block, so a managed block under the
+        /// preferred name pointing at this editor's current URL is accepted as our own write receipt
+        /// (the same evidence the LM Studio deep link relies on). Without it, losing the recorded name
+        /// -- a machine-local UserSettings file, a fresh clone, a settings reset -- made the next
+        /// Configure read our own entry as a foreign collision and write a hash-suffixed *second*
+        /// block beside it. Nothing removed the first one, both stayed live against the same endpoint,
+        /// and the resolution was self-locking: every later Configure re-derived the same hashed name.
+        /// </summary>
+        private string ResolveDeepSeekHarnessServerKey(List<string> patchPaths)
+        {
+            var existingNames = new HashSet<string>(StringComparer.Ordinal);
+            var preferredKey = GetPreferredServerKey();
+            var url = GetServerUrl();
+            var preferredEntryPointsAtCurrentUrl = false;
+
+            foreach (var patchPath in patchPaths)
+            {
+                var content = ReadAllTextIfExists(patchPath);
+                existingNames.UnionWith(FunplayDeepSeekHarnessPatch.ReadFunplayServerNames(content));
+
+                string blockUrl;
+                if (FunplayDeepSeekHarnessPatch.TryGetManagedBlockUrl(content, preferredKey, out blockUrl) &&
+                    string.Equals(blockUrl, url, StringComparison.OrdinalIgnoreCase))
+                {
+                    preferredEntryPointsAtCurrentUrl = true;
+                }
+            }
+
+            return ResolveServerKey(
+                _settings.GetLastClientConfigKey(DeepSeekHarnessTargetName),
+                existingNames,
+                preferredEntryPointsAtCurrentUrl);
+        }
+
+        private static string ReadAllTextIfExists(string path)
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
         }
 
         /// <summary>
@@ -582,7 +831,7 @@ namespace Funplay.Editor.MCP.Server
 
             Dictionary<string, object> root = null;
             if (File.Exists(target.ConfigPath))
-                root = SimpleJsonHelper.Deserialize(File.ReadAllText(target.ConfigPath)) as Dictionary<string, object>;
+                root = ParseRewritableConfig(target, serverName, entry);
             root = root ?? new Dictionary<string, object>();
 
             var servers = target.UseProjectScope
@@ -594,6 +843,76 @@ namespace Funplay.Editor.MCP.Server
 
             File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
             return serverName;
+        }
+
+        /// <summary>
+        /// Reads an existing config file, but only when its full contents survive a
+        /// <see cref="SimpleJsonHelper"/> round-trip. The whole file is rewritten from what the parse
+        /// returns, and that parser is strict-JSON only: a config carrying JSONC comments (legal in
+        /// OpenCode's <c>opencode.json</c> and VS Code's <c>mcp.json</c>, both of which are read with
+        /// real JSONC parsers) stops the key scan dead at the comment, so writing the parse result
+        /// back would silently delete every key past it -- providers, models, keybinds, agents. Rather
+        /// than clobber a file it cannot represent, this reports what to add by hand and changes
+        /// nothing, the same "stop instead of destroy" stance <c>WriteManagedBlock</c> takes for a
+        /// legacy AGENTS.md. Returns null for an empty file (nothing to preserve).
+        /// </summary>
+        private Dictionary<string, object> ParseRewritableConfig(
+            MCPConfigTarget target, string serverName, Dictionary<string, object> entry)
+        {
+            var content = File.ReadAllText(target.ConfigPath);
+            if (string.IsNullOrWhiteSpace(content))
+                return null;
+
+            string problem = null;
+            Dictionary<string, object> parsed = null;
+
+            if (ContainsJsonComment(content))
+                problem = "it contains JSON comments, which Funplay's strict-JSON writer cannot preserve";
+            else
+            {
+                parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
+                if (parsed == null)
+                    problem = "it could not be read as a JSON object";
+            }
+
+            if (problem == null)
+                return parsed;
+
+            throw new InvalidOperationException(
+                $"'{target.ConfigPath}' was left unchanged because {problem}. " +
+                $"Add this entry by hand under \"{GetRootKey(target)}\" instead:\n\n" +
+                $"\"{serverName}\": {SimpleJsonHelper.Serialize(entry)}");
+        }
+
+        /// <summary>
+        /// True if <paramref name="content"/> has a <c>//</c> or <c>/*</c> comment outside a string
+        /// literal. Deliberately only detects them -- rewriting a commented file correctly would take
+        /// a real JSONC parser, and the point here is to refuse, not to reformat.
+        /// Internal so the scan can be exercised in EditMode tests without a config file.
+        /// </summary>
+        internal static bool ContainsJsonComment(string content)
+        {
+            var inString = false;
+            for (var i = 0; i < content.Length; i++)
+            {
+                var c = content[i];
+
+                if (inString)
+                {
+                    if (c == '\\')
+                        i++;
+                    else if (c == '"')
+                        inString = false;
+                    continue;
+                }
+
+                if (c == '"')
+                    inString = true;
+                else if (c == '/' && i + 1 < content.Length && (content[i + 1] == '/' || content[i + 1] == '*'))
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -712,6 +1031,17 @@ namespace Funplay.Editor.MCP.Server
             }
 
             var originalContent = File.ReadAllText(configPath);
+
+            // Same "stop instead of destroy" guard ConfigureJsonTarget applies through
+            // ParseRewritableConfig: the file is rewritten from a strict-JSON parse, so one carrying
+            // JSONC comments would lose every key past the first comment. This path runs
+            // unattended at editor startup and has no way to ask, so it migrates nothing rather
+            // than truncate a config it cannot reproduce; clicking Configure reports the entry to
+            // add by hand. Claude Code writes ~/.claude.json itself and does not put comments in
+            // it, so this is a guard against a hand-edited file, not an expected shape.
+            if (ContainsJsonComment(originalContent))
+                return false;
+
             var root = SimpleJsonHelper.Deserialize(originalContent) as Dictionary<string, object>;
             if (root == null)
                 return false;
@@ -1191,7 +1521,10 @@ namespace Funplay.Editor.MCP.Server
             };
 
             if (target.IncludeTypeField)
-                entry["type"] = "http";
+                entry["type"] = string.IsNullOrEmpty(target.TypeFieldValue) ? "http" : target.TypeFieldValue;
+
+            if (target.IncludeEnabledField)
+                entry["enabled"] = true;
 
             return entry;
         }
@@ -1354,8 +1687,8 @@ namespace Funplay.Editor.MCP.Server
         /// The path Claude Code actually uses as the <c>projects["&lt;path&gt;"]</c> key: the git
         /// repository root, not this Unity project's own directory. Verified empirically against the
         /// official <c>claude mcp add --scope local</c> CLI, which -- run from a Unity project folder
-        /// that is itself a git subdirectory (a monorepo layout where the git root sits one or more
-        /// levels above the Unity project) -- writes to <c>projects[gitRoot]</c>, not
+        /// that is itself a git subdirectory (a monorepo layout, e.g. this repo, where the git root is
+        /// the parent of the Unity project) -- writes to <c>projects[gitRoot]</c>, not
         /// <c>projects[unityProjectPath]</c>. Writing under the Unity project path instead leaves the
         /// entry at a key Claude Code never reads for that session, so its tools silently never appear
         /// even though the config and the server are both otherwise correct.
@@ -1398,13 +1731,40 @@ namespace Funplay.Editor.MCP.Server
             {
                 case "Codex":
                     return "codex";
+                case "OpenCode":
+                    return "opencode";
                 case "Claude Code":
                     return "claude";
                 case "Cursor":
                     return "cursor";
+                case DeepSeekHarnessTargetName:
+                    return "dsh";
                 default:
                     return null;
             }
+        }
+
+        /// <summary>
+        /// OpenCode's entry goes into this repository's own <c>.opencode/opencode.json</c>, not the
+        /// global <c>~/.config/opencode/opencode.json</c>. OpenCode merges every config location it
+        /// finds (global <c>config.json</c> + <c>opencode.json</c> + <c>opencode.jsonc</c>, then the
+        /// project's, then <c>.opencode</c> directories, later ones overriding conflicting keys), and
+        /// it discovers the project file by walking upward from the directory the session was started
+        /// in -- so a file at the repository root is reachable from anywhere inside the repo, while a
+        /// global entry is visible to *every* session on the machine regardless of which project it
+        /// was opened in. That global visibility is the same cross-project leak project-scoping the
+        /// Claude Code entry fixes (see <see cref="GetOrCreateProjectScopedServers"/>): with two
+        /// Funplay projects configured, whichever Unity Editor happens to be running would expose its
+        /// tools inside an unrelated project's OpenCode session, indistinguishable from that project's
+        /// own entry. OpenCode is written per project for the same reason.
+        /// The repository root is used rather than the Unity project directory so the entry is found
+        /// whether OpenCode is started at the repo root or inside the Unity project folder (a monorepo
+        /// layout, e.g. this repo, where the git root is the Unity project's parent); the walk is
+        /// upward only, so the reverse placement would miss.
+        /// </summary>
+        private static string GetOpenCodeConfigPath()
+        {
+            return Path.Combine(GetProjectScopeKeyPath(), ".opencode", "opencode.json");
         }
 
         private static string GetUserHomePath()
@@ -1518,6 +1878,28 @@ namespace Funplay.Editor.MCP.Server
             public bool IsToml;
             public bool IncludeTypeField;
             public bool IsLMStudio;
+
+            /// <summary>
+            /// True only for DeepSeek Harness. Its entry lives in one or more profile patch files
+            /// (<c>~/.dsh/profiles/&lt;profile&gt;/cordis.patch.yml</c>) written as a managed YAML
+            /// block by <see cref="FunplayDeepSeekHarnessPatch"/> -- not as a single JSON/TOML key
+            /// like every other client here, so <see cref="ConfigPath"/> carries a display string
+            /// and all reads/writes go through dedicated methods.
+            /// </summary>
+            public bool IsDeepSeekHarness;
+
+            /// <summary>
+            /// Value written for the <c>type</c> field when <see cref="IncludeTypeField"/> is set.
+            /// Empty means "http" (the Claude Code / VS Code shape); OpenCode uses "remote".
+            /// </summary>
+            public string TypeFieldValue;
+
+            /// <summary>
+            /// True for OpenCode, whose documented remote-server example spells the flag out
+            /// (<c>{"type":"remote","url":...,"enabled":true}</c>). The field is optional in its schema
+            /// and its default is not documented, so it is written explicitly rather than relied on.
+            /// </summary>
+            public bool IncludeEnabledField;
 
             /// <summary>
             /// True only for Claude Code. Its config file supports a <c>projects["&lt;path&gt;"]</c>

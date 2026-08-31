@@ -356,6 +356,240 @@ namespace Funplay.Editor.Tests
             }
         }
 
+        /// <summary>
+        /// OpenCode only scans <c>.opencode/skills/</c> (plural) -- "It loads any matching
+        /// `skills/*/SKILL.md` in `.opencode/`" per its own docs. A singular <c>skill</c> directory is
+        /// never read and the miss is completely silent, so the literal path is asserted here rather
+        /// than derived from the same helper the writer uses.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_WritesOpenCodeSkillsToThePluralDirectory()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "opencode" }, Array.Empty<string>());
+
+                var expected = Path.Combine(
+                    projectRoot, ".opencode", "skills", "funplay-unity-mcp-workflow", "SKILL.md");
+
+                Assert.IsTrue(File.Exists(expected), expected);
+                Assert.IsFalse(
+                    Directory.Exists(Path.Combine(projectRoot, ".opencode", "skill")),
+                    "OpenCode never scans a singular '.opencode/skill' directory.");
+                Assert.AreEqual(
+                    Path.Combine(projectRoot, ".opencode", "skills"),
+                    ProjectSkillsManager.GetOpenCodeSkillsRoot(projectRoot));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        /// <summary>
+        /// AGENTS.md is read natively by both Codex and OpenCode, so its single managed block has to
+        /// outlive either platform being switched off on its own, and go away only when both are. The
+        /// per-platform skill directories still have to track their own platform.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_KeepsSharedAgentsBlockUntilBothAgentPlatformsAreDisabled()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(projectRoot);
+                var codexSkill = GetCodexWorkflowSkillPath(projectRoot);
+                var openCodeSkill = Path.Combine(
+                    ProjectSkillsManager.GetOpenCodeSkillsRoot(projectRoot),
+                    "funplay-unity-mcp-workflow",
+                    "SKILL.md");
+
+                ProjectSkillsManager.ApplyConfiguration(
+                    projectRoot, new[] { "codex", "opencode" }, Array.Empty<string>());
+                Assert.IsTrue(File.Exists(agentsPath));
+                Assert.IsTrue(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(openCodeSkill));
+
+                // OpenCode off, Codex still on: shared block stays, OpenCode's own skills go.
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsTrue(File.Exists(codexSkill));
+                Assert.IsFalse(File.Exists(openCodeSkill));
+
+                // Codex off, OpenCode on: same in the other direction.
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "opencode" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsFalse(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(openCodeSkill));
+
+                // Both off: the Funplay-only AGENTS.md is removed.
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, Array.Empty<string>(), Array.Empty<string>());
+                Assert.IsFalse(File.Exists(agentsPath));
+                Assert.IsFalse(File.Exists(openCodeSkill));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        /// <summary>
+        /// A legacy (begin-marker-only) AGENTS.md is matched against generated text, so every wording
+        /// a released version produced has to stay recognised. This pins the pre-OpenCode Codex-only
+        /// wording, which the managed block no longer emits.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_MigratesLegacyFileWrittenWithTheOlderCodexOnlyWording()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                var manifest = CreateManifest("codex");
+                ProjectSkillsManager.SaveManifest(projectRoot, manifest);
+                manifest = ProjectSkillsManager.LoadManifest(projectRoot);
+
+                var variants = BuildLegacyCodexContentVariants(projectRoot, manifest);
+                Assert.Greater(variants.Length, 1, "The pre-OpenCode wording must still be accepted.");
+
+                var codexOnly = variants.Last();
+                StringAssert.Contains("## Codex workflow rules", codexOnly);
+                StringAssert.DoesNotContain("## Agent workflow rules", codexOnly);
+
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(projectRoot);
+                File.WriteAllText(agentsPath, codexOnly);
+
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
+
+                var migrated = File.ReadAllText(agentsPath);
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, migrated);
+                StringAssert.Contains("## Agent workflow rules", migrated);
+                Assert.AreEqual(1, CountOccurrences(migrated, ProjectSkillsManager.ManagedMarker));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        /// <summary>
+        /// DeepSeek Harness resolves ITS project root as the nearest ancestor containing a
+        /// <c>.git</c> entry and scans <c>&lt;that&gt;/.dsh/skills</c> -- so in a monorepo (git root
+        /// above the Unity project folder) the skills must land at the repository root, never inside
+        /// this Unity project's own directory, where DSH would silently never find them.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_WritesDshSkillsToTheGitRootDshDirectory()
+        {
+            var tempRoot = CreateTempProjectPath();
+            // Anchor the walk deterministically: without a .git anywhere below, FindGitRootOrSelf
+            // could escape into whatever ancestor of the temp directory happens to be a repository.
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+            var unityProject = Path.Combine(repoRoot, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(unityProject, new[] { "dsh" }, Array.Empty<string>());
+
+                var expected = Path.Combine(
+                    repoRoot, ".dsh", "skills", "funplay-unity-mcp-workflow", "SKILL.md");
+                Assert.IsTrue(File.Exists(expected), expected);
+                AssertStandardSkillFrontmatter(expected);
+
+                Assert.IsFalse(Directory.Exists(Path.Combine(unityProject, ".dsh")),
+                    "Skills belong at the git root DSH scans, not the Unity project folder.");
+
+                // Instructions keep following the same convention as every other platform: written
+                // next to the project root the panel passes. DSH's instruction loader reads
+                // AGENTS.md in each directory between its project root and the session cwd, so a
+                // session opened inside the Unity project folder picks it up there.
+                StringAssert.Contains(
+                    ProjectSkillsManager.ManagedEndMarker,
+                    File.ReadAllText(ProjectSkillsManager.GetCodexAgentsPath(unityProject)),
+                    "The shared AGENTS.md block is written beside the other platforms' instruction files.");
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        /// <summary>
+        /// AGENTS.md is shared by Codex, OpenCode and DeepSeek Harness; the managed block must stay
+        /// while any one of them remains enabled, and each platform's own skill directory tracks its
+        /// own toggle.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_DshSharesTheAgentsBlockAndTracksItsOwnSkillDirectory()
+        {
+            var tempRoot = CreateTempProjectPath();
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+            try
+            {
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(repoRoot);
+                var dshSkill = Path.Combine(
+                    ProjectSkillsManager.GetDshSkillsRoot(repoRoot),
+                    "funplay-unity-mcp-workflow",
+                    "SKILL.md");
+                var codexSkill = GetCodexWorkflowSkillPath(repoRoot);
+
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, new[] { "codex", "dsh" }, Array.Empty<string>());
+                Assert.IsTrue(File.Exists(agentsPath));
+                Assert.IsTrue(File.Exists(dshSkill));
+                Assert.IsTrue(File.Exists(codexSkill));
+
+                // Codex off, DSH still on: shared block stays, Codex's own skills go.
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, new[] { "dsh" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsFalse(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(dshSkill));
+
+                // All agent platforms off: the Funplay-only AGENTS.md is removed.
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, Array.Empty<string>(), Array.Empty<string>());
+                Assert.IsFalse(File.Exists(agentsPath));
+                Assert.IsFalse(File.Exists(dshSkill));
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        /// <summary>
+        /// The AGENTS.md wording gained the DeepSeek Harness bullet when DSH joined the shared block;
+        /// files generated with the previous (Codex + OpenCode) wording must still migrate.
+        /// </summary>
+        [Test]
+        public void LegacyVariants_StillRecognizeThePreDshWording()
+        {
+            var projectRoot = CreateTempProjectPath();
+
+            try
+            {
+                var manifest = CreateManifest("codex", "opencode", "dsh");
+                var variants = BuildLegacyCodexContentVariants(projectRoot, manifest);
+
+                Assert.GreaterOrEqual(variants.Length, 3, "The pre-DSH wording must still be accepted.");
+                var preDsh = variants[1];
+                StringAssert.Contains("`.opencode/skills/`", preDsh);
+                StringAssert.DoesNotContain("DeepSeek Harness", preDsh);
+
+                var current = variants[0];
+                StringAssert.Contains("`.dsh/skills/`", current);
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
         private static string GetCodexWorkflowSkillPath(string projectRoot)
         {
             return Path.Combine(
@@ -371,6 +605,17 @@ namespace Funplay.Editor.Tests
                 platforms = platforms.ToList(),
                 optionalSkills = new System.Collections.Generic.List<string>()
             };
+        }
+
+        private static string[] BuildLegacyCodexContentVariants(
+            string projectRoot,
+            ProjectSkillsManager.ProjectSkillsManifest manifest)
+        {
+            var method = typeof(ProjectSkillsManager).GetMethod(
+                "BuildLegacyCodexAgentsContentVariants",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            return (string[])method.Invoke(null, new object[] { projectRoot, manifest });
         }
 
         private static string BuildLegacyCodexContent(
