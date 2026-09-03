@@ -4,6 +4,10 @@
 
 ### Added
 - The Claude Code project-guidance block Funplay writes into `CLAUDE.md` now tells the agent to check whether an unreachable `funplay-*` MCP server entry actually matches this project's own before treating Funplay as broken. Claude Code's connection check surfaces every registered server on the machine regardless of which project a session was opened in, so once two Funplay-enabled projects have each been configured (0.6.3's project-scope fix), a session in one project will still see the other project's entry reported as "Failed to connect" whenever that project's Editor isn't open -- correct routing does not change what a session's health check displays. Nothing about scoping changes here: this plugin still has no way to prove another project's entry is safe to delete, so the fix is putting that explanation where an agent is most likely to read it before mistaking a different project's disconnected entry for its own.
+- The MCP Server window now shows a compact Project Skills notice for the currently selected supported client when its skills have not been installed or its managed files are missing, conflicting, or out of date. The notice links directly to the Project Skills window and stays hidden for unsupported clients and fully up-to-date installations.
+
+### Changed
+- `unity-ui-composition` Project Skill v1.0.3 now reproduces explicitly designed text outlines, shadows, glows, face dilation, softness, and related effects through `TextMeshProUGUI` and TMP shader material controls when TMP is the project's established text system. It uses `outlineColor` and `outlineWidth` for simple outlines, prefers approved or deliberately scoped material presets for other effects, and avoids unintentionally restyling unrelated labels through a shared `fontSharedMaterial`.
 
 ## [0.6.4] - 2026-08-31
 

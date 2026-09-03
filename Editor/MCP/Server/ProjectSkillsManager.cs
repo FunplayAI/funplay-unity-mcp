@@ -80,7 +80,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.2",
+                "1.0.3",
                 "Unity UI Composition",
                 "Build and revise responsive Unity uGUI mobile interfaces, including portrait and landscape layouts, safe areas, prefabs, auto layout, scrolling, text, input, animation, and performance validation.",
                 true,
@@ -98,6 +98,7 @@ namespace Funplay.Editor.MCP.Server
                     "Build ScrollRect as ScrollRect root to Viewport with RectMask2D to Content, enable only the required axis, align growing content through anchors and pivot, and virtualize large lists.",
                     "Before creating text, inspect the relevant screens and project assets to determine whether UnityEngine.UI.Text or TextMeshProUGUI is the established convention; preserve the existing component type, follow the prevailing project choice, and default to TextMeshProUGUI only when a new project has no convention.",
                     "Do not add Outline, Shadow, or similar BaseMeshEffect components as default decoration; use them only when the design explicitly requires the effect or the project already has a verified style that uses it, and account for the added geometry and overdraw.",
+                    "When the design reference explicitly shows an outline, shadow, glow, face dilation, or another text effect and the project uses TextMeshProUGUI, reproduce it with the TextMeshProUGUI component and TMP shader material properties or a dedicated project material preset; use outlineColor and outlineWidth for a simple outline, and never mutate a shared fontSharedMaterial unless the style is intentionally global.",
                     "Author reusable user-facing UI as prefabs and instantiate those prefabs at runtime; do not procedurally reconstruct stable screens or controls in gameplay code when their hierarchy and references can be serialized and validated in the Editor.",
                     "Only when runtime construction is explicitly justified, keep a dynamic TMP_InputField inactive or disabled until its textComponent and textViewport (plus placeholder when used) are assigned; its caret renderer is initialized during OnEnable only when the text component is already bound, so bind first and enable last.",
                     "Use one EventSystem and the matching input module, keep Raycast Target enabled only on graphics that receive pointer input, and synchronize CanvasGroup alpha, interactable, and blocksRaycasts during transitions.",
@@ -122,6 +123,25 @@ namespace Funplay.Editor.MCP.Server
         internal static IReadOnlyList<string> GetSupportedPlatforms()
         {
             return SupportedPlatforms;
+        }
+
+        internal static string GetPlatformIdForConfigTarget(string targetName)
+        {
+            switch (targetName?.Trim().ToLowerInvariant())
+            {
+                case "codex":
+                    return "codex";
+                case "opencode":
+                    return "opencode";
+                case "claude code":
+                    return "claude";
+                case "cursor":
+                    return "cursor";
+                case "deepseek harness":
+                    return "dsh";
+                default:
+                    return null;
+            }
         }
 
         internal static ProjectSkillsManifest LoadManifest(string projectRoot)
@@ -1189,8 +1209,9 @@ description: {skill.Description}
 | `Image` | Sprite UI, icons, frames, progress fills, and nine-sliced controls | Use Simple for fixed art, Sliced for resizable bordered panels and buttons, Tiled for repeatable patterns, and Filled for progress or radial values | Stretching bordered art as Simple, leaving decorative graphics as Raycast Target, or using a unique material without need |
 | `RawImage` | Arbitrary Texture, RenderTexture, camera, video, downloaded, or generated texture content | Preserve the source aspect and manage texture lifetime explicitly | Using RawImage for ordinary Sprite UI that should atlas and batch with other Images |
 | `UnityEngine.UI.Text` | Text in an established legacy uGUI project or screen family | Use it only after inspection shows it is the prevailing project convention; match the existing Font, material, alignment, line spacing, overflow, and localization behavior | Introducing it into a new project, mixing it casually into a TMP-based screen, or converting existing labels without checking layout and serialized references |
-| `TextMeshProUGUI` | Text in an established TMP project and the default for a new project with no existing text convention | Match the project's font assets and material presets; set wrapping, alignment, overflow, fallback fonts, and localization limits; constrain Auto Size to a narrow range | Replacing an established `Text` component merely to modernize, continuous Auto Size on rapidly changing text, or shipping without required CJK and symbol glyphs |
-| `Outline` / `Shadow` / similar `BaseMeshEffect` | A specifically designed text or Graphic effect already required by the design or established project style | Reuse the project's approved style and keep effect distance, color, alpha, and stacking minimal; verify legibility and cost on target hardware | Adding generic polish by default, stacking effects, applying them broadly, or using them to compensate for weak contrast or incorrect layout; these effects duplicate UI geometry and increase overdraw |
+| `TextMeshProUGUI` | Text in an established TMP project and the default for a new project with no existing text convention | Match the project's font assets and material presets; set wrapping, alignment, overflow, fallback fonts, and localization limits; constrain Auto Size to a narrow range; when the design explicitly shows a text effect, use TMP's own component and shader-material controls | Replacing an established `Text` component merely to modernize, continuous Auto Size on rapidly changing text, or shipping without required CJK and symbol glyphs |
+| TMP font material / material preset | An outline, underlay or shadow, glow, face dilation, softness, or other text treatment explicitly visible in the design for a `TextMeshProUGUI` project | For a simple outline set the TMP component's `outlineColor` and `outlineWidth`; for underlay, glow, or other shader effects reuse an approved project preset or create a dedicated preset or material instance and verify it with fallback fonts | Adding a uGUI `Outline` or `Shadow` to TMP text by habit, changing a shared `fontSharedMaterial` and unintentionally restyling other labels, or enabling effects absent from the design |
+| `Outline` / `Shadow` / similar `BaseMeshEffect` | A specifically designed effect on legacy `UnityEngine.UI.Text` or another Graphic, when required by the design or established project style | Reuse the project's approved style and keep effect distance, color, alpha, and stacking minimal; verify legibility and cost on target hardware; prefer TMP-native effects when the text component is `TextMeshProUGUI` | Adding generic polish by default, stacking effects, applying them broadly, or using them to compensate for weak contrast or incorrect layout; these effects duplicate UI geometry and increase overdraw |
 | `TMP_InputField` | Editable TMP text | Author and validate a prefab with `textComponent`, `textViewport`, `placeholder` when used, target Graphic, navigation, and input settings already serialized; instantiate the prefab and bind data or listeners at runtime | Rebuilding a stable input hierarchy in code; if dynamic construction is genuinely required, never add it to an active GameObject and bind `textComponent` afterward because affected TMP versions create the caret renderer in `OnEnable` only when that reference is already present |
 | `ScrollRect` | Drag or wheel scrolling through content larger than a viewport | Use `ScrollRect -> Viewport + RectMask2D -> Content`, reference both Viewport and Content, enable only required axes, and choose Clamped or Elastic intentionally | Unrestricted movement without recovery, deeply nested competing scroll axes, or instantiating thousands of live rows without virtualization |
 | `RectMask2D` | Rectangular clipping in 2D Canvas UI | Prefer it for scroll viewports and rectangular reveal areas | Using stencil `Mask` for a simple rectangle |
@@ -1275,6 +1296,8 @@ safeAreaRoot.offsetMax = Vector2.zero;
 - In TMP projects, use font fallback chains for CJK, symbols, and localized glyphs. Keep common glyphs in the primary asset and verify fallback material appearance and draw-call impact.
 - Prefer wrapping, truncation, or a known layout expansion policy over broad Auto Size ranges. TMP Auto Size performs repeated layout passes and is unsuitable for frequently changing counters or timers.
 - Do not add `Outline`, `Shadow`, or another `BaseMeshEffect` merely because a control looks unfinished. Require an explicit design need or a verified existing project style, prefer the existing shared prefab or TMP material preset when applicable, avoid stacked effects, and verify the extra geometry and overdraw.
+- When the reference image or design explicitly shows an outline or another font effect and the project uses `TextMeshProUGUI`, reproduce the visible treatment through the TMP component rather than omitting it or attaching a uGUI mesh effect by habit. Use `outlineColor` and `outlineWidth` for a simple outline; use an existing approved TMP material preset, or a dedicated preset or material instance, for underlay or shadow, glow, face dilation, softness, and other shader effects.
+- Treat TMP material scope as part of the edit. Do not modify a shared `fontSharedMaterial` when the effect is local to one label or prefab because every user of that material may change. Reuse a matching project preset when one exists; otherwise create a deliberately scoped preset or instance, preserve the font atlas and fallback chain, and verify the result against the reference at target resolution.
 - Prefer a prefab for `TMP_InputField` and other stable controls so hierarchy, references, navigation, styling, localization, and focus behavior are inspectable before Play Mode. Runtime code should instantiate the prefab and supply data and listeners, not recreate its child objects and component wiring.
 - Only when procedural construction is explicitly required, treat the first enable of a runtime-created `TMP_InputField` as an initialization boundary. Create and wire its text hierarchy while the root is inactive (or the component is disabled), assign at least `textComponent` and `textViewport` plus `placeholder` when used, then enable it. In affected TMP versions, `OnEnable` creates the cached `Caret` renderer only when `textComponent` is already bound; assigning the property after that first enable does not retroactively create it.
 - If a dynamically constructed `TMP_InputField` accepts text but shows no insertion caret, inspect whether a `Caret` / `TMP_SelectionCaret` object was created and whether `textComponent` was assigned before first enable. After wiring the missing references, disable and re-enable the field to run initialization again; then verify focus, blinking caret, selection highlight, placeholder state, and editing in Play Mode.

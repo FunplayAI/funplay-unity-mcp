@@ -31,7 +31,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(File.Exists(skillPath));
                 var agentsContent = File.ReadAllText(agentsPath);
                 StringAssert.Contains("unity-mcp-workflow@1.0.3", agentsContent);
-                StringAssert.Contains("unity-ui-composition@1.0.2", agentsContent);
+                StringAssert.Contains("unity-ui-composition@1.0.3", agentsContent);
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
                 var skillContent = File.ReadAllText(skillPath);
@@ -47,7 +47,7 @@ namespace Funplay.Editor.Tests
                 StringAssert.Contains("\"id\": \"unity-mcp-workflow\"", manifestJson);
                 StringAssert.Contains("\"version\": \"1.0.3\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-ui-composition\"", manifestJson);
-                StringAssert.Contains("\"version\": \"1.0.2\"", manifestJson);
+                StringAssert.Contains("\"version\": \"1.0.3\"", manifestJson);
             }
             finally
             {
@@ -119,7 +119,7 @@ namespace Funplay.Editor.Tests
                 foreach (var path in new[] { codexSkillPath, claudeSkillPath, cursorRulePath })
                 {
                     var content = File.ReadAllText(path);
-                    StringAssert.Contains("unity-ui-composition@1.0.2", content);
+                    StringAssert.Contains("unity-ui-composition@1.0.3", content);
                     StringAssert.Contains("Screen.safeArea", content);
                     StringAssert.Contains("720 x 1559", content);
                     StringAssert.Contains("1559 x 720", content);
@@ -128,6 +128,9 @@ namespace Funplay.Editor.Tests
                     StringAssert.Contains("default to `TextMeshProUGUI`", content);
                     StringAssert.Contains("text component that is most common", content);
                     StringAssert.Contains("Do not add `Outline`, `Shadow`, or another `BaseMeshEffect`", content);
+                    StringAssert.Contains("Use `outlineColor` and `outlineWidth` for a simple outline", content);
+                    StringAssert.Contains("Do not modify a shared `fontSharedMaterial`", content);
+                    StringAssert.Contains("underlay or shadow, glow, face dilation, softness", content);
                     StringAssert.Contains("Author reusable user-facing screens, panels, and controls as prefabs", content);
                     StringAssert.Contains("Only when procedural construction is explicitly required", content);
                     StringAssert.Contains("disable and re-enable the field to run initialization again", content);
@@ -151,7 +154,7 @@ namespace Funplay.Editor.Tests
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
                 CollectionAssert.DoesNotContain(manifest.optionalSkills, skillId);
                 Assert.IsTrue(manifest.skillVersions.Any(entry =>
-                    entry.id == skillId && entry.version == "1.0.2"));
+                    entry.id == skillId && entry.version == "1.0.3"));
             }
             finally
             {

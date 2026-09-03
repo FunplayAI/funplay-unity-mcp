@@ -88,7 +88,8 @@ namespace Funplay.Editor.MCP.Server
             row.Add(configureButton);
 
             var selectedTarget = _targets[_selectedTargetIndex];
-            var skillsSupported = !string.IsNullOrEmpty(MapTargetNameToSkillsPlatformId(selectedTarget.Name));
+            var skillsSupported = !string.IsNullOrEmpty(
+                ProjectSkillsManager.GetPlatformIdForConfigTarget(selectedTarget.Name));
             var configureSkillsButton = new Button(() =>
             {
                 ConfigureMCPAndSkillsForTarget(_targets[_selectedTargetIndex]);
@@ -507,7 +508,7 @@ namespace Funplay.Editor.MCP.Server
             {
                 var customMessage = WriteMCPConfigurationForTarget(target);
 
-                var platformId = MapTargetNameToSkillsPlatformId(target.Name);
+                var platformId = ProjectSkillsManager.GetPlatformIdForConfigTarget(target.Name);
                 if (string.IsNullOrEmpty(platformId))
                 {
                     var configSummary = customMessage ??
@@ -1723,25 +1724,6 @@ namespace Funplay.Editor.MCP.Server
             }
 
             return startDirectory;
-        }
-
-        private static string MapTargetNameToSkillsPlatformId(string targetName)
-        {
-            switch (targetName?.Trim())
-            {
-                case "Codex":
-                    return "codex";
-                case "OpenCode":
-                    return "opencode";
-                case "Claude Code":
-                    return "claude";
-                case "Cursor":
-                    return "cursor";
-                case DeepSeekHarnessTargetName:
-                    return "dsh";
-                default:
-                    return null;
-            }
         }
 
         /// <summary>

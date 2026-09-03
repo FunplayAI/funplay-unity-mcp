@@ -453,7 +453,7 @@ namespace Funplay.Editor.MCP.Server
                 return null;
 
             var idx = Mathf.Clamp(_selectedTargetIndex, 0, _platformTargets.Length - 1);
-            return MapTargetNameToSkillsPlatformId(_platformTargets[idx]);
+            return ProjectSkillsManager.GetPlatformIdForConfigTarget(_platformTargets[idx]);
         }
 
         private string GetCurrentSkillsPlatformDisplayName()
@@ -463,25 +463,6 @@ namespace Funplay.Editor.MCP.Server
 
             var idx = Mathf.Clamp(_selectedTargetIndex, 0, _platformTargets.Length - 1);
             return _platformTargets[idx];
-        }
-
-        private static string MapTargetNameToSkillsPlatformId(string targetName)
-        {
-            switch (targetName?.Trim())
-            {
-                case "Codex":
-                    return "codex";
-                case "OpenCode":
-                    return "opencode";
-                case "Claude Code":
-                    return "claude";
-                case "Cursor":
-                    return "cursor";
-                case "DeepSeek Harness":
-                    return "dsh";
-                default:
-                    return null;
-            }
         }
 
         private void RefreshGeneratedFiles(

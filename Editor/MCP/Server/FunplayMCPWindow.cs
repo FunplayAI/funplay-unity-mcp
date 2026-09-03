@@ -14,6 +14,7 @@ namespace Funplay.Editor.MCP.Server
         private MCPServerService _mcpServer;
         private FunplayMCPHeaderStatusPanel _headerStatusPanel;
         private FunplayMCPUpdatePanel _updatePanel;
+        private FunplayMCPProjectSkillsNoticePanel _projectSkillsNoticePanel;
         private FunplayMCPRecentActivityPanel _activityPanel;
 
         [MenuItem("Funplay/MCP Server")]
@@ -78,6 +79,9 @@ namespace Funplay.Editor.MCP.Server
             _updatePanel = new FunplayMCPUpdatePanel();
             _updatePanel.AddTo(mainContainer);
 
+            _projectSkillsNoticePanel = new FunplayMCPProjectSkillsNoticePanel(_settingsController);
+            _projectSkillsNoticePanel.AddTo(mainContainer);
+
             new FunplayMCPServerControlsPanel(
                     _settingsController,
                     _mcpServer,
@@ -103,6 +107,12 @@ namespace Funplay.Editor.MCP.Server
         {
             _activityPanel?.Dispose();
             _activityPanel = null;
+            _projectSkillsNoticePanel = null;
+        }
+
+        private void OnFocus()
+        {
+            _projectSkillsNoticePanel?.Refresh();
         }
 
         private void OnUpdateStateChanged()
