@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- The Claude Code project-guidance block Funplay writes into `CLAUDE.md` now tells the agent to check whether an unreachable `funplay-*` MCP server entry actually matches this project's own before treating Funplay as broken. Claude Code's connection check surfaces every registered server on the machine regardless of which project a session was opened in, so once two Funplay-enabled projects have each been configured (0.6.3's project-scope fix), a session in one project will still see the other project's entry reported as "Failed to connect" whenever that project's Editor isn't open -- correct routing does not change what a session's health check displays. Nothing about scoping changes here: this plugin still has no way to prove another project's entry is safe to delete, so the fix is putting that explanation where an agent is most likely to read it before mistaking a different project's disconnected entry for its own.
+
 ## [0.6.4] - 2026-08-31
 
 ### Added

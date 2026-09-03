@@ -975,6 +975,7 @@ $@"{ManagedMarker}
 - `request_recompile` is rejected while Unity is in Play Mode. Call `exit_play_mode` first, then retry.
 - After `enter_play_mode`, the HTTP server briefly drops while Unity reloads the domain. Poll `tools/list` or `get_reload_recovery_status` until it responds again before issuing the next tool call.
 - If domain reload interrupts a request, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm it.
+- If a Claude Code session reports another `funplay-*` MCP server entry as unreachable, check whether its name matches this project's own before treating Funplay as broken. Funplay registers one independent entry per Unity project, but Claude Code's connection check surfaces every registered entry on the machine regardless of which project the session is in — a different project's entry being disconnected is expected when that project's Editor isn't currently open, and it should not be deleted, since it may still be in active use by that project.
 - Additional installed skills are available under `.claude/skills/`.
 
 ## Project
