@@ -30,13 +30,13 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(File.Exists(agentsPath));
                 Assert.IsTrue(File.Exists(skillPath));
                 var agentsContent = File.ReadAllText(agentsPath);
-                StringAssert.Contains("unity-mcp-workflow@1.0.3", agentsContent);
-                StringAssert.Contains("unity-ui-composition@1.0.3", agentsContent);
+                StringAssert.Contains("unity-mcp-workflow@1.0.4", agentsContent);
+                StringAssert.Contains("unity-ui-composition@1.0.4", agentsContent);
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
                 var skillContent = File.ReadAllText(skillPath);
-                StringAssert.Contains("- Skill version: `1.0.3`", skillContent);
-                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.3 -->", skillContent);
+                StringAssert.Contains("- Skill version: `1.0.4`", skillContent);
+                StringAssert.Contains("<!-- Funplay Unity MCP skill version: unity-mcp-workflow@1.0.4 -->", skillContent);
                 StringAssert.Contains(
                     "PORT=24312 # replace with the port shown in the Funplay MCP Server window",
                     skillContent);
@@ -45,9 +45,9 @@ namespace Funplay.Editor.Tests
                 var manifestJson = File.ReadAllText(ProjectSkillsManager.GetManifestPath(projectRoot));
                 StringAssert.Contains("\"skillVersions\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-mcp-workflow\"", manifestJson);
-                StringAssert.Contains("\"version\": \"1.0.3\"", manifestJson);
+                StringAssert.Contains("\"version\": \"1.0.4\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-ui-composition\"", manifestJson);
-                StringAssert.Contains("\"version\": \"1.0.3\"", manifestJson);
+                StringAssert.Contains("\"version\": \"1.0.4\"", manifestJson);
             }
             finally
             {
@@ -119,7 +119,7 @@ namespace Funplay.Editor.Tests
                 foreach (var path in new[] { codexSkillPath, claudeSkillPath, cursorRulePath })
                 {
                     var content = File.ReadAllText(path);
-                    StringAssert.Contains("unity-ui-composition@1.0.3", content);
+                    StringAssert.Contains("unity-ui-composition@1.0.4", content);
                     StringAssert.Contains("Screen.safeArea", content);
                     StringAssert.Contains("720 x 1559", content);
                     StringAssert.Contains("1559 x 720", content);
@@ -154,7 +154,7 @@ namespace Funplay.Editor.Tests
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
                 CollectionAssert.DoesNotContain(manifest.optionalSkills, skillId);
                 Assert.IsTrue(manifest.skillVersions.Any(entry =>
-                    entry.id == skillId && entry.version == "1.0.3"));
+                    entry.id == skillId && entry.version == "1.0.4"));
             }
             finally
             {
@@ -294,7 +294,7 @@ namespace Funplay.Editor.Tests
                 ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { "codex" }, Array.Empty<string>());
                 var skillPath = GetCodexWorkflowSkillPath(projectRoot);
                 RemoveLinesContaining(skillPath, "Funplay Unity MCP skill version:");
-                RemoveLinesContaining(skillPath, "version: 1.0.3");
+                RemoveLinesContaining(skillPath, "version: 1.0.4");
 
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
                 var status = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, "codex");
@@ -303,7 +303,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(status.HasUpdates);
                 Assert.IsTrue(skillStatus.RequiresUpgrade);
                 Assert.AreEqual("unknown", skillStatus.InstalledVersion);
-                Assert.AreEqual("1.0.3", skillStatus.ExpectedVersion);
+                Assert.AreEqual("1.0.4", skillStatus.ExpectedVersion);
             }
             finally
             {
@@ -329,7 +329,73 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(status.HasUpdates);
                 Assert.IsTrue(skillStatus.Missing);
                 Assert.AreEqual("missing", skillStatus.InstalledVersion);
-                Assert.AreEqual("1.0.3", skillStatus.ExpectedVersion);
+                Assert.AreEqual("1.0.4", skillStatus.ExpectedVersion);
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        [TestCase("codex", "Codex")]
+        [TestCase("claude", "Claude Code")]
+        [TestCase("cursor", "Cursor")]
+        [TestCase("opencode", "OpenCode")]
+        [TestCase("dsh", "DeepSeek Harness")]
+        [TestCase("antigravity", "Antigravity")]
+        public void ApplyConfiguration_UpgradesPreviousBuiltInVersionsAndClearsNotice(
+            string platformId, string targetName)
+        {
+            var projectRoot = CreateTempProjectPath();
+            // Keep git-root-based skill targets inside this isolated project.
+            Directory.CreateDirectory(Path.Combine(projectRoot, ".git"));
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { platformId }, Array.Empty<string>());
+                var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
+                var current = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, platformId);
+                Assert.IsFalse(current.HasUpdates);
+
+                // Simulate the previous release's on-disk version receipts, without depending on
+                // generated prose. Upgrade detection must use the files, not just the manifest.
+                foreach (var file in current.Files)
+                {
+                    File.WriteAllText(file.Path, File.ReadAllText(file.Path).Replace("@1.0.4", "@1.0.3"));
+                }
+
+                var previous = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, platformId);
+                Assert.IsTrue(previous.HasUpdates);
+                var skills = previous.Files.Where(file => file.SkillId != "project").ToArray();
+                CollectionAssert.AreEquivalent(
+                    new[] { "unity-mcp-workflow", "unity-ui-composition" },
+                    skills.Select(file => file.SkillId).ToArray());
+                foreach (var skill in skills)
+                {
+                    Assert.AreEqual("1.0.3", skill.InstalledVersion);
+                    Assert.AreEqual("1.0.4", skill.ExpectedVersion);
+                    Assert.IsTrue(skill.RequiresUpgrade);
+                    Assert.IsFalse(skill.Missing);
+                    Assert.IsFalse(skill.Unmanaged);
+                }
+
+                var notice = FunplayMCPProjectSkillsNoticePanel.Evaluate(projectRoot, targetName);
+                Assert.AreEqual(FunplayMCPProjectSkillsNoticePanel.NoticeKind.NeedsUpdate, notice.Kind);
+                Assert.AreEqual(previous.Files.Count, notice.AffectedFileCount);
+                Assert.AreEqual(0, notice.MissingFileCount);
+                Assert.AreEqual(0, notice.ConflictFileCount);
+
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { platformId }, Array.Empty<string>());
+                var updatedManifest = ProjectSkillsManager.LoadManifest(projectRoot);
+                Assert.IsFalse(ProjectSkillsManager.GetUpgradeStatus(
+                    projectRoot, updatedManifest, platformId).HasUpdates);
+                Assert.IsEmpty(updatedManifest.optionalSkills, "Both skills must remain built-in.");
+                foreach (var skill in skills)
+                    Assert.IsTrue(updatedManifest.skillVersions.Any(entry =>
+                        entry.id == skill.SkillId && entry.version == "1.0.4"));
+                Assert.AreEqual(
+                    FunplayMCPProjectSkillsNoticePanel.NoticeKind.None,
+                    FunplayMCPProjectSkillsNoticePanel.Evaluate(projectRoot, targetName).Kind);
             }
             finally
             {

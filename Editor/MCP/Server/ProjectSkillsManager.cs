@@ -39,11 +39,11 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.3",
+                "1.0.4",
                 "Unity MCP Workflow",
-                "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects.",
+                "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,
-                "Use this skill when Codex or another AI agent is working in a Unity project and needs to verify code, prefabs, UI, Play Mode behavior, screenshots, scene hierarchy, console logs, domain reloads, or MCP connection issues.",
+                "Use this skill when Codex or another AI agent is working in a Unity project and needs to verify code, prefabs, UI, Play Mode behavior, screenshots, Game View recordings, scene hierarchy, console logs, domain reloads, or MCP connection issues.",
                 new[]
                 {
                     "Use Unity MCP as the source of truth for Editor state, scene hierarchy, prefab references, runtime objects, compilation status, and Play Mode behavior.",
@@ -58,7 +58,7 @@ namespace Funplay.Editor.MCP.Server
                     "Unless the user explicitly requests a full rebuild, preserve the existing hierarchy when editing UI or GameObject prefabs and modify only the required objects, components, and serialized fields; do not recreate the entire prefab.",
                     "Inspect editor-level state through dedicated tools: `get_selection`, `set_selection`, `get_prefab_stage`, `get_active_tool`, `get_windows`, `get_tags`, `get_layers`, `get_build_settings`. Do not write `execute_code` snippets just to read this.",
                     "When no specialized MCP tool covers an editor action, try `execute_menu_item` (e.g. 'GameObject/2D Object/Sprite', 'Window/Layouts/Default', 'Edit/Project Settings...') before falling back to `execute_code`.",
-                    "When Tool Exposure uses the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, input simulation, and performance inspection.",
+                    "When Tool Exposure uses the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, Game View recording, input simulation, and performance inspection.",
                     "When Tool Exposure uses the default `full` profile, all registered MCP tools are available. Prefer specific tools for simple scene, asset, GameObject, component, prefab, camera, UI, package, animation, file, or visual-feedback operations.",
                     "If Tool Exposure has been customized and a named tool is unavailable, adapt to the exposed tool list and report which expected tool is missing.",
                     "Never edit Unity serialized files (`.unity`, `.prefab`, `.asset`) with shell text tools or patches. Use Unity MCP or Editor APIs for scenes, prefabs, and ScriptableObject assets; shell tools may only inspect or locate these files.",
@@ -73,6 +73,7 @@ namespace Funplay.Editor.MCP.Server
                     "If a request is interrupted by script recompilation or domain reload, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm the final state.",
                     "Read back exact values from Unity after changes, not only success messages.",
                     "Test actual behavior in Unity through hierarchy, console logs, Play Mode, UI interactions, screenshots, or targeted `execute_code` checks.",
+                    "Use `capture_game_view` for static visual checks and short `record_game_view` clips for animation or interaction sequences; retain the returned `recording_id`, poll status or stop that recording, and inspect the local MP4 only after `data.ready=true`. A successful tool response alone does not prove a completed recording or correct behavior.",
                     "When Unity readback and text files disagree for serialized scene or prefab state, trust Unity readback and investigate the asset path.",
                     "Do not run self-healing fallback loops. If a reference, path, tool, or package is missing, report one clear error and stop or skip that item instead of guessing new paths or silently creating replacements.",
                     "For `UnityEngine.Object` references, never use `??=` for lazy rebinding. Use explicit `if (field == null) field = Resolve();` checks so Unity fake-null references are handled correctly.",
@@ -80,7 +81,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.3",
+                "1.0.4",
                 "Unity UI Composition",
                 "Build and revise responsive Unity uGUI mobile interfaces, including portrait and landscape layouts, safe areas, prefabs, auto layout, scrolling, text, input, animation, and performance validation.",
                 true,
@@ -106,6 +107,7 @@ namespace Funplay.Editor.MCP.Server
                     "Clamp edge controls after layout and visual children are finalized by measuring their complete RectTransform bounds, not only the root sizeDelta.",
                     "Prefer serialized component references and stable semantic names over Transform.Find paths or default duplicate names.",
                     "Validate hierarchy and exact RectTransform values through Unity, then test screenshots, interaction, safe areas, localization, and reopen behavior in Device Simulator and representative real-device builds.",
+                    "Use screenshots for static layout and short `record_game_view` clips for transitions, scrolling, caret blinking, animation interruption, or close and reopen behavior; start before the relevant interaction, wait for `data.ready=true`, and review the actual clip before reporting temporal behavior as verified.",
                     "Profile before optimizing; split static and frequently changing UI into a small number of purposeful canvases, atlas compatible sprites, reduce overdraw, and avoid unnecessary layout rebuilds."
                 }),
         };
@@ -1156,6 +1158,9 @@ $@"{ManagedMarker}
                 return BuildUnityUiCompositionCursorRuleContent(skill);
 
             var alwaysApply = skill.IsBuiltIn ? "true" : "false";
+            var recordingGuidance = string.Equals(skill.Id, "unity-mcp-workflow", StringComparison.OrdinalIgnoreCase)
+                ? BuildGameViewRecordingGuidance()
+                : string.Empty;
             return
 $@"---
 description: {skill.Description}
@@ -1172,7 +1177,7 @@ version: {skill.Version}
 ## Rules
 
 {string.Join("\n", skill.Rules.Select(rule => $"- {rule}"))}
-
+{recordingGuidance}
 ## Metadata
 
 - Skill id: `{skill.Id}`
@@ -1286,7 +1291,7 @@ description: {skill.Description}
 4. Read back and validate.
    - Read exact hierarchy, anchors, offsets, sizes, sprites, text settings, raycast state, sorting, and references back from Unity.
    - Test layout, input, safe area, localization, animation interruption, close and reopen state, and runtime data changes.
-   - Capture screenshots at representative aspect ratios. Use a real device build for performance and platform behavior before claiming device validation.
+   - Capture screenshots at representative aspect ratios for static layout; use a short `record_game_view` clip when correctness depends on an animation or interaction sequence. Use a real device build for performance and platform behavior before claiming device validation.
 
 ## Component Selection
 
@@ -1417,6 +1422,9 @@ safeAreaRoot.offsetMax = Vector2.zero;
 - Avoid hiding large inactive screens only with alpha zero; they can still render or receive input depending on CanvasGroup state. Use the project's hide or pooling policy and measure reopen cost.
 - Validate portrait at 16:9, 19.5:9 or 20:9, a cutout phone, and a portrait tablet. Validate landscape at 16:9, ultrawide, 16:10, 4:3, and both cutout sides.
 - In every profile, verify full-bleed art, safe interactive content, text overflow and fallback glyphs, scroll bounds, modal input blocking, touch hit areas, selection navigation, animation interruption, and close and reopen state.
+- Use `capture_game_view` for static composition, text fit, and before/after comparisons. Use a short `record_game_view` clip for behavior a still image cannot establish, such as popup transitions, scroll inertia, caret blinking, interrupted animations, or repeated close and reopen actions; record only the sequence relevant to the change.
+- For a clip, finish compilation, enter Play Mode and wait for MCP recovery, keep the Game tab visible at a fixed resolution, then start recording before performing the interaction. Save `data.recording_id`, pass it to `action=status` or `action=stop`, and wait for `data.ready=true` before reviewing the local MP4. The Unity MCP Workflow skill describes supported Editors and failure handling. If recording or video viewing is unavailable, report that limitation; screenshots and hierarchy readback alone do not prove timing or transition correctness.
+- Review intermediate frames as well as the final state: look for clipping or layout jumps, stuck raycast blocking, input leaking through a modal, and interruption or reopen state. Pair the clip with component-state readback and actual input checks; a visual result alone cannot prove event routing. Recording is silent and adds overhead, so it cannot validate audio or replace Profiler and real-device performance checks.
 - Use Device Simulator for layout, safe-area, orientation, and basic single-touch checks. It does not simulate target CPU, GPU, memory, rendering backend, native plugins, or multitouch; use representative device builds for performance and final interaction validation.
 
 ## Official Unity References
@@ -1430,6 +1438,34 @@ safeAreaRoot.offsetMax = Vector2.zero;
 - [TextMeshPro UI text and Auto Size](https://docs.unity.cn/Packages/com.unity.textmeshpro%403.2/manual/TMPObjectUIText.html) and [fallback fonts](https://docs.unity.cn/Packages/com.unity.textmeshpro%404.0/manual/FontAssetsFallback.html)
 - [Screen.safeArea](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Screen-safeArea.html), [relative RectTransform bounds](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/RectTransformUtility.CalculateRelativeRectTransformBounds.html), and [Device Simulator](https://docs.unity3d.com/6000.0/Documentation/Manual/device-simulator-introduction.html)
 - [Sprite Atlas](https://docs.unity3d.com/6000.0/Documentation/Manual/sprite/atlas/create-sprite-atlas.html), [platform texture overrides](https://docs.unity3d.com/6000.0/Documentation/Manual/class-TextureImporter-type-specific.html), and [official uGUI optimization guide](https://learn.unity.com/course/introduction-to-ui-in-unity/tutorial/optimizing-unity-ui)
+
+";
+        }
+
+        // Keep the recording lifecycle identical in Cursor rules and standard SKILL.md documents.
+        private static string BuildGameViewRecordingGuidance()
+        {
+            return
+@"
+## Game View Recording
+
+Use `capture_game_view` for static layout or a single visual state. Use `record_game_view` when the task needs evidence over time, such as animation, transitions, or a reproducible interaction sequence; do not record every routine UI edit.
+
+1. Prepare. Finish compilation, enter Play Mode when needed, and wait for MCP reload recovery. Recording requires a graphics-enabled macOS or Windows Unity Editor with a visible, rendering Game tab. Keep that tab visible and its resolution unchanged throughout capture; hiding it or resizing the source can fail the recording. The MP4 includes overlay UI but no audio.
+2. Start a short, bounded clip before performing the relevant actions. For example, call `record_game_view` with:
+
+   ```json
+   {""action"":""start"",""duration_seconds"":10,""fps"":15,""max_dimension"":1280}
+   ```
+
+   Save `data.recording_id` from the response, then perform the interaction. Start returns immediately; recording stops automatically at the duration limit. These are the default settings; accepted ranges are 1-120 seconds, 1-60 fps, and a 128-1920 pixel maximum edge. Aspect ratio is preserved without upscaling. Prefer a shorter clip or lower sampling rate/resolution if capture overhead is disruptive.
+3. Poll `record_game_view` with `{""action"":""status"",""recording_id"":""<returned id>""}`. To finish early, use `{""action"":""stop"",""recording_id"":""<returned id>""}`, then poll status until finalization. Always pass the saved ID so a stale request cannot inspect or stop a newer recording. If another recording is already active, report it rather than stopping someone else's capture.
+4. Check the receipt, not just `success`. While `data.status` is `recording` or `stopping`, the file is not ready. Read the MP4 only when `data.ready=true`; a `success=true` status query can still describe a failed recording. Stop polling on terminal `completed`, `interrupted`, or `failed` status and inspect `error`, `stop_reason`, and the actual captured extent (`frame_count`, `elapsed_seconds`, `last_frame_seconds`). Leaving Play Mode or reloading scripts finalizes early; recover the receipt after reload and treat any usable partial clip as partial evidence, not a complete test.
+5. Review the actual file at `data.path`, under `<UnityProject>/Library/FunplayMcp/Recordings/`. MCP returns a local-file receipt, not video bytes or base64; the client must have access to that filesystem and a video viewer. A remote MCP connection alone does not provide file access. If video viewing is unavailable, inspect extracted frames when supported and state their limits, or report that the clip was saved but not reviewed. Do not claim to have watched an inaccessible clip or upload project footage without authorization.
+
+- Report the reproduction steps, clip path, observed result, and any interruption or unverified portion. Combine visual evidence with Unity state readback and console checks.
+- Capture is best-effort with real elapsed timestamps, not guaranteed target-fps sampling. Use it for visual behavior, not frame-accurate performance measurement; use Profiler and device tests for performance.
+- If the tool, platform, or rendering prerequisites are unavailable, report the limitation and use screenshots or state checks only for what they can establish. Do not loop on terminal failures or install recording dependencies merely to bypass the limitation.
 
 ";
         }
@@ -1491,7 +1527,7 @@ description: {skill.Description}
 
 ## Tool Exposure
 
-- With the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, input simulation, and performance inspection.
+- With the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, Game View recording, input simulation, and performance inspection.
 - With the default `full` profile, prefer specific MCP tools for simple scene, asset, GameObject, component, prefab, camera, UI, package, animation, file, or visual-feedback operations.
 - If Tool Exposure is customized and a named tool is unavailable, adapt to the exposed tool list and report which expected tool is missing.
 
@@ -1704,7 +1740,7 @@ $@"
 - Source repository: `https://github.com/FunplayAI/funplay-unity-mcp`
 ";
 
-            return header + body + footer;
+            return header + body + BuildGameViewRecordingGuidance() + footer;
         }
 
         private static ProjectSkillsManifest CreateDefaultManifest()
