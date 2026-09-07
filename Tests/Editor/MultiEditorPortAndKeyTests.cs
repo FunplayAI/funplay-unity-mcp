@@ -348,6 +348,49 @@ namespace Funplay.Editor
                 "A recorded entry repointed at a non-loopback host was edited deliberately after we wrote it.");
         }
 
+        /// <summary>
+        /// Antigravity's entries carry the endpoint under <c>serverUrl</c>, not <c>url</c>. The rename
+        /// cleanup must read the same key the writer used, or this project's own previous entry looks
+        /// hand-edited and is never retired -- leaving two funplay entries on the same port.
+        /// </summary>
+        [Test]
+        public void ConfigCleanup_RetiresAPreviousEntryWrittenUnderAnAlternateUrlKey()
+        {
+            var servers = new Dictionary<string, object>
+            {
+                ["funplay-love-town"] = Entry("http://127.0.0.1:24312/mcp", "serverUrl"),
+                ["funplay-old-name"] = Entry("http://127.0.0.1:24312/mcp", "serverUrl"),
+                ["funplay-other-project"] = Entry("http://127.0.0.1:21000/mcp", "serverUrl")
+            };
+
+            FunplayMCPClientConfigPanel.RemoveSupersededFunplayEntries(
+                servers, "funplay-love-town", "funplay-old-name", "serverUrl");
+
+            Assert.IsFalse(servers.ContainsKey("funplay-old-name"), "The serverUrl entry we wrote before is retired.");
+            Assert.IsTrue(servers.ContainsKey("funplay-love-town"));
+            Assert.IsTrue(servers.ContainsKey("funplay-other-project"));
+        }
+
+        /// <summary>
+        /// Antigravity's <c>McpServerSpec</c> has no <c>url</c> field: an entry written in the usual
+        /// shape sits in its config connecting to nothing. Pin the key the writer emits.
+        /// </summary>
+        [Test]
+        public void HttpEntry_UsesTheTargetsUrlFieldName()
+        {
+            var antigravity = FunplayMCPClientConfigPanel.CreateHttpEntry(
+                "http://127.0.0.1:24312/mcp", "serverUrl", false, null, false);
+            Assert.AreEqual("http://127.0.0.1:24312/mcp", antigravity["serverUrl"]);
+            Assert.IsFalse(antigravity.ContainsKey("url"), "Antigravity ignores an entry carrying url.");
+            Assert.IsFalse(antigravity.ContainsKey("type"));
+
+            var standard = FunplayMCPClientConfigPanel.CreateHttpEntry(
+                "http://127.0.0.1:24312/mcp", null, true, null, true);
+            Assert.AreEqual("http://127.0.0.1:24312/mcp", standard["url"]);
+            Assert.AreEqual("http", standard["type"]);
+            Assert.AreEqual(true, standard["enabled"]);
+        }
+
         [Test]
         public void ConfigCleanup_DoesNothingWithoutARecordedPreviousEntry()
         {
@@ -422,9 +465,9 @@ namespace Funplay.Editor
                 "Without a recorded previous name the file is left untouched.");
         }
 
-        private static Dictionary<string, object> Entry(string url)
+        private static Dictionary<string, object> Entry(string url, string urlFieldName = "url")
         {
-            return new Dictionary<string, object> { ["url"] = url, ["type"] = "http" };
+            return new Dictionary<string, object> { [urlFieldName] = url, ["type"] = "http" };
         }
 
         [Test]

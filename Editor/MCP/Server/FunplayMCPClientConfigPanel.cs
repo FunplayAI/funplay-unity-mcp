@@ -849,7 +849,8 @@ namespace Funplay.Editor.MCP.Server
                 : GetOrCreateNestedDictionary(root, rootKey);
 
             servers[serverName] = entry;
-            RemoveSupersededFunplayEntries(servers, serverName, _settings.GetLastClientConfigKey(target.Name));
+            RemoveSupersededFunplayEntries(
+                servers, serverName, _settings.GetLastClientConfigKey(target.Name), target.UrlFieldName);
 
             File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
             return serverName;
@@ -1240,7 +1241,10 @@ namespace Funplay.Editor.MCP.Server
         /// any project on the machine could have written it, so it is surfaced in the panel instead.
         /// </summary>
         internal static void RemoveSupersededFunplayEntries(
-            Dictionary<string, object> servers, string currentServerName, string previousServerName)
+            Dictionary<string, object> servers,
+            string currentServerName,
+            string previousServerName,
+            string urlFieldName = null)
         {
             if (string.IsNullOrEmpty(previousServerName) ||
                 string.Equals(previousServerName, currentServerName, StringComparison.Ordinal))
@@ -1257,17 +1261,19 @@ namespace Funplay.Editor.MCP.Server
 
             // A recorded key whose entry now points somewhere non-local was edited by hand after we
             // wrote it; leave that alone rather than deleting someone's deliberate change.
-            if (!IsLoopbackEntry(previousEntry))
+            if (!IsLoopbackEntry(previousEntry, urlFieldName))
                 return;
 
             servers.Remove(previousServerName);
         }
 
-        private static bool IsLoopbackEntry(object entry)
+        // The endpoint key follows the target (Antigravity writes serverUrl); reading only "url"
+        // here would make an Antigravity entry look hand-edited and never retire it.
+        private static bool IsLoopbackEntry(object entry, string urlFieldName = null)
         {
             var entryMap = entry as Dictionary<string, object>;
             object url;
-            if (entryMap == null || !entryMap.TryGetValue("url", out url))
+            if (entryMap == null || !entryMap.TryGetValue(GetUrlFieldName(urlFieldName), out url))
                 return false;
 
             return IsLoopbackUrl(url as string);
@@ -1525,18 +1531,43 @@ namespace Funplay.Editor.MCP.Server
 
         private Dictionary<string, object> CreateHttpEntry(MCPConfigTarget target)
         {
+            return CreateHttpEntry(
+                GetServerUrl(),
+                target.UrlFieldName,
+                target.IncludeTypeField,
+                target.TypeFieldValue,
+                target.IncludeEnabledField);
+        }
+
+        internal static Dictionary<string, object> CreateHttpEntry(
+            string serverUrl,
+            string urlFieldName,
+            bool includeTypeField,
+            string typeFieldValue,
+            bool includeEnabledField)
+        {
             var entry = new Dictionary<string, object>
             {
-                [string.IsNullOrEmpty(target.UrlFieldName) ? "url" : target.UrlFieldName] = GetServerUrl()
+                [GetUrlFieldName(urlFieldName)] = serverUrl
             };
 
-            if (target.IncludeTypeField)
-                entry["type"] = string.IsNullOrEmpty(target.TypeFieldValue) ? "http" : target.TypeFieldValue;
+            if (includeTypeField)
+                entry["type"] = string.IsNullOrEmpty(typeFieldValue) ? "http" : typeFieldValue;
 
-            if (target.IncludeEnabledField)
+            if (includeEnabledField)
                 entry["enabled"] = true;
 
             return entry;
+        }
+
+        /// <summary>
+        /// The JSON key the endpoint lives under: <c>url</c> unless the target names another one
+        /// (Antigravity's <c>serverUrl</c>). Every reader of an entry's endpoint must go through this
+        /// too, or an entry written under the alternate key is invisible to it.
+        /// </summary>
+        internal static string GetUrlFieldName(string urlFieldName)
+        {
+            return string.IsNullOrEmpty(urlFieldName) ? "url" : urlFieldName;
         }
 
         private string CreateTomlSection(MCPConfigTarget target, string serverKey)
