@@ -730,7 +730,7 @@ namespace Funplay.Editor.Tools.Builtins
             return false;
         }
 
-        private static object GetMainPlayModeView()
+        internal static object GetMainPlayModeView()
         {
             try
             {
@@ -1358,18 +1358,8 @@ namespace Funplay.Editor.Tools.Builtins
 
             try
             {
-                if (playModeView == null)
+                if (!TryGetPlayModeViewRenderTexture(playModeView, out var sourceRenderTexture))
                     return null;
-
-                var renderTextureField = playModeView.GetType().GetField(
-                    "m_RenderTexture",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var sourceRenderTexture = renderTextureField?.GetValue(playModeView) as RenderTexture;
-                if (sourceRenderTexture == null || !sourceRenderTexture.IsCreated() ||
-                    sourceRenderTexture.width <= 0 || sourceRenderTexture.height <= 0)
-                {
-                    return null;
-                }
 
                 // Read the already-rendered Game View frame. This avoids camera.Render(),
                 // which can bypass SRP cameras and produce black frames in URP/HDRP.
@@ -1392,6 +1382,17 @@ namespace Funplay.Editor.Tools.Builtins
                 if (screenshot != null)
                     UnityEngine.Object.DestroyImmediate(screenshot);
             }
+        }
+
+        internal static bool TryGetPlayModeViewRenderTexture(object playModeView, out RenderTexture texture)
+        {
+            texture = null;
+            if (playModeView == null)
+                return false;
+            var field = playModeView.GetType().GetField(
+                "m_RenderTexture", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            texture = field?.GetValue(playModeView) as RenderTexture;
+            return texture != null && texture.IsCreated() && texture.width > 0 && texture.height > 0;
         }
 
         internal static bool ShouldFlipPlayModeViewRenderTexture()

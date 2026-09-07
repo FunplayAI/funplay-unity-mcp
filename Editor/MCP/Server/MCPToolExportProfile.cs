@@ -27,6 +27,7 @@ namespace Funplay.Editor.MCP.Server
             "analyze_scene_complexity",
             "capture_scene_view",
             "capture_game_view",
+            "record_game_view",
             "capture_simulator_view",
             "capture_editor_window",
             "raycast_at_point",

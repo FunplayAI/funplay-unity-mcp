@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-09-07
+
 ### Added
+- `record_game_view` is a default-core tool for asynchronous, silent Game View MP4 recording on macOS and Windows Editors. Start a bounded recording, perform interactions, then poll status or stop early; the finalized local-file receipt includes the recording ID, dimensions, frame count, elapsed time, size, stop reason, and errors. Captures include overlay UI, preserve wall-clock frame timestamps, and use Unity's built-in encoder without a Recorder dependency. Exiting Play Mode or reloading scripts finalizes and releases recording resources, with the receipt retained across domain reloads.
 - **Antigravity** is now a one-click client-config and Project Skills target. Configuration uses the workspace-local `.agents/mcp_config.json` with `mcpServers` / `serverUrl`, following the [current Antigravity MCP format](https://antigravity.google/docs/mcp/). MCP config, `.agents/skills/`, and the managed `AGENTS.md` block share the nearest Git root (or Unity project directory outside Git). Existing global entries are reported without being rewritten, and configuration never silently falls back to global scope.
 
 ### Fixed
