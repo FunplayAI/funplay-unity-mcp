@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using Funplay.Editor.Settings;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -51,11 +52,13 @@ namespace Funplay.Editor.MCP.Server
         private static readonly Color MutedValueColor = new Color(0.56f, 0.56f, 0.56f);
 
         private readonly MCPInteractionLog _interactionLog;
+        private readonly ISettingsController _settingsController;
         private readonly Action<Action> _defer;
         private readonly List<RowExpandState> _rows = new List<RowExpandState>();
         private ScrollView _scrollView;
         private RowExpandState _autoExpandedRow;
         private int _generation;
+        private bool _expandAllByDefault;
 
         // Tracks one row's expand/collapse so the "latest entry auto-expands" behavior can
         // later collapse it again once a newer entry arrives - but only if the user never
@@ -68,14 +71,22 @@ namespace Funplay.Editor.MCP.Server
             public Action ReleaseDetails;
         }
 
-        public FunplayMCPRecentActivityPanel(MCPServerService server) : this(server.InteractionLog)
+        public FunplayMCPRecentActivityPanel(MCPServerService server, ISettingsController settingsController)
+            : this(server.InteractionLog, settingsController: settingsController)
         {
         }
 
-        internal FunplayMCPRecentActivityPanel(MCPInteractionLog interactionLog, Action<Action> defer = null)
+        internal FunplayMCPRecentActivityPanel(
+            MCPInteractionLog interactionLog,
+            Action<Action> defer = null,
+            ISettingsController settingsController = null)
         {
             _interactionLog = interactionLog ?? throw new ArgumentNullException(nameof(interactionLog));
             _defer = defer ?? (callback => EditorApplication.delayCall += () => callback());
+            _settingsController = settingsController;
+            _expandAllByDefault = _settingsController?.MCPRecentActivityExpandedByDefault ?? true;
+            if (_settingsController != null)
+                _settingsController.OnSettingsChanged += RefreshExpansionDefaults;
         }
 
         public void AddTo(VisualElement parent)
@@ -150,8 +161,25 @@ namespace Funplay.Editor.MCP.Server
 
         public void Dispose()
         {
+            if (_settingsController != null)
+                _settingsController.OnSettingsChanged -= RefreshExpansionDefaults;
             ClearRows();
             _scrollView = null;
+        }
+
+        private void RefreshExpansionDefaults()
+        {
+            var expandAll = _settingsController.MCPRecentActivityExpandedByDefault;
+            if (expandAll == _expandAllByDefault)
+                return;
+
+            _expandAllByDefault = expandAll;
+            // Apply the preference live without rebuilding rows or discarding manual choices.
+            foreach (var row in _rows)
+            {
+                if (!row.ManuallyToggled)
+                    row.ApplyExpanded?.Invoke(expandAll || row == _autoExpandedRow);
+            }
         }
 
         private void AddRow(MCPLogEntry entry, bool isLatest = false)
@@ -241,7 +269,7 @@ namespace Funplay.Editor.MCP.Server
                 // A new entry became the latest: collapse whichever row was auto-expanded for
                 // that reason before, unless the user has since touched it themselves -
                 // manual choices are never overridden by the "latest" auto-expand behavior.
-                if (_autoExpandedRow != null && !_autoExpandedRow.ManuallyToggled)
+                if (!_expandAllByDefault && _autoExpandedRow != null && !_autoExpandedRow.ManuallyToggled)
                     _autoExpandedRow.ApplyExpanded(false);
                 _autoExpandedRow = null;
             }
@@ -328,7 +356,7 @@ namespace Funplay.Editor.MCP.Server
                 if (isLatest)
                     _autoExpandedRow = rowState;
 
-                rowState.ApplyExpanded(isLatest);
+                rowState.ApplyExpanded(_expandAllByDefault || isLatest);
             }
             else
             {

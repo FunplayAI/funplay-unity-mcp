@@ -3,8 +3,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Funplay.Editor.MCP.Server;
+using Funplay.Editor.Services;
+using Funplay.Editor.Settings;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -18,6 +21,7 @@ namespace Funplay.Editor.Tests
         private EditorWindow _window;
         private MCPInteractionLog _log;
         private FunplayMCPRecentActivityPanel _panel;
+        private string _settingsProjectPath;
         private readonly Queue<Action> _callbacks = new Queue<Action>();
 
         [UnitySetUp]
@@ -28,6 +32,7 @@ namespace Funplay.Editor.Tests
                 Assert.Ignore("These UI tests require a graphics-enabled interactive Unity Editor.");
             _log = null;
             _panel = null;
+            _settingsProjectPath = null;
             _callbacks.Clear();
             _window = ScriptableObject.CreateInstance<EditorWindow>();
             _window.titleContent = new GUIContent("Funplay Activity Tests");
@@ -45,6 +50,8 @@ namespace Funplay.Editor.Tests
             _callbacks.Clear();
             if (_window != null)
                 _window.Close();
+            if (_settingsProjectPath != null && Directory.Exists(_settingsProjectPath))
+                Directory.Delete(_settingsProjectPath, true);
         }
 
         [Test]
@@ -126,6 +133,111 @@ namespace Funplay.Editor.Tests
             AssertExpanded(old);
             AssertExpanded(latest);
             AssertExpanded(Rows().Last());
+        }
+
+        [Test]
+        public void ExpandAll_ExpandsHistoryAndNewEntries_ButKeepsManualCollapse()
+        {
+            var settings = CreateSettings(expandAll: true);
+            _log = new MCPInteractionLog();
+            _log.Add("old", MCPToolCallStatus.Success, "Old");
+            _log.Add("latest", MCPToolCallStatus.Success, "Latest");
+            BuildPanel(settings);
+            foreach (var row in Rows())
+                AssertExpanded(row);
+            var manuallyCollapsed = Rows()[0];
+            Click(Header(manuallyCollapsed));
+
+            _log.Add("new", MCPToolCallStatus.Success, "New");
+            FlushCallbacks();
+            AssertCollapsed(manuallyCollapsed);
+            AssertExpanded(Rows()[1]);
+            AssertExpanded(Rows()[2]);
+        }
+
+        [Test]
+        public void ExpansionPreference_AppliesLiveWithoutOverridingManualChoices()
+        {
+            var settings = CreateSettings(expandAll: false);
+            _log = new MCPInteractionLog();
+            _log.Add("manual-open", MCPToolCallStatus.Success, "Manually open");
+            _log.Add("automatic", MCPToolCallStatus.Success, "Follow the preference");
+            _log.Add("manual-closed", MCPToolCallStatus.Success, "Manually closed");
+            BuildPanel(settings);
+            var rows = Rows();
+            Click(Summary(rows[0]));
+            Click(Header(rows[2]));
+
+            settings.MCPRecentActivityExpandedByDefault = true;
+            AssertExpanded(rows[0]);
+            AssertExpanded(rows[1]);
+            AssertCollapsed(rows[2]);
+            _log.Add("latest", MCPToolCallStatus.Success, "Latest");
+            FlushCallbacks();
+
+            settings.MCPRecentActivityExpandedByDefault = false;
+            AssertExpanded(rows[0]);
+            AssertCollapsed(rows[1]);
+            AssertCollapsed(rows[2]);
+            AssertExpanded(Rows().Last());
+            settings.MCPRecentActivityExpandedByDefault = true;
+            AssertExpanded(rows[1]);
+            AssertCollapsed(rows[2]);
+        }
+
+        [Test]
+        public void DisablingExpandAll_ReleasesHistoricalTextures_AndHandlesEmptyLatest()
+        {
+            var settings = CreateSettings(expandAll: true);
+            _log = new MCPInteractionLog();
+            _log.Add("image", MCPToolCallStatus.Success, MakeImage());
+            _log.Add("empty", MCPToolCallStatus.Success, string.Empty);
+            BuildPanel(settings);
+            var imageRow = Rows()[0];
+            var texture = imageRow.Q<Image>().image as Texture2D;
+            Assert.IsTrue(texture != null);
+
+            settings.MCPRecentActivityExpandedByDefault = false;
+            AssertCollapsed(imageRow);
+            Assert.IsTrue(texture == null);
+            settings.MCPRecentActivityExpandedByDefault = true;
+            AssertExpanded(imageRow);
+        }
+
+        [Test]
+        public void ReopeningPanel_ReadsPersistedPreference_AndResetsManualOverrides()
+        {
+            var settings = CreateSettings(expandAll: true);
+            _log = new MCPInteractionLog();
+            _log.Add("old", MCPToolCallStatus.Success, "Old");
+            _log.Add("latest", MCPToolCallStatus.Success, "Latest");
+            BuildPanel(settings);
+            Click(Header(Rows()[0]));
+            AssertCollapsed(Rows()[0]);
+
+            _log.OnEntryAdded -= _panel.OnEntryAdded;
+            _panel.Dispose();
+            _window.rootVisualElement.Clear();
+            var reloaded = new SettingsController(new TestApplicationPaths(_settingsProjectPath));
+            BuildPanel(reloaded);
+            foreach (var row in Rows())
+                AssertExpanded(row);
+        }
+
+        [Test]
+        public void UnrelatedSettingsChange_DoesNotRebuildExpandedDetails()
+        {
+            var settings = CreateSettings(expandAll: true);
+            _log = new MCPInteractionLog();
+            _log.Add("image", MCPToolCallStatus.Success, MakeImage());
+            BuildPanel(settings);
+            var image = Rows()[0].Q<Image>();
+            var texture = image.image;
+
+            settings.PluginDebugLoggingEnabled = true;
+            Assert.AreSame(image, Rows()[0].Q<Image>());
+            Assert.AreSame(texture, image.image);
+            AssertExpanded(Rows()[0]);
         }
 
         [Test]
@@ -295,13 +407,33 @@ namespace Funplay.Editor.Tests
             AssertExpanded(row);
         }
 
-        private void BuildPanel()
+        private void BuildPanel(ISettingsController settings = null)
         {
             // Do not invoke Unity's global delayCall (which may contain unrelated project
             // callbacks). Control only this panel's queue to test clear/rebuild races exactly.
-            _panel = new FunplayMCPRecentActivityPanel(_log, callback => _callbacks.Enqueue(callback));
+            _panel = new FunplayMCPRecentActivityPanel(_log, callback => _callbacks.Enqueue(callback),
+                settings ?? CreateSettings(expandAll: false));
             _panel.AddTo(_window.rootVisualElement);
             _log.OnEntryAdded += _panel.OnEntryAdded;
+        }
+
+        private SettingsController CreateSettings(bool expandAll)
+        {
+            _settingsProjectPath = Path.Combine(Path.GetTempPath(), "FunplayActivityTests_" + Guid.NewGuid().ToString("N"));
+            return new SettingsController(new TestApplicationPaths(_settingsProjectPath))
+            {
+                MCPRecentActivityExpandedByDefault = expandAll
+            };
+        }
+
+        private sealed class TestApplicationPaths : IApplicationPaths
+        {
+            public TestApplicationPaths(string projectPath) { ProjectPath = projectPath; }
+            public string ProjectPath { get; }
+            public string AssetsPath => Path.Combine(ProjectPath, "Assets");
+            public string TempPath => Path.Combine(ProjectPath, "Temp", "Funplay");
+            public string DataPath => AssetsPath;
+            public string PersistentDataPath => Path.Combine(ProjectPath, "PersistentData");
         }
 
         private VisualElement[] Rows() => _window.rootVisualElement

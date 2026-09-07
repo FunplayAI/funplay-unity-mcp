@@ -23,6 +23,7 @@ namespace Funplay.Editor.Settings
         private const bool DefaultExecuteCodeStrictFilesystemSafetyEnabled = true;
         private const bool DefaultExecuteCodeProjectNamespaceInjectionEnabled = false;
         private const bool DefaultPluginDebugLoggingEnabled = false;
+        private const bool DefaultMCPRecentActivityExpandedByDefault = true;
         private const bool DefaultMCPBrokerModeEnabled = false;
 
         private readonly string _settingsPath;
@@ -254,6 +255,23 @@ namespace Funplay.Editor.Settings
             }
         }
 
+        public bool MCPRecentActivityExpandedByDefault
+        {
+            get
+            {
+                lock (_lock)
+                    return _settings.mcpRecentActivityExpandedByDefault;
+            }
+            set
+            {
+                UpdateSettings(data =>
+                {
+                    data.mcpRecentActivityExpandedByDefault = value;
+                    data.mcpRecentActivityExpansionConfigured = true;
+                });
+            }
+        }
+
         public bool MCPBrokerModeEnabled
         {
             get
@@ -413,6 +431,8 @@ namespace Funplay.Editor.Settings
                 executeCodeProjectNamespaceInjectionConfigured = true,
                 pluginDebugLoggingEnabled = DefaultPluginDebugLoggingEnabled,
                 pluginDebugLoggingConfigured = true,
+                mcpRecentActivityExpandedByDefault = DefaultMCPRecentActivityExpandedByDefault,
+                mcpRecentActivityExpansionConfigured = true,
                 mcpBrokerModeEnabled = DefaultMCPBrokerModeEnabled,
                 mcpBrokerMonoPath = string.Empty
             };
@@ -468,6 +488,11 @@ namespace Funplay.Editor.Settings
                 settings.pluginDebugLoggingEnabled = DefaultPluginDebugLoggingEnabled;
                 settings.pluginDebugLoggingConfigured = true;
             }
+            if (!settings.mcpRecentActivityExpansionConfigured)
+            {
+                settings.mcpRecentActivityExpandedByDefault = DefaultMCPRecentActivityExpandedByDefault;
+                settings.mcpRecentActivityExpansionConfigured = true;
+            }
         }
 
         private static string NormalizeToolExportProfile(string value)
@@ -519,6 +544,8 @@ namespace Funplay.Editor.Settings
             public bool executeCodeProjectNamespaceInjectionConfigured = false;
             public bool pluginDebugLoggingEnabled = DefaultPluginDebugLoggingEnabled;
             public bool pluginDebugLoggingConfigured = false;
+            public bool mcpRecentActivityExpandedByDefault = DefaultMCPRecentActivityExpandedByDefault;
+            public bool mcpRecentActivityExpansionConfigured = false;
             public bool mcpBrokerModeEnabled = DefaultMCPBrokerModeEnabled;
             public string mcpBrokerMonoPath = string.Empty;
             public List<string> mcpLastClientConfigKeys;

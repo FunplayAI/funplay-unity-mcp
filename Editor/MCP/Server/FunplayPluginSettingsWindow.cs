@@ -19,6 +19,7 @@ namespace Funplay.Editor.MCP.Server
     internal class FunplayPluginSettingsWindow : EditorWindow
     {
         private ISettingsController _settingsController;
+        private Toggle _recentActivityExpandedToggle;
         private Toggle _debugLoggingToggle;
         private Label _debugStatusLabel;
 
@@ -32,6 +33,8 @@ namespace Funplay.Editor.MCP.Server
 
         public void CreateGUI()
         {
+            if (_settingsController != null)
+                _settingsController.OnSettingsChanged -= RefreshStatus;
             _settingsController = RootScopeServices.Services?.GetService(typeof(ISettingsController))
                 as ISettingsController;
 
@@ -68,17 +71,41 @@ namespace Funplay.Editor.MCP.Server
             title.style.marginBottom = 4;
             rootVisualElement.Add(title);
 
-            var hint = new Label("Project-level settings for the Funplay Unity MCP plugin. Safety checks and debug logging are stored per project.");
+            var hint = new Label("Project-level settings for the Funplay Unity MCP plugin. Preferences are saved per project.");
             hint.style.fontSize = 11;
             hint.style.color = new Color(0.65f, 0.65f, 0.65f);
             hint.style.whiteSpace = WhiteSpace.Normal;
             hint.style.marginBottom = 10;
             rootVisualElement.Add(hint);
 
+            var content = new ScrollView(ScrollViewMode.Vertical) { name = "mcp-settings-scroll" };
+            content.style.flexGrow = 1;
+            content.style.minHeight = 0;
+            rootVisualElement.Add(content);
+
             var safetySection = CreateSection();
             safetySection.style.marginBottom = 8;
             FunplayMCPSafetyPanel.AddTo(safetySection, _settingsController);
-            rootVisualElement.Add(safetySection);
+            content.Add(safetySection);
+
+            var activitySection = CreateSection();
+            activitySection.style.marginBottom = 8;
+            activitySection.Add(CreateSectionHeader("Recent Activity"));
+            _recentActivityExpandedToggle = new Toggle("Expand all entries by default")
+            {
+                name = "recent-activity-expanded-by-default"
+            };
+            _recentActivityExpandedToggle.style.marginBottom = 5;
+            _recentActivityExpandedToggle.labelElement.style.whiteSpace = WhiteSpace.Normal;
+            _recentActivityExpandedToggle.labelElement.style.flexShrink = 1;
+            _recentActivityExpandedToggle.SetValueWithoutNotify(_settingsController.MCPRecentActivityExpandedByDefault);
+            _recentActivityExpandedToggle.RegisterValueChangedCallback(evt =>
+                _settingsController.MCPRecentActivityExpandedByDefault = evt.newValue);
+            activitySection.Add(_recentActivityExpandedToggle);
+            activitySection.Add(CreateHint(
+                "On: expand all entries. Off: collapse history and expand only the latest entry. " +
+                "Applies immediately; manually expanded or collapsed entries keep your choice until the panel is reopened."));
+            content.Add(activitySection);
 
             var debugSection = CreateSection();
             debugSection.Add(CreateSectionHeader("Debug"));
@@ -96,7 +123,7 @@ namespace Funplay.Editor.MCP.Server
             _debugStatusLabel = CreateHint(string.Empty);
             debugSection.Add(_debugStatusLabel);
 
-            rootVisualElement.Add(debugSection);
+            content.Add(debugSection);
             RefreshStatus();
         }
 
@@ -104,6 +131,8 @@ namespace Funplay.Editor.MCP.Server
         {
             if (_settingsController == null)
                 return;
+
+            _recentActivityExpandedToggle?.SetValueWithoutNotify(_settingsController.MCPRecentActivityExpandedByDefault);
 
             var enabled = _settingsController.PluginDebugLoggingEnabled;
             if (_debugLoggingToggle != null)
@@ -123,6 +152,7 @@ namespace Funplay.Editor.MCP.Server
         private static VisualElement CreateSection()
         {
             var section = new VisualElement();
+            section.style.flexShrink = 0;
             section.style.backgroundColor = new Color(0.14f, 0.14f, 0.14f);
             section.style.borderTopLeftRadius = 4;
             section.style.borderTopRightRadius = 4;
