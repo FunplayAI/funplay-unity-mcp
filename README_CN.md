@@ -273,6 +273,27 @@ url = "http://127.0.0.1:<port>/"
 </details>
 
 <details>
+<summary>Antigravity</summary>
+
+写入工作区级 `.agents/mcp_config.json`，在 `mcpServers` 中使用 `serverUrl` 指向 Funplay 的 Streamable HTTP 端点，使服务器配置仅在该工作区中生效。请使用支持[工作区 MCP 配置](https://antigravity.google/docs/mcp/)的当前 Antigravity 版本，配置后重新加载 MCP 服务器。
+
+工作区根目录取最近的包含 `.git` 的祖先目录（包括 worktree 的 `.git` 文件）；项目不在 Git 仓库中时使用 Unity 工程目录。请在 Antigravity 中打开该目录。**Configure + Skills** 会将 `.agents/mcp_config.json`、`.agents/skills/` 和 `AGENTS.md` 托管块放在同一根目录下，也适用于 Unity 工程嵌套在仓库中的情况。其他客户端沿用现有指引位置，路径相同时共用托管块。
+
+如果 `~/.gemini/config/mcp_config.json` 或旧版 `~/.gemini/antigravity/mcp_config.json` 中已有 Funplay 条目，面板会显示提示并保留原文件。完成各工作区配置后再检查这些全局条目；一键配置不会自动回退到全局配置。同一仓库中的多个 Unity 工程共用工作区，其 MCP 条目各自命名；Project Skills 遇到其他工程已有的工作区托管指引时会停止，避免覆盖工程身份。
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "serverUrl": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 除非你本地 Windsurf 版本要求不同的 MCP 配置格式，否则可直接使用与 Cursor 相同的 JSON 结构。
@@ -324,7 +345,7 @@ url = "http://127.0.0.1:<port>/"
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
 - **输入模拟 + 截图验证** — 在 Play Mode 中模拟键盘/鼠标，再用 Game View / Scene View 截图验证结果
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
-- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness 等客户端生成 MCP 配置
+- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness、Antigravity 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
 - **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含内置的 `unity-mcp-workflow` 与 `unity-ui-composition` 指引
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志

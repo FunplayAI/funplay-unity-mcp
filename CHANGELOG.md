@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+- **Antigravity** is now a one-click client-config and Project Skills target. Configuration uses the workspace-local `.agents/mcp_config.json` with `mcpServers` / `serverUrl`, following the [current Antigravity MCP format](https://antigravity.google/docs/mcp/). MCP config, `.agents/skills/`, and the managed `AGENTS.md` block share the nearest Git root (or Unity project directory outside Git). Existing global entries are reported without being rewritten, and configuration never silently falls back to global scope.
+
+### Fixed
+- Endpoint matching and rename cleanup use the target's endpoint key, including Antigravity's `serverUrl`, so reconfiguring a renamed project retires its recorded previous entry without deleting other servers.
+- Antigravity instruction paths and version checks agree with its workspace Skills location for nested Unity projects. Platform toggles preserve shared instructions and user-authored text; configuring another Unity project without Antigravity no longer deletes workspace Antigravity Skills. Another project's managed workspace guidance is protected from replacement.
+
+### Pull requests and issues
+- [PR #56](https://github.com/FunplayAI/funplay-unity-mcp/pull/56): Antigravity client configuration and Project Skills support, with workspace isolation and shared-instruction fixes.
+- No GitHub issues were closed by these changes.
+
+### Contributors
+- Thanks [@dehuaichendragonplus](https://github.com/dehuaichendragonplus) for PR #56.
+
 ## [0.6.5] - 2026-09-03
 
 ### Added

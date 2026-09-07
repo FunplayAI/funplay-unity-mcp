@@ -273,6 +273,27 @@ Written as a delimited managed block into every DeepSeek Harness profile's `~/.d
 </details>
 
 <details>
+<summary>Antigravity</summary>
+
+Written to the workspace-local `.agents/mcp_config.json` with `mcpServers` entries using `serverUrl` for Funplay's Streamable HTTP endpoint. This keeps the server out of unrelated workspaces. Use a current Antigravity version supporting [workspace MCP configuration](https://antigravity.google/docs/mcp/), then reload its MCP servers.
+
+The workspace root is the nearest ancestor containing `.git` (including a worktree's `.git` file), or the Unity project directory when it is outside Git. Open that directory as the Antigravity workspace. **Configure + Skills** places `.agents/mcp_config.json`, `.agents/skills/`, and the managed `AGENTS.md` block at this same root, including when the Unity project is nested inside a repository. Other clients retain their existing instruction locations and share the block when paths coincide.
+
+Existing Funplay entries in `~/.gemini/config/mcp_config.json` or the older `~/.gemini/antigravity/mcp_config.json` are reported in the panel and left unchanged. Review them after configuring each workspace; the one-click action does not fall back to global configuration. Multiple Unity projects in the same repository share a workspace: their MCP entries remain separately named, while Project Skills refuses to replace another project's managed workspace guidance.
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "serverUrl": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 Use the same JSON structure as Cursor unless your local Windsurf version requires a different MCP config format.
@@ -322,7 +343,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
 - **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
-- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, and similar clients directly from the Unity window
+- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, Antigravity, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
 - **Project Skills Manager** — Configure project-level skills for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - **MCP Settings** — Adjust `execute_code` safety defaults and enable verbose plugin debug logging when troubleshooting MCP connections or tool execution
