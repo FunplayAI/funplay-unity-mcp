@@ -99,7 +99,7 @@ namespace Funplay.Editor.MCP.Server
                     BuildUI)
                 .AddTo(mainContainer);
 
-            _activityPanel = new FunplayMCPRecentActivityPanel(_mcpServer);
+            _activityPanel = new FunplayMCPRecentActivityPanel(_mcpServer, _settingsController);
             _activityPanel.AddTo(mainContainer);
         }
 

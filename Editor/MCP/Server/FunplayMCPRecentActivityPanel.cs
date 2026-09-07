@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using Funplay.Editor.Settings;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -50,18 +51,47 @@ namespace Funplay.Editor.MCP.Server
         private static readonly Color PendingValueColor = new Color(0.95f, 0.68f, 0.25f);
         private static readonly Color MutedValueColor = new Color(0.56f, 0.56f, 0.56f);
 
-        private readonly MCPServerService _server;
-        private readonly List<Texture2D> _previewTextures = new List<Texture2D>();
+        private readonly MCPInteractionLog _interactionLog;
+        private readonly ISettingsController _settingsController;
+        private readonly Action<Action> _defer;
+        private readonly List<RowExpandState> _rows = new List<RowExpandState>();
         private ScrollView _scrollView;
+        private RowExpandState _autoExpandedRow;
+        private int _generation;
+        private bool _expandAllByDefault;
 
-        public FunplayMCPRecentActivityPanel(MCPServerService server)
+        // Tracks one row's expand/collapse so the "latest entry auto-expands" behavior can
+        // later collapse it again once a newer entry arrives - but only if the user never
+        // touched it themselves in the meantime (manual choices always win).
+        private sealed class RowExpandState
         {
-            _server = server;
+            public VisualElement Card;
+            public bool ManuallyToggled;
+            public Action<bool> ApplyExpanded;
+            public Action ReleaseDetails;
+        }
+
+        public FunplayMCPRecentActivityPanel(MCPServerService server, ISettingsController settingsController)
+            : this(server.InteractionLog, settingsController: settingsController)
+        {
+        }
+
+        internal FunplayMCPRecentActivityPanel(
+            MCPInteractionLog interactionLog,
+            Action<Action> defer = null,
+            ISettingsController settingsController = null)
+        {
+            _interactionLog = interactionLog ?? throw new ArgumentNullException(nameof(interactionLog));
+            _defer = defer ?? (callback => EditorApplication.delayCall += () => callback());
+            _settingsController = settingsController;
+            _expandAllByDefault = _settingsController?.MCPRecentActivityExpandedByDefault ?? true;
+            if (_settingsController != null)
+                _settingsController.OnSettingsChanged += RefreshExpansionDefaults;
         }
 
         public void AddTo(VisualElement parent)
         {
-            ClearPreviewTextures();
+            ClearRows();
 
             var header = new VisualElement();
             header.style.flexDirection = FlexDirection.Row;
@@ -78,10 +108,10 @@ namespace Funplay.Editor.MCP.Server
 
             var clearButton = new Button(() =>
             {
-                _server.InteractionLog.Clear();
-                ClearPreviewTextures();
-                _scrollView?.contentContainer.Clear();
+                _interactionLog.Clear();
+                ClearRows();
             });
+            clearButton.name = "recent-activity-clear";
             clearButton.text = "Clear";
             clearButton.style.height = 20;
             clearButton.style.width = 50;
@@ -90,6 +120,7 @@ namespace Funplay.Editor.MCP.Server
             parent.Add(header);
 
             _scrollView = new ScrollView(ScrollViewMode.Vertical);
+            _scrollView.name = "recent-activity-scroll";
             _scrollView.style.flexGrow = 1;
             _scrollView.style.backgroundColor = new Color(0.14f, 0.14f, 0.14f);
             _scrollView.style.borderTopLeftRadius = 4;
@@ -102,39 +133,62 @@ namespace Funplay.Editor.MCP.Server
             _scrollView.style.paddingBottom = 4;
             parent.Add(_scrollView);
 
-            var entries = _server.InteractionLog.GetEntries();
+            _autoExpandedRow = null;
+            // GetEntries() returns newest-first (index 0 = most recent); this loop walks it
+            // back-to-front so the oldest row is added (and rendered) first, newest last/bottom.
+            var entries = _interactionLog.GetEntries();
             for (int i = entries.Count - 1; i >= 0; i--)
-                AddRow(entries[i]);
+                AddRow(entries[i], isLatest: i == 0);
         }
 
         public void OnEntryAdded(MCPLogEntry entry)
         {
-            EditorApplication.delayCall += () =>
+            var generation = _generation;
+            _defer(() =>
             {
-                if (_scrollView == null)
+                // Clear/rebuild/dispose invalidates already-queued entries and scroll requests.
+                if (_scrollView == null || generation != _generation)
                     return;
 
-                AddRow(entry);
-                EditorApplication.delayCall += () =>
+                AddRow(entry, isLatest: true);
+                _defer(() =>
                 {
-                    if (_scrollView != null)
+                    if (_scrollView != null && generation == _generation)
                         _scrollView.scrollOffset = new Vector2(0, float.MaxValue);
-                };
-            };
+                });
+            });
         }
 
         public void Dispose()
         {
-            ClearPreviewTextures();
+            if (_settingsController != null)
+                _settingsController.OnSettingsChanged -= RefreshExpansionDefaults;
+            ClearRows();
             _scrollView = null;
         }
 
-        private void AddRow(MCPLogEntry entry)
+        private void RefreshExpansionDefaults()
+        {
+            var expandAll = _settingsController.MCPRecentActivityExpandedByDefault;
+            if (expandAll == _expandAllByDefault)
+                return;
+
+            _expandAllByDefault = expandAll;
+            // Apply the preference live without rebuilding rows or discarding manual choices.
+            foreach (var row in _rows)
+            {
+                if (!row.ManuallyToggled)
+                    row.ApplyExpanded?.Invoke(expandAll || row == _autoExpandedRow);
+            }
+        }
+
+        private void AddRow(MCPLogEntry entry, bool isLatest = false)
         {
             var badgeText = GetBadgeText(entry.Status);
             var accentColor = GetAccentColor(entry.Status);
 
             var card = new VisualElement();
+            card.name = "recent-activity-row";
             card.style.backgroundColor = new Color(0.19f, 0.19f, 0.19f);
             card.style.borderTopLeftRadius = 4;
             card.style.borderTopRightRadius = 4;
@@ -149,8 +203,16 @@ namespace Funplay.Editor.MCP.Server
             card.style.marginBottom = 3;
 
             var topRow = new VisualElement();
+            topRow.name = "recent-activity-header";
             topRow.style.flexDirection = FlexDirection.Row;
             topRow.style.alignItems = Align.Center;
+
+            var expandArrow = new Label("▸");
+            expandArrow.style.fontSize = 10;
+            expandArrow.style.color = new Color(0.5f, 0.5f, 0.5f);
+            expandArrow.style.marginRight = 4;
+            expandArrow.style.width = 10;
+            topRow.Add(expandArrow);
 
             var timeLabel = new Label(entry.Timestamp.ToString("HH:mm:ss"));
             timeLabel.style.fontSize = 10;
@@ -198,28 +260,143 @@ namespace Funplay.Editor.MCP.Server
                 isStructuredResult = true;
             }
 
-            if (!string.IsNullOrEmpty(displayResult))
+            var detailsContainer = new VisualElement { name = "recent-activity-details" };
+            var hasDetails = !string.IsNullOrEmpty(displayResult) || !string.IsNullOrEmpty(entry.ImageDataUri);
+            var rowState = new RowExpandState { Card = card };
+
+            if (isLatest)
             {
-                if (isStructuredResult)
-                {
-                    card.Add(CreateStructuredResult(displayResult));
-                }
-                else
-                {
-                    var summaryLabel = CreateWrappedLabel(displayResult, new Color(0.6f, 0.6f, 0.6f));
-                    summaryLabel.style.fontSize = 11;
-                    summaryLabel.style.marginTop = 3;
-                    card.Add(summaryLabel);
-                }
+                // A new entry became the latest: collapse whichever row was auto-expanded for
+                // that reason before, unless the user has since touched it themselves -
+                // manual choices are never overridden by the "latest" auto-expand behavior.
+                if (!_expandAllByDefault && _autoExpandedRow != null && !_autoExpandedRow.ManuallyToggled)
+                    _autoExpandedRow.ApplyExpanded(false);
+                _autoExpandedRow = null;
             }
 
-            if (!string.IsNullOrEmpty(entry.ImageDataUri) &&
-                TryCreateImagePreview(entry.ImageDataUri, out var preview))
+            if (hasDetails)
             {
-                card.Add(preview);
+                // DisplayResult is readable text with a larger, bounded display budget. The
+                // compact ResultSummary is raw protocol text capped at 200 chars for resources.
+                var collapsedSummary = CreateCollapsedSummaryLabel(displayResult);
+                card.Add(collapsedSummary);
+
+                card.Add(detailsContainer);
+
+                // Native Editor tooltip: show the same formatted detail text the expanded view
+                // renders, everywhere in the card. Plain `card.tooltip` is not enough: an ellipsis-
+                // truncated Label (the collapsed summary line) supplies its own default tooltip
+                // (its raw, unformatted text) at the moment it is hovered, which pre-empts an
+                // ancestor's tooltip and made the header and the summary line disagree. Intercept
+                // the TooltipEvent during the trickle-down (capture) phase instead, before it
+                // reaches any such child, so this one formatted value always wins.
+                card.RegisterCallback<TooltipEvent>(evt =>
+                {
+                    evt.tooltip = displayResult;
+                    evt.rect = card.worldBound;
+                    evt.StopImmediatePropagation();
+                }, TrickleDown.TrickleDown);
+
+                var expanded = false;
+                Texture2D previewTexture = null;
+                rowState.ReleaseDetails = () =>
+                {
+                    detailsContainer.Clear();
+                    if (previewTexture != null)
+                        UnityEngine.Object.DestroyImmediate(previewTexture);
+                    previewTexture = null;
+                };
+                rowState.ApplyExpanded = value =>
+                {
+                    if (value && !expanded)
+                    {
+                        if (!string.IsNullOrEmpty(displayResult))
+                        {
+                            if (isStructuredResult)
+                                detailsContainer.Add(CreateStructuredResult(displayResult));
+                            else
+                            {
+                                var text = CreateWrappedLabel(displayResult, new Color(0.6f, 0.6f, 0.6f));
+                                text.style.fontSize = 11;
+                                text.style.marginTop = 3;
+                                detailsContainer.Add(text);
+                            }
+                        }
+
+                        if (TryCreateImagePreview(entry.ImageDataUri, out var preview))
+                        {
+                            previewTexture = preview.image as Texture2D;
+                            detailsContainer.Add(preview);
+                        }
+                    }
+                    else if (!value && expanded)
+                    {
+                        // Hiding the subtree alone retains its Labels and decoded GPU texture.
+                        // Recreate on demand so collapsed history stays lightweight.
+                        rowState.ReleaseDetails();
+                    }
+                    expanded = value;
+                    expandArrow.text = expanded ? "▾" : "▸";
+                    detailsContainer.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
+                    collapsedSummary.style.display = expanded ? DisplayStyle.None : DisplayStyle.Flex;
+                };
+
+                EventCallback<ClickEvent> toggle = evt =>
+                {
+                    if (evt.button != 0)
+                        return;
+                    rowState.ManuallyToggled = true;
+                    rowState.ApplyExpanded(!expanded);
+                };
+                // Both the header row and the collapsed summary line must open the card -
+                // they are siblings, not nested, so each needs its own click registration.
+                topRow.RegisterCallback(toggle);
+                collapsedSummary.RegisterCallback(toggle);
+
+                if (isLatest)
+                    _autoExpandedRow = rowState;
+
+                rowState.ApplyExpanded(_expandAllByDefault || isLatest);
+            }
+            else
+            {
+                expandArrow.style.display = DisplayStyle.None;
             }
 
+            _rows.Add(rowState);
             _scrollView?.contentContainer.Add(card);
+            // The log is a ring buffer; mirror its bound instead of retaining evicted UI rows.
+            while (_rows.Count > _interactionLog.Capacity)
+            {
+                var oldest = _rows[0];
+                oldest.ReleaseDetails?.Invoke();
+                oldest.Card.RemoveFromHierarchy();
+                if (_autoExpandedRow == oldest)
+                    _autoExpandedRow = null;
+                _rows.RemoveAt(0);
+            }
+        }
+
+        private static Label CreateCollapsedSummaryLabel(string resultSummary)
+        {
+            var text = string.IsNullOrEmpty(resultSummary) ? "" : resultSummary.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+            var label = new Label(text);
+            label.name = "recent-activity-summary";
+            label.enableRichText = false;
+            label.style.fontSize = 10;
+            label.style.color = new Color(0.55f, 0.55f, 0.55f);
+            label.style.marginTop = 2;
+            label.style.whiteSpace = WhiteSpace.NoWrap;
+            label.style.overflow = Overflow.Hidden;
+            label.style.textOverflow = TextOverflow.Ellipsis;
+            // No manual char cap and no explicit width: the label relies on the default
+            // stretch-to-parent cross-axis sizing (same as topRow) so it tracks the card's
+            // actual width on every relayout, growing back on widen as well as shrinking on
+            // narrow. minWidth=0 stops the NoWrap text's intrinsic width from acting as a
+            // lower bound that would otherwise fight that resize in one direction.
+            label.style.minWidth = 0;
+            return label;
         }
 
         private static VisualElement CreateStructuredResult(string displayResult)
@@ -502,24 +679,23 @@ namespace Funplay.Editor.MCP.Server
             }
         }
 
-        private bool TryCreateImagePreview(string imageDataUri, out Image preview)
+        private static bool TryCreateImagePreview(string imageDataUri, out Image preview)
         {
             preview = null;
             const string prefix = "data:image/png;base64,";
             if (string.IsNullOrEmpty(imageDataUri) || !imageDataUri.StartsWith(prefix, StringComparison.Ordinal))
                 return false;
 
+            Texture2D texture = null;
             try
             {
                 var bytes = Convert.FromBase64String(imageDataUri.Substring(prefix.Length));
-                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 if (!texture.LoadImage(bytes))
                 {
                     UnityEngine.Object.DestroyImmediate(texture);
                     return false;
                 }
-
-                _previewTextures.Add(texture);
 
                 preview = new Image
                 {
@@ -537,19 +713,20 @@ namespace Funplay.Editor.MCP.Server
             }
             catch
             {
+                if (texture != null)
+                    UnityEngine.Object.DestroyImmediate(texture);
                 return false;
             }
         }
 
-        private void ClearPreviewTextures()
+        private void ClearRows()
         {
-            foreach (var texture in _previewTextures)
-            {
-                if (texture != null)
-                    UnityEngine.Object.DestroyImmediate(texture);
-            }
-
-            _previewTextures.Clear();
+            _generation++;
+            foreach (var row in _rows)
+                row.ReleaseDetails?.Invoke();
+            _rows.Clear();
+            _autoExpandedRow = null;
+            _scrollView?.contentContainer.Clear();
         }
     }
 }

@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+- **Funplay > MCP Settings > Recent Activity** now includes a per-project **Expand all entries by default** preference. It is enabled by default for new and previously unconfigured projects, persists across Editor reloads (including an explicit off choice), and updates the open panel immediately without restarting MCP. Manually expanded or collapsed rows retain their state until the panel is reopened.
+
+### Changed
+- The MCP Server window's Recent Activity panel supports collapsing entries to one-line summaries by clicking their headers, and reopening them from either the header or summary. With **Expand all entries by default** disabled, history is collapsed and only the latest result expands automatically; manually expanded or collapsed rows keep their state as new entries arrive. Summaries resize with the panel's available width in both directions, and hovering either the header or summary consistently shows the same formatted, multi-line detail text.
+
+- Collapsed summaries use the human-readable formatted result instead of raw JSON and retain text beyond the compact resource summary's 200-character limit, while keeping the existing 4,000-character display bound. Plain-text results use that same display budget.
+- Detail controls and screenshot textures are created only when a row expands and released when it collapses, is cleared, or is evicted. The panel mirrors the activity log's bounded capacity, and queued callbacks cannot resurrect cleared rows or duplicate rows after a rebuild.
+
+### Pull requests and issues
+- [PR #57](https://github.com/FunplayAI/funplay-unity-mcp/pull/57): collapsible Recent Activity, with a persistent expand-all preference, readable summaries, lazy detail loading, resource cleanup, and Editor UI regression tests.
+- No GitHub issues were closed by these changes.
+
+### Contributors
+- Thanks [@dehuaichendragonplus](https://github.com/dehuaichendragonplus) for PR #57.
+
 ## [0.6.6] - 2026-09-07
 
 ### Added

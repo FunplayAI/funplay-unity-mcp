@@ -23,6 +23,7 @@ namespace Funplay.Editor
                 Assert.IsTrue(controller.ExecuteCodeStrictFilesystemSafetyEnabled);
                 Assert.IsFalse(controller.ExecuteCodeProjectNamespaceInjectionEnabled);
                 Assert.IsFalse(controller.PluginDebugLoggingEnabled);
+                Assert.IsTrue(controller.MCPRecentActivityExpandedByDefault);
                 Assert.IsFalse(controller.MCPBrokerModeEnabled);
                 Assert.AreEqual(string.Empty, controller.MCPBrokerMonoPath);
                 StringAssert.Contains("\"executeCodeSafetyChecksEnabled\": true", ReadSettingsJson(projectPath));
@@ -33,6 +34,8 @@ namespace Funplay.Editor
                 StringAssert.Contains("\"executeCodeProjectNamespaceInjectionConfigured\": true", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"pluginDebugLoggingEnabled\": false", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"pluginDebugLoggingConfigured\": true", ReadSettingsJson(projectPath));
+                StringAssert.Contains("\"mcpRecentActivityExpandedByDefault\": true", ReadSettingsJson(projectPath));
+                StringAssert.Contains("\"mcpRecentActivityExpansionConfigured\": true", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"mcpBrokerModeEnabled\": false", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"mcpBrokerMonoPath\": \"\"", ReadSettingsJson(projectPath));
             }
@@ -61,6 +64,7 @@ namespace Funplay.Editor
                 Assert.IsTrue(controller.ExecuteCodeStrictFilesystemSafetyEnabled);
                 Assert.IsFalse(controller.ExecuteCodeProjectNamespaceInjectionEnabled);
                 Assert.IsFalse(controller.PluginDebugLoggingEnabled);
+                Assert.IsTrue(controller.MCPRecentActivityExpandedByDefault);
                 Assert.IsFalse(controller.MCPBrokerModeEnabled);
                 Assert.AreEqual(string.Empty, controller.MCPBrokerMonoPath);
                 StringAssert.Contains("\"executeCodeSafetyChecksEnabled\": true", ReadSettingsJson(projectPath));
@@ -71,6 +75,8 @@ namespace Funplay.Editor
                 StringAssert.Contains("\"executeCodeProjectNamespaceInjectionConfigured\": true", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"pluginDebugLoggingEnabled\": false", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"pluginDebugLoggingConfigured\": true", ReadSettingsJson(projectPath));
+                StringAssert.Contains("\"mcpRecentActivityExpandedByDefault\": true", ReadSettingsJson(projectPath));
+                StringAssert.Contains("\"mcpRecentActivityExpansionConfigured\": true", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"mcpBrokerModeEnabled\": false", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"mcpBrokerMonoPath\": \"\"", ReadSettingsJson(projectPath));
             }
@@ -161,6 +167,43 @@ namespace Funplay.Editor
                 Assert.IsTrue(reloaded.PluginDebugLoggingEnabled);
                 StringAssert.Contains("\"pluginDebugLoggingEnabled\": true", ReadSettingsJson(projectPath));
                 StringAssert.Contains("\"pluginDebugLoggingConfigured\": true", ReadSettingsJson(projectPath));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectPath);
+            }
+        }
+
+        [Test]
+        public void RecentActivityExpansion_PersistsBothValuesAndNotifiesOnlyOnChanges()
+        {
+            var projectPath = CreateTempProjectPath();
+            try
+            {
+                var paths = new TestApplicationPaths(projectPath);
+                var controller = new SettingsController(paths);
+                controller.MCPRecentActivityExpandedByDefault = false;
+                controller.MCPServerEnabled = true;
+                controller.MCPServerPort = 14321;
+                var notifications = 0;
+                controller.OnSettingsChanged += () => notifications++;
+
+                controller.MCPRecentActivityExpandedByDefault = false;
+                Assert.AreEqual(0, notifications);
+                controller.MCPRecentActivityExpandedByDefault = true;
+                controller.MCPRecentActivityExpandedByDefault = true;
+                Assert.AreEqual(1, notifications);
+                var reloaded = new SettingsController(paths);
+                Assert.IsTrue(reloaded.MCPRecentActivityExpandedByDefault);
+                StringAssert.Contains("\"mcpRecentActivityExpandedByDefault\": true", ReadSettingsJson(projectPath));
+
+                reloaded.MCPRecentActivityExpandedByDefault = false;
+                var reloadedAgain = new SettingsController(paths);
+                Assert.IsFalse(reloadedAgain.MCPRecentActivityExpandedByDefault);
+                Assert.IsTrue(reloadedAgain.MCPServerEnabled);
+                Assert.AreEqual(14321, reloadedAgain.MCPServerPort);
+                Assert.IsTrue(reloadedAgain.MCPServerPortConfigured);
+                StringAssert.Contains("\"mcpRecentActivityExpandedByDefault\": false", ReadSettingsJson(projectPath));
             }
             finally
             {
