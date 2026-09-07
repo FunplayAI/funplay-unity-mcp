@@ -273,6 +273,25 @@ url = "http://127.0.0.1:<port>/"
 </details>
 
 <details>
+<summary>Antigravity</summary>
+
+写入全局 `~/.gemini/config/mcp_config.json`。Antigravity 的远程服务器配置把端点字段命名为 `serverUrl`（写成 `url` 会被忽略）；其 language server 用 MCP streamable-HTTP transport 连接该端点，正是本 server 使用的协议。配置后重启 Antigravity，可在 **Additional Options (...) > MCP Servers** 中查看。
+
+Project Skills 会把 `SKILL.md` 写入仓库根目录的 `.agents/skills/`（Antigravity 从会话工作目录向上查找 `.agents/`），并与其他 agent 客户端共用 `AGENTS.md` 托管块（Antigravity 原生读取该文件）。
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "serverUrl": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 除非你本地 Windsurf 版本要求不同的 MCP 配置格式，否则可直接使用与 Cursor 相同的 JSON 结构。
@@ -324,7 +343,7 @@ url = "http://127.0.0.1:<port>/"
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
 - **输入模拟 + 截图验证** — 在 Play Mode 中模拟键盘/鼠标，再用 Game View / Scene View 截图验证结果
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
-- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness 等客户端生成 MCP 配置
+- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness、Antigravity 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
 - **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含内置的 `unity-mcp-workflow` 与 `unity-ui-composition` 指引
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志

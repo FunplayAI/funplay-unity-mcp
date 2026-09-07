@@ -566,8 +566,9 @@ namespace Funplay.Editor.Tests
         }
 
         /// <summary>
-        /// The AGENTS.md wording gained the DeepSeek Harness bullet when DSH joined the shared block;
-        /// files generated with the previous (Codex + OpenCode) wording must still migrate.
+        /// The AGENTS.md wording gains a bullet every time another client joins the shared block, and
+        /// each older rendering must stay recognizable or files carrying it stop migrating. Newest
+        /// first: current (with Antigravity), pre-Antigravity, pre-DSH.
         /// </summary>
         [Test]
         public void LegacyVariants_StillRecognizeThePreDshWording()
@@ -576,20 +577,105 @@ namespace Funplay.Editor.Tests
 
             try
             {
-                var manifest = CreateManifest("codex", "opencode", "dsh");
+                var manifest = CreateManifest("codex", "opencode", "dsh", "antigravity");
                 var variants = BuildLegacyCodexContentVariants(projectRoot, manifest);
 
-                Assert.GreaterOrEqual(variants.Length, 3, "The pre-DSH wording must still be accepted.");
-                var preDsh = variants[1];
-                StringAssert.Contains("`.opencode/skills/`", preDsh);
-                StringAssert.DoesNotContain("DeepSeek Harness", preDsh);
+                Assert.GreaterOrEqual(variants.Length, 4, "The pre-DSH wording must still be accepted.");
 
                 var current = variants[0];
                 StringAssert.Contains("`.dsh/skills/`", current);
+                StringAssert.Contains("`.agents/skills/`", current);
+
+                var preAntigravity = variants[1];
+                StringAssert.Contains("`.dsh/skills/`", preAntigravity);
+                StringAssert.DoesNotContain("Antigravity", preAntigravity);
+
+                var preDsh = variants[2];
+                StringAssert.Contains("`.opencode/skills/`", preDsh);
+                StringAssert.DoesNotContain("DeepSeek Harness", preDsh);
             }
             finally
             {
                 DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        /// <summary>
+        /// Antigravity discovers workspace customizations by walking from the session's working
+        /// directory up to the repository root, so <c>.agents/skills</c> must land at the git root --
+        /// in a monorepo (git root above the Unity project folder) a copy inside the Unity folder is
+        /// only visible to sessions started at or below it. Same reasoning as the DSH case above.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_WritesAntigravitySkillsToTheGitRootAgentsDirectory()
+        {
+            var tempRoot = CreateTempProjectPath();
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+            var unityProject = Path.Combine(repoRoot, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(unityProject, new[] { "antigravity" }, Array.Empty<string>());
+
+                var expected = Path.Combine(
+                    repoRoot, ".agents", "skills", "funplay-unity-mcp-workflow", "SKILL.md");
+                Assert.IsTrue(File.Exists(expected), expected);
+                AssertStandardSkillFrontmatter(expected);
+
+                Assert.IsFalse(Directory.Exists(Path.Combine(unityProject, ".agents")),
+                    "Skills belong at the git root Antigravity walks up to, not the Unity project folder.");
+
+                StringAssert.Contains(
+                    ProjectSkillsManager.ManagedEndMarker,
+                    File.ReadAllText(ProjectSkillsManager.GetCodexAgentsPath(unityProject)),
+                    "Antigravity reads AGENTS.md natively and shares the block with the other agent platforms.");
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        /// <summary>
+        /// Antigravity shares AGENTS.md with Codex/OpenCode/DSH: the block stays while any of them is
+        /// enabled, while its own skill directory follows only its own toggle.
+        /// </summary>
+        [Test]
+        public void ApplyConfiguration_AntigravitySharesTheAgentsBlockAndTracksItsOwnSkillDirectory()
+        {
+            var tempRoot = CreateTempProjectPath();
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+            try
+            {
+                var agentsPath = ProjectSkillsManager.GetCodexAgentsPath(repoRoot);
+                var antigravitySkill = Path.Combine(
+                    ProjectSkillsManager.GetAntigravitySkillsRoot(repoRoot),
+                    "funplay-unity-mcp-workflow",
+                    "SKILL.md");
+                var codexSkill = GetCodexWorkflowSkillPath(repoRoot);
+
+                ProjectSkillsManager.ApplyConfiguration(
+                    repoRoot, new[] { "codex", "antigravity" }, Array.Empty<string>());
+                Assert.IsTrue(File.Exists(agentsPath));
+                Assert.IsTrue(File.Exists(antigravitySkill));
+                Assert.IsTrue(File.Exists(codexSkill));
+
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, new[] { "antigravity" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
+                Assert.IsFalse(File.Exists(codexSkill));
+                Assert.IsTrue(File.Exists(antigravitySkill));
+
+                ProjectSkillsManager.ApplyConfiguration(repoRoot, Array.Empty<string>(), Array.Empty<string>());
+                Assert.IsFalse(File.Exists(agentsPath));
+                Assert.IsFalse(File.Exists(antigravitySkill));
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
             }
         }
 

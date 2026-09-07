@@ -108,7 +108,7 @@ namespace Funplay.Editor.MCP.Server
 
             var skillsHint = new Label(skillsSupported
                 ? "Configure + Skills also installs the project MCP workflow skill."
-                : "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness.");
+                : "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, DeepSeek Harness, and Antigravity.");
             skillsHint.style.fontSize = 10;
             skillsHint.style.color = new Color(0.6f, 0.6f, 0.6f);
             skillsHint.style.marginBottom = 4;
@@ -473,6 +473,15 @@ namespace Funplay.Editor.MCP.Server
                     ConfigPath = FunplayDeepSeekHarnessPatch.GetDisplayPath(homePath),
                     IsDeepSeekHarness = true,
                 },
+                new MCPConfigTarget
+                {
+                    Name = "Antigravity",
+                    ConfigPath = GetAntigravityConfigPath(homePath),
+                    UrlFieldName = "serverUrl",
+                    ActivationHint =
+                        "Restart Antigravity for it to take effect. " +
+                        "Its active servers are listed under Additional Options (...) > MCP Servers.",
+                },
             };
         }
 
@@ -516,7 +525,7 @@ namespace Funplay.Editor.MCP.Server
                     EditorUtility.DisplayDialog(
                         "MCP Configuration",
                         configSummary + "\n\n" +
-                        "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness.",
+                        "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, DeepSeek Harness, and Antigravity.",
                         "OK");
 
                     _rebuildWindow?.Invoke();
@@ -1518,7 +1527,7 @@ namespace Funplay.Editor.MCP.Server
         {
             var entry = new Dictionary<string, object>
             {
-                ["url"] = GetServerUrl()
+                [string.IsNullOrEmpty(target.UrlFieldName) ? "url" : target.UrlFieldName] = GetServerUrl()
             };
 
             if (target.IncludeTypeField)
@@ -1749,6 +1758,22 @@ namespace Funplay.Editor.MCP.Server
             return Path.Combine(GetProjectScopeKeyPath(), ".opencode", "opencode.json");
         }
 
+        /// <summary>
+        /// Antigravity keeps its MCP servers in <c>~/.gemini/config/mcp_config.json</c> -- one global
+        /// map of server id to spec, plus per-plugin <c>plugins/&lt;name&gt;/mcp_config.json</c> files
+        /// that only load with their plugin, which is not a place a Unity plugin should be writing to.
+        /// The remote spec carries a single <c>serverUrl</c>; Antigravity's own documentation calls
+        /// that "SSE transport", but the language server has exactly two connectors --
+        /// <c>LocalSubprocessConnector</c> for <c>command</c> and <c>StreamableHTTPConnector</c> for
+        /// <c>serverUrl</c> -- so a streamable-HTTP endpoint like this one is what it actually speaks.
+        /// There is no project-scoping concept here, so like Cursor/VS Code/Trae/Kiro the entry is
+        /// global and stays distinguishable only by its per-project name.
+        /// </summary>
+        private static string GetAntigravityConfigPath(string homePath)
+        {
+            return Path.Combine(homePath, ".gemini", "config", "mcp_config.json");
+        }
+
         private static string GetUserHomePath()
         {
             var homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -1875,6 +1900,14 @@ namespace Funplay.Editor.MCP.Server
             /// Empty means "http" (the Claude Code / VS Code shape); OpenCode uses "remote".
             /// </summary>
             public string TypeFieldValue;
+
+            /// <summary>
+            /// Key the endpoint is written under inside the entry. Empty means <c>url</c>, which is
+            /// what every client here uses except Antigravity: its <c>McpServerSpec</c> names the
+            /// remote endpoint <c>serverUrl</c> and ignores an entry carrying neither that nor
+            /// <c>command</c>.
+            /// </summary>
+            public string UrlFieldName;
 
             /// <summary>
             /// True for OpenCode, whose documented remote-server example spells the flag out

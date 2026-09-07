@@ -33,7 +33,7 @@ namespace Funplay.Editor.MCP.Server
         private const string CodexManagedNotice = "This section is managed by Funplay MCP for Unity. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
         private const string ClaudeManagedNotice = "This section is managed by Funplay MCP for Unity for Claude Code. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
 
-        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor", "opencode", "dsh" };
+        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor", "opencode", "dsh", "antigravity" };
 
         private static readonly SkillDefinition[] SkillCatalog =
         {
@@ -139,6 +139,8 @@ namespace Funplay.Editor.MCP.Server
                     return "cursor";
                 case "deepseek harness":
                     return "dsh";
+                case "antigravity":
+                    return "antigravity";
                 default:
                     return null;
             }
@@ -237,6 +239,21 @@ namespace Funplay.Editor.MCP.Server
             return Path.Combine(FunplayMCPClientConfigPanel.FindGitRootOrSelf(projectRoot), ".dsh", "skills");
         }
 
+        /// <summary>
+        /// Antigravity discovers workspace customizations in a <c>.agents/</c> directory (it also
+        /// accepts <c>.agent</c>, <c>_agents</c> and <c>_agent</c>; the documented primary spelling is
+        /// used here) and reads skills from <c>.agents/skills/&lt;name&gt;/SKILL.md</c>. It finds that
+        /// directory by walking from the session's working directory up to the repository root, so --
+        /// exactly like DeepSeek Harness -- the skills are written at the discovered git root: in a
+        /// monorepo layout (git root above the Unity project folder) a <c>.agents</c> inside the Unity
+        /// folder would only ever be seen by a session started at or below it, while one at the repo
+        /// root is reachable from anywhere inside the repo.
+        /// </summary>
+        internal static string GetAntigravitySkillsRoot(string projectRoot)
+        {
+            return Path.Combine(FunplayMCPClientConfigPanel.FindGitRootOrSelf(projectRoot), ".agents", "skills");
+        }
+
         internal static void ApplyConfiguration(string projectRoot, IEnumerable<string> selectedPlatforms, IEnumerable<string> selectedOptionalSkills)
         {
             var manifest = new ProjectSkillsManifest
@@ -254,6 +271,7 @@ namespace Funplay.Editor.MCP.Server
             SyncCursor(projectRoot, normalized);
             SyncOpenCode(projectRoot, normalized);
             SyncDsh(projectRoot, normalized);
+            SyncAntigravity(projectRoot, normalized);
         }
 
         internal static bool IsPlatformConfigured(string projectRoot, string platformId)
@@ -363,21 +381,26 @@ namespace Funplay.Editor.MCP.Server
                     paths.Add(GetCodexAgentsPath(projectRoot));
                     paths.Add(GetDshSkillsRoot(projectRoot));
                     break;
+                case "antigravity":
+                    paths.Add(GetCodexAgentsPath(projectRoot));
+                    paths.Add(GetAntigravitySkillsRoot(projectRoot));
+                    break;
             }
 
             return paths;
         }
 
-        // AGENTS.md is shared by Codex, OpenCode and DeepSeek Harness (all three read it natively),
-        // so the single managed block is written while ANY of them is enabled and removed only when
-        // ALL are disabled. Splitting it per platform would need two blocks in one file, which
-        // WriteManagedBlock's single begin..end marker model cannot represent.
+        // AGENTS.md is shared by Codex, OpenCode, DeepSeek Harness and Antigravity (all four read it
+        // natively), so the single managed block is written while ANY of them is enabled and removed
+        // only when ALL are disabled. Splitting it per platform would need two blocks in one file,
+        // which WriteManagedBlock's single begin..end marker model cannot represent.
         private static void SyncAgentsInstructions(string projectRoot, ProjectSkillsManifest manifest)
         {
             var enabled =
                 manifest.platforms.Contains("codex", StringComparer.OrdinalIgnoreCase) ||
                 manifest.platforms.Contains("opencode", StringComparer.OrdinalIgnoreCase) ||
-                manifest.platforms.Contains("dsh", StringComparer.OrdinalIgnoreCase);
+                manifest.platforms.Contains("dsh", StringComparer.OrdinalIgnoreCase) ||
+                manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
             var agentsPath = GetCodexAgentsPath(projectRoot);
 
             if (!enabled)
@@ -477,6 +500,21 @@ namespace Funplay.Editor.MCP.Server
 
             Directory.CreateDirectory(skillsRoot);
             WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.Dsh);
+        }
+
+        private static void SyncAntigravity(string projectRoot, ProjectSkillsManifest manifest)
+        {
+            var enabled = manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
+            var skillsRoot = GetAntigravitySkillsRoot(projectRoot);
+
+            if (!enabled)
+            {
+                DeleteManagedSkillDirectories(skillsRoot);
+                return;
+            }
+
+            Directory.CreateDirectory(skillsRoot);
+            WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.Antigravity);
         }
 
         private static void WriteManagedSkillDirectories(string skillsRoot, ProjectSkillsManifest manifest, SkillPlatform platform)
@@ -772,6 +810,17 @@ namespace Funplay.Editor.MCP.Server
                             BuildSkillVersionMarker(skill)));
                     }
                     break;
+                case "antigravity":
+                    AddProjectVersionFile(result, GetCodexAgentsPath(projectRoot), skills);
+                    foreach (var skill in skills)
+                    {
+                        result.Add(new ExpectedSkillVersionFile(
+                            Path.Combine(GetAntigravitySkillsRoot(projectRoot), $"funplay-{skill.Id}", "SKILL.md"),
+                            skill.Id,
+                            skill.Version,
+                            BuildSkillVersionMarker(skill)));
+                    }
+                    break;
             }
 
             return result;
@@ -911,7 +960,7 @@ namespace Funplay.Editor.MCP.Server
             return content.Substring(start, end - start).Trim();
         }
 
-        // Shared by Codex and OpenCode (both read AGENTS.md); see SyncAgentsInstructions.
+        // Shared by every AGENTS.md-reading client; see SyncAgentsInstructions.
         private static string BuildAgentsManagedBlock(string projectRoot, ProjectSkillsManifest manifest)
         {
             var installed = GetInstalledSkills(manifest);
@@ -929,7 +978,7 @@ $@"{ManagedMarker}
 
 ## Agent workflow rules
 
-- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness.
+- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness, `.agents/skills/` for Antigravity.
 - Use `execute_code` as the primary Unity automation tool. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo automatically.
 - Confirm the Unity project root, active scene, and real object/prefab/asset path before edits. Treat user-provided object names as hints, not paths.
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
@@ -1024,9 +1073,16 @@ $@"{ManagedMarker}
         {
             var current = BuildLegacyCodexAgentsContent(projectRoot, manifest);
 
+            // Pre-Antigravity: the skills bullet named Codex, OpenCode and DSH before Antigravity
+            // joined the shared AGENTS.md block.
+            var preAntigravity = current
+                .Replace(
+                    "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness, `.agents/skills/` for Antigravity.",
+                    "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness.");
+
             // Pre-DSH: the block named Codex and OpenCode before DeepSeek Harness joined the shared
             // AGENTS.md block. Files on disk still carrying this wording must keep migrating.
-            var preDsh = current
+            var preDsh = preAntigravity
                 .Replace(
                     "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness.",
                     "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.");
@@ -1038,7 +1094,7 @@ $@"{ManagedMarker}
                     "- Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode.",
                     "- Prefer project-local Funplay skills under `.codex/skills/`.");
 
-            return new[] { current, preDsh, codexOnly };
+            return new[] { current, preAntigravity, preDsh, codexOnly };
         }
 
         private static string BuildLegacyClaudeInstructionsContent(string projectRoot, ProjectSkillsManifest manifest)
@@ -1675,7 +1731,8 @@ $@"
             Claude,
             Cursor,
             OpenCode,
-            Dsh
+            Dsh,
+            Antigravity
         }
 
         [Serializable]

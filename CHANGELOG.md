@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **Antigravity** is now a one-click client-config target. Its entry is written to the global `~/.gemini/config/mcp_config.json` (`{"mcpServers": {"funplay-<project>": {"serverUrl": ...}}}`), the only location a Unity plugin can reasonably own -- the alternative, `plugins/<name>/mcp_config.json`, loads only with its plugin. The endpoint key is `serverUrl`, not the `url` every other JSON client here uses: Antigravity's `McpServerSpec` has no `url` field, so an entry written in the usual shape would sit in the config connecting to nothing. Its documentation labels that field "SSE transport", but the shipped language server registers exactly two connectors -- `LocalSubprocessConnector` for `command` and `StreamableHTTPConnector` for `serverUrl` -- so the streamable-HTTP endpoint this server exposes is what it actually speaks. Like Cursor/VS Code/Trae/Kiro, Antigravity has no project-scoping concept in its config, so the entry is global and stays distinguishable only by its per-project name. Antigravity is also a Project Skills platform: `SKILL.md` bundles are written to `.agents/skills/` at the **repository root** -- its customization discovery walks from the session's working directory up to the repo root, so in a monorepo layout (git root above the Unity project folder) a `.agents` inside the Unity folder would only be found by a session started at or below it, the same trap the DeepSeek Harness `.dsh/skills` placement avoids. It reads `AGENTS.md` natively, so it joins Codex/OpenCode/DSH on the single shared managed block (written while any of them is enabled, removed only when all are disabled); the block's skills bullet gained the `.agents/skills/` entry, with the previous wording kept in the legacy-migration variant list so files already on disk keep migrating instead of erroring.
+
 ## [0.6.5] - 2026-09-03
 
 ### Added

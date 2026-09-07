@@ -273,6 +273,25 @@ Written as a delimited managed block into every DeepSeek Harness profile's `~/.d
 </details>
 
 <details>
+<summary>Antigravity</summary>
+
+Written to the global `~/.gemini/config/mcp_config.json`. Antigravity's remote-server spec names the endpoint `serverUrl` (a plain `url` key is ignored); its language server connects that with the MCP streamable-HTTP transport, which is what this server speaks. Restart Antigravity afterwards, then check **Additional Options (...) > MCP Servers**.
+
+Project Skills write `SKILL.md` bundles to `.agents/skills/` at the repository root (Antigravity walks up from the session's working directory to find `.agents/`), and Antigravity reads the shared `AGENTS.md` managed block natively.
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "serverUrl": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 Use the same JSON structure as Cursor unless your local Windsurf version requires a different MCP config format.
@@ -322,7 +341,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
 - **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
-- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, and similar clients directly from the Unity window
+- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, Antigravity, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
 - **Project Skills Manager** — Configure project-level skills for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - **MCP Settings** — Adjust `execute_code` safety defaults and enable verbose plugin debug logging when troubleshooting MCP connections or tool execution
