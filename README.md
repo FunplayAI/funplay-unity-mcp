@@ -23,7 +23,7 @@
 
 Funplay MCP for Unity is an MIT-licensed Unity Editor MCP server that lets AI assistants like Claude Code, Cursor, Kimi Code, LM Studio, Windsurf, Codex, and VS Code Copilot operate directly inside your running Unity project.
 
-Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's 156 built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
+Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's 157 built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
 
 > *"Build a snake game with a 10x10 grid, food spawning, score UI, and game-over screen"*
 >
@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.5"
+    "com.gamebooom.unity.mcp": "0.6.6"
   }
 }
 ```
@@ -273,6 +273,27 @@ Written as a delimited managed block into every DeepSeek Harness profile's `~/.d
 </details>
 
 <details>
+<summary>Antigravity</summary>
+
+Written to the workspace-local `.agents/mcp_config.json` with `mcpServers` entries using `serverUrl` for Funplay's Streamable HTTP endpoint. This keeps the server out of unrelated workspaces. Use a current Antigravity version supporting [workspace MCP configuration](https://antigravity.google/docs/mcp/), then reload its MCP servers.
+
+The workspace root is the nearest ancestor containing `.git` (including a worktree's `.git` file), or the Unity project directory when it is outside Git. Open that directory as the Antigravity workspace. **Configure + Skills** places `.agents/mcp_config.json`, `.agents/skills/`, and the managed `AGENTS.md` block at this same root, including when the Unity project is nested inside a repository. Other clients retain their existing instruction locations and share the block when paths coincide.
+
+Existing Funplay entries in `~/.gemini/config/mcp_config.json` or the older `~/.gemini/antigravity/mcp_config.json` are reported in the panel and left unchanged. Review them after configuring each workspace; the one-click action does not fall back to global configuration. Multiple Unity projects in the same repository share a workspace: their MCP entries remain separately named, while Project Skills refuses to replace another project's managed workspace guidance.
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "serverUrl": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 Use the same JSON structure as Cursor unless your local Windsurf version requires a different MCP config format.
@@ -298,7 +319,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - This package is **Editor-only**. It does not add runtime components to your built game.
 - The MCP server port is derived per project (range 20000-29999) for new projects, or pinned — projects upgraded from an earlier version keep their existing port as a pin, and any port you type is a pin. The MCP Server window shows where the port came from and the active URL. A project's client-config entry is named after the project directory (for example `funplay-love-town`), so configuring several projects no longer overwrites one shared `funplay` entry. Two projects that share a product name would resolve to the same entry name; the second one configured appends a project hash automatically, so nothing is overwritten and no setting has to be turned on.
 - Local MCP server settings are stored in `UserSettings/FunplayMcpSettings.json`.
-- The package defaults to the `core` MCP tool profile to reduce tool-list noise for AI clients. `core` currently exposes 34 high-signal tools centered on `execute_code`, play mode control, input simulation, screenshots, performance inspection, logs, compilation checks, structured object and component editing, field-level prefab asset editing, editor selection / prefab-stage state, and `execute_menu_item` as a low-friction fallback. Switch to `full` in the MCP Server window if you want all 156 tools exposed.
+- The package defaults to the `core` MCP tool profile to reduce tool-list noise for AI clients. `core` currently exposes 35 high-signal tools centered on `execute_code`, play mode control, input simulation, screenshots, performance inspection, logs, compilation checks, structured object and component editing, field-level prefab asset editing, editor selection / prefab-stage state, and `execute_menu_item` as a low-friction fallback. Switch to `full` in the MCP Server window if you want all 157 tools exposed.
 - `execute_code` safety checks and the stricter filesystem guard are enabled by default from **Funplay > MCP Settings**. The guard blocks obvious destructive snippets, broad `System.IO` writes, raw file streams, and absolute/user/system/traversal paths, but it is not a complete sandbox. Clients may still override the default per call with the optional `safety_checks` argument.
 - Plugin debug logging is off by default and can also be enabled from **Funplay > MCP Settings**. Warnings and errors are always written to the Unity Console.
 - All exposed MCP tools run directly. There is no extra approval toggle.
@@ -310,19 +331,19 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Default Safety Checks** — `execute_code` now has persistent default-on safety toggles, including a stricter filesystem guard for clients that do not expose per-call arguments clearly
 - **Play Mode Automation** — Enter play mode, simulate keyboard/mouse input, capture screenshots, inspect logs, and validate behavior from the same MCP session
 - **Project Context Built In** — Exposes live resources for project state, active scene, selection, compilation, console output, and MCP interaction history
-- **Focused by Default, Full When Needed** — `core` exposes a compact high-signal toolset; `full` exposes all 156 tools
+- **Focused by Default, Full When Needed** — `core` exposes a compact high-signal toolset; `full` exposes all 157 tools
 - **Single Unity Package** — No extra approval UI, no external daemon to click through, and no Python requirement for the Unity-side plugin itself
 - **Extensible** — Add custom tools with attribute-based discovery, or connect Unity to external MCP services when needed
 
 ## Highlights
 
-- **156 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 35 modules
+- **157 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 36 modules
 - **Structured Returns + `instanceId` Chaining** — Tools return `{success, message, data}` JSON with stable `instanceId` fields so agents can chain `by_id` calls reliably instead of re-resolving by name
 - **`IFunplayCommand` for `execute_code`** — New snippet template with auto-Undo (`ctx.RegisterObjectCreation/Modification/DestroyObject`), structured logs (`ctx.Log/LogWarning/LogError`), and a tracked changelog returned to the agent
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
 - **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
-- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, and similar clients directly from the Unity window
+- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, Antigravity, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
 - **Project Skills Manager** — Configure project-level skills for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - **MCP Settings** — Adjust `execute_code` safety defaults and enable verbose plugin debug logging when troubleshooting MCP connections or tool execution
@@ -386,7 +407,7 @@ The table below compares this repository with Unity Technologies' official `com.
 | License | MIT, open source | Unity Terms of Service, proprietary |
 | Deployment | Local HTTP MCP server in Editor, no cloud | Editor + native Relay subprocess + Unity Cloud backend |
 | Billing | Free, user brings their own AI client | Credits-based (Unity Dashboard) |
-| Tool exposure | 156 tools across 35 modules, `core` (34) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
+| Tool exposure | 157 tools across 36 modules, `core` (35) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
 | Generic escape hatch | `execute_code` — Roslyn-first in-memory compile, `IFunplayCommand` + Undo, no sandbox (client-side approval) | `RunCommand` — namespace blacklist sandbox |
 | Play mode validation | Full loop: enter / simulate input / capture / read logs / exit | Enter/Exit only; no input simulation |
 | Asset generators | Not built-in (compose external APIs via `execute_code`) | Native Image / Mesh / PBR / Sound / Animation generators |
@@ -399,7 +420,7 @@ For a long-form comparison of the two approaches see [Funplay Unity MCP vs Unity
 
 The current open-source package exposes four high-value capability layers:
 
-- **Tools** — 156 total tools in `full`, 34 focused tools in `core`
+- **Tools** — 157 total tools in `full`, 35 focused tools in `core`
 - **Primary execution** — `execute_code` for rich editor/runtime orchestration
 - **Prompts** — parameterized workflow prompts: `edit_prefab_safely`, `verify_compilation`, `enter_play_and_recover`, `wire_serialized_references`, `create_playable_prototype`. Projects can add their own through `mcp-prompts/*.md` files in the project root.
 - **Resources** — project context, scene summaries, selection state, compile errors, console errors, MCP interaction history, plus resource templates for scene objects, components, and asset paths
@@ -421,7 +442,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Funplay MCP for Unity currently ships with **156 tool functions** across 35 modules:
+Funplay MCP for Unity currently ships with **157 tool functions** across 36 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -447,6 +468,7 @@ Funplay MCP for Unity currently ships with **156 tool functions** across 35 modu
 | **Animation** | `create_animation_clip`, `create_animator_controller`, `assign_animator`, `get_animator_state`, `set_animator_parameter`, `play_animator_state` |
 | **Camera** | `get_camera_properties`, `set_camera_projection`, `set_camera_settings`, `set_camera_culling_mask` |
 | **Screenshot** | `capture_game_view`, `capture_simulator_view`, `capture_scene_view`, `capture_multiview`, `capture_editor_window` |
+| **Video** | `record_game_view` |
 | **Script Execution** | `execute_code`, `get_execute_code_history`, `replay_execute_code`, `clear_execute_code_history` |
 | **Input Simulation** | `simulate_key_press`, `simulate_key_combo`, `simulate_mouse_click`, `simulate_mouse_drag` |
 | **Performance** | `get_performance_snapshot`, `analyze_scene_complexity` |
@@ -462,6 +484,20 @@ Funplay MCP for Unity currently ships with **156 tool functions** across 35 modu
 | **Visual Feedback** | `select_object`, `focus_on_object`, `ping_asset`, `log_message`, `show_dialog`, `get_console_logs` |
 
 > 📊 See [PROFILER_TOOLS.md](PROFILER_TOOLS.md) for the full Profiler tool reference, implementation notes, known limitations, and test report.
+
+### Recording Game View video
+
+Use `record_game_view` (included in `core`) to review UI animations, transitions, and multi-step interactions in a short **silent MP4**. It uses Unity's built-in [MediaEncoder](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Media.MediaEncoder.html); no Recorder package or external encoder is required.
+
+1. Enter Play Mode, wait for reload recovery, and open the Game tab so it renders.
+2. Call `record_game_view` with `{"action":"start","duration_seconds":10,"fps":15,"max_dimension":1280}`. Keep its `recording_id`.
+3. Perform the interactions while recording. Start returns immediately, and the duration limit stops recording automatically.
+4. Poll with `{"action":"status","recording_id":"<id>"}`. To end early, use `action:"stop"`, then poll until finalization finishes.
+5. When `ready:true`, read the returned `path` as a local video file. Video bytes are not embedded in the MCP response; remote clients need separate access to the Unity machine's files.
+
+Clips receive unique filenames under `<UnityProject>/Library/FunplayMcp/Recordings/` and are retained until you remove them. Start accepts 1–120 seconds, 1–60 target FPS, and a maximum dimension of 128–1920 pixels; it preserves the aspect ratio without upscaling and uses even encoding dimensions. State includes actual frame count, elapsed time, stop reason, file size, and errors. Pass the recording ID when polling/stopping to avoid accidentally controlling a newer clip.
+
+Currently supports graphics-enabled **macOS and Windows Editors in Play Mode**, with no audio track. It captures the rendered Game View, including overlay UI, without re-rendering scene cameras. Keep the Game tab rendering and do not resize it during capture: hiding/closing the tab or changing its render resolution stops recording with an error instead of silently capturing stale or stretched frames. Exiting Play Mode finalizes the clip; a script/domain reload finalizes it early and preserves an `interrupted` receipt in the editor session. Only consume a file with `ready:true`. Slow frames keep their real timestamps, but recording adds overhead: this is visual evidence, not frame-accurate performance profiling.
 
 ## Adding Custom Tools
 
@@ -493,7 +529,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (protocol handling)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (reflection-based invocation)
-                └─ Tool Functions (156 built-in tools across 35 modules)
+                └─ Tool Functions (157 built-in tools across 36 modules)
 ```
 
 ```

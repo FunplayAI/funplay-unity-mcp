@@ -5,6 +5,23 @@
 ### Changed
 - The MCP Server window's Recent Activity panel now renders each entry collapsed to a one-line summary by default, instead of always rendering the full structured result (or image preview) for every row. On a busy session the panel previously accumulated dozens of fully-expanded cards -- each with its own parsed JSON tree or embedded screenshot -- which made the window noticeably slower to lay out and repaint, and buried the one entry a user actually wanted to check under a wall of detail from unrelated calls. Clicking a row's header or its summary line expands it in place; the most recently added entry still expands automatically so the latest result is visible without an extra click, but any entry a user has manually expanded or collapsed keeps that state even as newer entries arrive afterward (only the automatic "latest entry" expansion is superseded). The summary line stretches to the panel's actual width on every relayout -- growing back on widen as well as shrinking on narrow -- instead of a fixed character count that left it either truncated well short of the available space or unable to grow into a wider window. Hovering a row (its header or its summary line) shows the same formatted, multi-line detail text the expanded view renders, by intercepting the tooltip during the trickle-down phase before Unity's own default per-Label ellipsis tooltip (which otherwise shows raw, unformatted text and could disagree with what the header showed) has a chance to supply it.
 
+## [0.6.6] - 2026-09-07
+
+### Added
+- `record_game_view` is a default-core tool for asynchronous, silent Game View MP4 recording on macOS and Windows Editors. Start a bounded recording, perform interactions, then poll status or stop early; the finalized local-file receipt includes the recording ID, dimensions, frame count, elapsed time, size, stop reason, and errors. Captures include overlay UI, preserve wall-clock frame timestamps, and use Unity's built-in encoder without a Recorder dependency. Exiting Play Mode or reloading scripts finalizes and releases recording resources, with the receipt retained across domain reloads.
+- **Antigravity** is now a one-click client-config and Project Skills target. Configuration uses the workspace-local `.agents/mcp_config.json` with `mcpServers` / `serverUrl`, following the [current Antigravity MCP format](https://antigravity.google/docs/mcp/). MCP config, `.agents/skills/`, and the managed `AGENTS.md` block share the nearest Git root (or Unity project directory outside Git). Existing global entries are reported without being rewritten, and configuration never silently falls back to global scope.
+
+### Fixed
+- Endpoint matching and rename cleanup use the target's endpoint key, including Antigravity's `serverUrl`, so reconfiguring a renamed project retires its recorded previous entry without deleting other servers.
+- Antigravity instruction paths and version checks agree with its workspace Skills location for nested Unity projects. Platform toggles preserve shared instructions and user-authored text; configuring another Unity project without Antigravity no longer deletes workspace Antigravity Skills. Another project's managed workspace guidance is protected from replacement.
+
+### Pull requests and issues
+- [PR #56](https://github.com/FunplayAI/funplay-unity-mcp/pull/56): Antigravity client configuration and Project Skills support, with workspace isolation and shared-instruction fixes.
+- No GitHub issues were closed by these changes.
+
+### Contributors
+- Thanks [@dehuaichendragonplus](https://github.com/dehuaichendragonplus) for PR #56.
+
 ## [0.6.5] - 2026-09-03
 
 ### Added

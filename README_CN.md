@@ -23,7 +23,7 @@
 
 Funplay MCP for Unity 是一个采用 MIT 协议的 Unity 编辑器 MCP 服务器，让 Claude Code、Cursor、Kimi Code、LM Studio、Windsurf、Codex、VS Code Copilot 等 AI 助手直接操作正在运行的 Unity 项目。
 
-一句话描述你的游戏 — AI 助手通过 Funplay MCP for Unity 的 156 个内置工具自动创建场景、编写脚本、验证运行态、模拟输入、分析性能并完成编辑器自动化，把所有逻辑串联起来。
+一句话描述你的游戏 — AI 助手通过 Funplay MCP for Unity 的 157 个内置工具自动创建场景、编写脚本、验证运行态、模拟输入、分析性能并完成编辑器自动化，把所有逻辑串联起来。
 
 > *"做一个贪吃蛇游戏，10x10 网格，食物随机生成，计分 UI，游戏结束界面"*
 >
@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.5"
+    "com.gamebooom.unity.mcp": "0.6.6"
   }
 }
 ```
@@ -273,6 +273,27 @@ url = "http://127.0.0.1:<port>/"
 </details>
 
 <details>
+<summary>Antigravity</summary>
+
+写入工作区级 `.agents/mcp_config.json`，在 `mcpServers` 中使用 `serverUrl` 指向 Funplay 的 Streamable HTTP 端点，使服务器配置仅在该工作区中生效。请使用支持[工作区 MCP 配置](https://antigravity.google/docs/mcp/)的当前 Antigravity 版本，配置后重新加载 MCP 服务器。
+
+工作区根目录取最近的包含 `.git` 的祖先目录（包括 worktree 的 `.git` 文件）；项目不在 Git 仓库中时使用 Unity 工程目录。请在 Antigravity 中打开该目录。**Configure + Skills** 会将 `.agents/mcp_config.json`、`.agents/skills/` 和 `AGENTS.md` 托管块放在同一根目录下，也适用于 Unity 工程嵌套在仓库中的情况。其他客户端沿用现有指引位置，路径相同时共用托管块。
+
+如果 `~/.gemini/config/mcp_config.json` 或旧版 `~/.gemini/antigravity/mcp_config.json` 中已有 Funplay 条目，面板会显示提示并保留原文件。完成各工作区配置后再检查这些全局条目；一键配置不会自动回退到全局配置。同一仓库中的多个 Unity 工程共用工作区，其 MCP 条目各自命名；Project Skills 遇到其他工程已有的工作区托管指引时会停止，避免覆盖工程身份。
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "serverUrl": "http://127.0.0.1:<port>/"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary>Windsurf</summary>
 
 除非你本地 Windsurf 版本要求不同的 MCP 配置格式，否则可直接使用与 Cursor 相同的 JSON 结构。
@@ -300,7 +321,7 @@ url = "http://127.0.0.1:<port>/"
 - 这是一个 **仅限 Editor** 的包，不会向最终构建产物添加运行时代码。
 - MCP Server 端口对**新工程**按工程派生（20000-29999 区间）；从旧版本升级的工程会保留原端口并记为 pin，手填的端口同样是 pin。MCP Server 窗口会显示端口来源与当前实际地址。客户端配置里的条目名按**工程目录名**命名（例如 `funplay-love-town`，只保留 ASCII 字母数字），多个工程不再互相覆盖同一个 `funplay` 条目。两个工程产品名相同时会解析出同一个条目名，此时后配置的那个会**自动追加工程哈希**，既不会覆盖对方，也不需要用户去开任何开关。
 - 本地 MCP Server 配置保存在 `UserSettings/FunplayMcpSettings.json`。
-- 插件默认使用 `core` MCP 工具暴露配置，减少 AI 客户端的工具噪音；`core` 当前暴露 34 个高频工具，覆盖 `execute_code`、运行模式控制、输入模拟、截图、性能检查、日志、编译检查、结构化对象与组件编辑、字段级 Prefab 资产编辑、编辑器选中与 prefab stage 状态读写，以及 `execute_menu_item` 兜底入口。如果你需要完整工具集，可在 MCP Server 窗口切换到 `full`，暴露全部 156 个工具。
+- 插件默认使用 `core` MCP 工具暴露配置，减少 AI 客户端的工具噪音；`core` 当前暴露 35 个高频工具，覆盖 `execute_code`、运行模式控制、输入模拟、截图、性能检查、日志、编译检查、结构化对象与组件编辑、字段级 Prefab 资产编辑、编辑器选中与 prefab stage 状态读写，以及 `execute_menu_item` 兜底入口。如果你需要完整工具集，可在 MCP Server 窗口切换到 `full`，暴露全部 157 个工具。
 - `execute_code` safety checks 和更严格的文件系统 guard 现在可在 **Funplay > MCP Settings** 设置默认值，默认开启；它会阻止明显破坏性片段、宽泛的 `System.IO` 写入、原始文件流、绝对路径、用户/系统目录路径和 `../` 穿越路径，但它不是完整沙箱。客户端仍可在单次调用中用可选 `safety_checks` 参数显式覆盖。
 - 插件 debug 日志默认关闭，也可在 **Funplay > MCP Settings** 中开启；Warning 和 Error 始终会输出到 Unity Console。
 - 所有已暴露的 MCP 工具都会直接执行，不再提供额外的 approval 开关。
@@ -312,19 +333,19 @@ url = "http://127.0.0.1:<port>/"
 - **默认安全检查** — `execute_code` 现在有持久化、默认开启的 safety toggle，并包含更严格的文件系统 guard，适合 LM Studio 这类不明显暴露单次参数的客户端
 - **Play Mode 自动化闭环** — 进入运行模式、模拟键鼠输入、截图、查看日志、验证行为都能在同一 MCP 会话里完成
 - **内建项目上下文** — 直接提供项目状态、当前场景、选择对象、编译错误、控制台输出和 MCP 交互记录资源
-- **默认聚焦，必要时全量** — 默认 `core` 工具集更利于 AI 选工具，需要时可切到 `full` 暴露全部 156 个工具
+- **默认聚焦，必要时全量** — 默认 `core` 工具集更利于 AI 选工具，需要时可切到 `full` 暴露全部 157 个工具
 - **单 Unity 包落地** — 不需要额外 approval 开关，Unity 侧也不依赖单独 Python 守护进程
 - **可扩展** — 支持 Attribute 发现自定义工具，也支持连接外部 MCP 服务
 
 ## 核心特性
 
-- **156 个内置工具** — 覆盖场景编辑、脚本、资产、运行态控制、截图、性能分析、Prompts、Resources、结构化对象定位、SerializedObject 组件编辑、编辑器状态读写、菜单项兜底以及编辑器自动化，共 35 个模块
+- **157 个内置工具** — 覆盖场景编辑、脚本、资产、运行态控制、截图、性能分析、Prompts、Resources、结构化对象定位、SerializedObject 组件编辑、编辑器状态读写、菜单项兜底以及编辑器自动化，共 36 个模块
 - **结构化返回 + `instanceId` 链式调用** — 工具返回 `{success, message, data}` JSON 并附带稳定的 `instanceId`，agent 后续直接 `by_id` 调用，不再受重名困扰
 - **`execute_code` 的 `IFunplayCommand` 模板** — 新模板自动 Undo（`ctx.RegisterObjectCreation/Modification/DestroyObject`）、结构化日志（`ctx.Log/LogWarning/LogError`），并把改动列表回传给 agent
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
 - **输入模拟 + 截图验证** — 在 Play Mode 中模拟键盘/鼠标，再用 Game View / Scene View 截图验证结果
 - **内置更新** — 直接在 Unity 菜单中检查更新，并根据安装方式自动重新拉取 Git 包或导入最新 `unitypackage`
-- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness 等客户端生成 MCP 配置
+- **一键客户端配置** — 直接在 Unity 窗口里为 Claude Code、Cursor、Kimi、LM Studio、VS Code、Kiro、Trae、Codex、OpenCode、DeepSeek Harness、Antigravity 等客户端生成 MCP 配置
 - **工具暴露控制** — 编辑 `core` 和 `full` 各自暴露的具体工具
 - **项目 Skills 管理器** — 为支持的 AI 客户端配置项目级 skills，包含内置的 `unity-mcp-workflow` 与 `unity-ui-composition` 指引
 - **插件设置** — 排查 MCP 连接或工具执行问题时，可开关详细 debug 日志
@@ -388,7 +409,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 | 协议 / License | MIT 开源 | Unity Terms of Service，私有 |
 | 部署 | Editor 内嵌 HTTP MCP server，纯本地 | Editor + 原生 Relay 子进程 + Unity Cloud 后端 |
 | 计费 | 免费，用户自带 AI 客户端 | Credits 点数制（Unity Dashboard）|
-| 工具暴露 | 156 工具 / 35 模块，`core` (34) / `full` profile | ~15 个 MCP 工具（多数为 `Manage*` 大粒度族）|
+| 工具暴露 | 157 工具 / 36 模块，`core` (35) / `full` profile | ~15 个 MCP 工具（多数为 `Manage*` 大粒度族）|
 | 通用逃生口 | `execute_code` — Roslyn 优先内存编译、`IFunplayCommand` + Undo、无沙箱（客户端层审批）| `RunCommand` — 命名空间黑名单沙箱 |
 | Play Mode 验证 | 完整闭环：进入 / 模拟输入 / 截图 / 读日志 / 退出 | 仅进入/退出，无输入模拟 |
 | 资产生成器 | 不内建（通过 `execute_code` 组合外部 API）| 内建 Image / Mesh / PBR / Sound / Animation 五类生成器 |
@@ -401,7 +422,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 
 当前开源包有四层高价值能力：
 
-- **Tools** — `full` 下共 156 个工具，`core` 下 34 个高频工具
+- **Tools** — `full` 下共 157 个工具，`core` 下 35 个高频工具
 - **Primary execution** — `execute_code` 用于复杂编辑器/运行态编排
 - **Prompts** — 参数化工作流 Prompt：`edit_prefab_safely`、`verify_compilation`、`enter_play_and_recover`、`wire_serialized_references`、`create_playable_prototype`。项目可通过根目录下的 `mcp-prompts/*.md` 注册专属 Prompt。
 - **Resources** — 项目上下文、场景摘要、选择状态、编译错误、控制台错误、MCP 交互记录，以及按对象/组件/资源路径展开的模板资源
@@ -423,7 +444,7 @@ Prompt 名称和参数名必须匹配 `[a-z][a-z0-9_-]{0,63}`。`prompts/get` �
 
 ## 内置工具
 
-Funplay MCP for Unity 当前提供 **156 个工具函数**，覆盖 35 个模块：
+Funplay MCP for Unity 当前提供 **157 个工具函数**，覆盖 36 个模块：
 
 | 分类 | 工具 |
 |------|------|
@@ -449,6 +470,7 @@ Funplay MCP for Unity 当前提供 **156 个工具函数**，覆盖 35 个模块
 | **动画** | `create_animation_clip`, `create_animator_controller`, `assign_animator`, `get_animator_state`, `set_animator_parameter`, `play_animator_state` |
 | **相机** | `get_camera_properties`, `set_camera_projection`, `set_camera_settings`, `set_camera_culling_mask` |
 | **截图** | `capture_game_view`, `capture_simulator_view`, `capture_scene_view`, `capture_multiview`, `capture_editor_window` |
+| **录屏** | `record_game_view` |
 | **脚本执行** | `execute_code`, `get_execute_code_history`, `replay_execute_code`, `clear_execute_code_history` |
 | **输入模拟** | `simulate_key_press`, `simulate_key_combo`, `simulate_mouse_click`, `simulate_mouse_drag` |
 | **性能分析** | `get_performance_snapshot`, `analyze_scene_complexity` |
@@ -464,6 +486,20 @@ Funplay MCP for Unity 当前提供 **156 个工具函数**，覆盖 35 个模块
 | **可视化反馈** | `select_object`, `focus_on_object`, `ping_asset`, `log_message`, `show_dialog`, `get_console_logs` |
 
 > 📊 完整的 Profiler 工具参考、实现细节、已知限制和测试报告见 [PROFILER_TOOLS_CN.md](PROFILER_TOOLS_CN.md)。
+
+### 录制 Game View 视频
+
+默认 `core` 工具集中的 `record_game_view` 可将 UI 动画、转场和连续操作录成一段**无音轨 MP4**，用于视觉检查。使用 Unity 自带的 [MediaEncoder](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Media.MediaEncoder.html)，不需要安装 Recorder 包或外部编码器。
+
+1. 进入 Play Mode，等待域重载恢复，并打开 Game 标签页使其正常渲染。
+2. 调用 `record_game_view`，参数为 `{"action":"start","duration_seconds":10,"fps":15,"max_dimension":1280}`，保留返回的 `recording_id`。
+3. 开始调用立即返回，可在录制期间继续模拟输入和操作；达到时长上限后自动停止。
+4. 使用 `{"action":"status","recording_id":"<id>"}` 查询状态。若要提前结束，调用 `action:"stop"`，然后继续查询直至文件完成封装。
+5. 只有 `ready:true` 时才读取返回的本地 `path`。MCP 响应不会内嵌视频数据；远程客户端需要另行获得 Unity 所在机器的文件访问能力。
+
+视频采用唯一文件名，保存在 `<UnityProject>/Library/FunplayMcp/Recordings/`，不会自动删除。开始录制可设置 1–120 秒、1–60 目标 FPS，以及 128–1920 像素的最长边；保持宽高比、不放大原画面，并对齐到编码所需的偶数尺寸。状态还包含实际帧数、经过时间、结束原因、文件大小和错误信息。查询或停止时携带录制 ID，可避免误操作新一段录制。
+
+目前支持具有图形设备的 **macOS / Windows Unity Editor，且必须处于 Play Mode**；暂不录音。画面来自已经渲染的 Game View，包含 Overlay UI，不额外重绘场景相机。录制时保持 Game 标签页渲染，不要改变其分辨率：隐藏、关闭标签页或改变渲染分辨率会结束录制并报错，避免录入旧画面或拉伸画面。退出 Play Mode 会封装视频；脚本重编译或域重载会提前封装，并在编辑器会话中保留 `interrupted` 状态。无论结束原因如何，都以 `ready:true` 为可读取条件。慢帧会保留真实时间戳，但录制本身有开销，不能用于帧精确的性能测量。
 
 ## 添加自定义工具
 
@@ -495,7 +531,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (协议处理)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (反射式调用)
-                └─ Tool Functions (156 个内置工具，35 个模块)
+                └─ Tool Functions (157 个内置工具，36 个模块)
 ```
 
 ```

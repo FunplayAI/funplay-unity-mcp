@@ -9,7 +9,7 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 3. Start the server and use the built-in one-click client configuration
 4. Connect your AI client to the endpoint shown in the window (`http://127.0.0.1:<port>/`, derived per project unless you pin a port)
 5. Open **Funplay > Tool Exposure** to edit the exact tools exposed by `core` or `full`
-6. For Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness, use **Configure + Skills** or open **Funplay > Project Skills** to install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills
+6. For Claude Code, Cursor, Codex, OpenCode, DeepSeek Harness, and Antigravity, use **Configure + Skills** or open **Funplay > Project Skills** to install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills
 7. Open **Funplay > Plugin Settings** to adjust debug logging when troubleshooting
 
 ## Guides
@@ -18,7 +18,8 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 
 ## Highlights
 
-- 156 built-in tool functions across scene, asset, script, prefab, UI, animation, camera, screenshot, package, editor-state, menu-item, and feedback workflows
+- 157 built-in tool functions across scene, asset, script, prefab, UI, animation, camera, screenshot, video, package, editor-state, menu-item, and feedback workflows
+- Asynchronous `record_game_view` video recording in the default `core` tool set: start, query status, or stop a silent Game View MP4, with automatic duration limits and domain-reload finalization (macOS/Windows Editor, Play Mode required)
 - Structured `{success, message, data}` JSON returns with stable `instanceId` fields so agents can chain `by_id` lookups
 - `IFunplayCommand` template for `execute_code` with auto-Undo, structured logs, and a returned changelog of created/modified/destroyed objects
 - Default-on `execute_code` safety checks toggle in the MCP Server window, with per-call override support through the optional `safety_checks` argument
@@ -26,7 +27,7 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 - Reflection-based tool discovery via `[ToolProvider]`
 - One-click local MCP config generation for supported clients, including Kimi Code and LM Studio
 - Separate tool exposure window for editing which tools `core` and `full` expose
-- One-click MCP config plus project workflow skill setup for Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness
+- One-click MCP config plus project workflow skill setup for Claude Code, Cursor, Codex, OpenCode, DeepSeek Harness, and Antigravity
 - Project skills management for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - Dedicated plugin settings window with a debug logging toggle that is enabled by default
 - Persisted MCP server settings in `UserSettings/FunplayMcpSettings.json`
