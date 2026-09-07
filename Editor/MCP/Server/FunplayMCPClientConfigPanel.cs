@@ -196,6 +196,9 @@ namespace Funplay.Editor.MCP.Server
             var resolvedKey = ResolveServerKeyForTarget(target);
             var details = $"{target.ConfigPath}\nEntry: {resolvedKey} -> {GetServerUrl()}";
 
+            if (target.Name == "Antigravity")
+                details += GetAntigravityGlobalConfigNotice(GetUserHomePath());
+
             // Say why the name grew a hash, or the user just sees an unexplained hex suffix. The
             // occupant can also be this same project under a lost record (settings file deleted,
             // fresh checkout on the same machine), which we cannot tell apart from another project.
@@ -473,15 +476,7 @@ namespace Funplay.Editor.MCP.Server
                     ConfigPath = FunplayDeepSeekHarnessPatch.GetDisplayPath(homePath),
                     IsDeepSeekHarness = true,
                 },
-                new MCPConfigTarget
-                {
-                    Name = "Antigravity",
-                    ConfigPath = GetAntigravityConfigPath(homePath),
-                    UrlFieldName = "serverUrl",
-                    ActivationHint =
-                        "Restart Antigravity for it to take effect. " +
-                        "Its active servers are listed under Additional Options (...) > MCP Servers.",
-                },
+                CreateAntigravityTarget(GetProjectRootPath()),
             };
         }
 
@@ -835,9 +830,17 @@ namespace Funplay.Editor.MCP.Server
         /// </summary>
         private string ConfigureJsonTarget(MCPConfigTarget target, string presetServerKey = null)
         {
-            var rootKey = GetRootKey(target);
             var serverName = presetServerKey ?? ResolveServerKeyForTarget(target);
-            var entry = CreateHttpEntry(target);
+            WriteJsonConfiguration(target, serverName,
+                _settings.GetLastClientConfigKey(target.Name), CreateHttpEntry(target));
+            return serverName;
+        }
+
+        internal static void WriteJsonConfiguration(
+            MCPConfigTarget target, string serverName, string previousServerName,
+            Dictionary<string, object> entry)
+        {
+            var rootKey = GetRootKey(target);
 
             Dictionary<string, object> root = null;
             if (File.Exists(target.ConfigPath))
@@ -850,10 +853,12 @@ namespace Funplay.Editor.MCP.Server
 
             servers[serverName] = entry;
             RemoveSupersededFunplayEntries(
-                servers, serverName, _settings.GetLastClientConfigKey(target.Name), target.UrlFieldName);
+                servers, serverName, previousServerName, target.UrlFieldName);
 
+            var directory = Path.GetDirectoryName(target.ConfigPath);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
             File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
-            return serverName;
         }
 
         /// <summary>
@@ -867,7 +872,7 @@ namespace Funplay.Editor.MCP.Server
         /// nothing, the same "stop instead of destroy" stance <c>WriteManagedBlock</c> takes for a
         /// legacy AGENTS.md. Returns null for an empty file (nothing to preserve).
         /// </summary>
-        private Dictionary<string, object> ParseRewritableConfig(
+        private static Dictionary<string, object> ParseRewritableConfig(
             MCPConfigTarget target, string serverName, Dictionary<string, object> entry)
         {
             var content = File.ReadAllText(target.ConfigPath);
@@ -1440,7 +1445,8 @@ namespace Funplay.Editor.MCP.Server
                     target.IsToml,
                     target.RootKey,
                     serverKey,
-                    expectedUrl);
+                    expectedUrl,
+                    target.UrlFieldName);
             }
             catch (Exception)
             {
@@ -1461,7 +1467,8 @@ namespace Funplay.Editor.MCP.Server
             bool isToml,
             string rootKey,
             string serverKey,
-            string expectedUrl)
+            string expectedUrl,
+            string urlFieldName = null)
         {
             if (string.IsNullOrEmpty(content) ||
                 string.IsNullOrEmpty(serverKey) ||
@@ -1497,7 +1504,7 @@ namespace Funplay.Editor.MCP.Server
             var entry = entryValue as Dictionary<string, object>;
             object urlValue;
             return entry != null &&
-                   entry.TryGetValue("url", out urlValue) &&
+                   entry.TryGetValue(GetUrlFieldName(urlFieldName), out urlValue) &&
                    string.Equals(urlValue as string, expectedUrl, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -1790,19 +1797,53 @@ namespace Funplay.Editor.MCP.Server
         }
 
         /// <summary>
-        /// Antigravity keeps its MCP servers in <c>~/.gemini/config/mcp_config.json</c> -- one global
-        /// map of server id to spec, plus per-plugin <c>plugins/&lt;name&gt;/mcp_config.json</c> files
-        /// that only load with their plugin, which is not a place a Unity plugin should be writing to.
-        /// The remote spec carries a single <c>serverUrl</c>; Antigravity's own documentation calls
-        /// that "SSE transport", but the language server has exactly two connectors --
-        /// <c>LocalSubprocessConnector</c> for <c>command</c> and <c>StreamableHTTPConnector</c> for
-        /// <c>serverUrl</c> -- so a streamable-HTTP endpoint like this one is what it actually speaks.
-        /// There is no project-scoping concept here, so like Cursor/VS Code/Trae/Kiro the entry is
-        /// global and stays distinguishable only by its per-project name.
+        /// Keep Antigravity's MCP config, skills and AGENTS.md in one workspace. Use the nearest
+        /// repository root (including worktrees), or the Unity project itself outside Git.
+        /// See https://antigravity.google/docs/mcp/ for workspace config and serverUrl support.
         /// </summary>
-        private static string GetAntigravityConfigPath(string homePath)
+        internal static string GetAntigravityWorkspaceRoot(string projectRoot)
         {
-            return Path.Combine(homePath, ".gemini", "config", "mcp_config.json");
+            if (string.IsNullOrWhiteSpace(projectRoot))
+                throw new ArgumentException("A Unity project root is required.", nameof(projectRoot));
+            return FindGitRootOrSelf(Path.GetFullPath(projectRoot));
+        }
+
+        internal static string GetAntigravityConfigPath(string projectRoot)
+        {
+            return Path.Combine(GetAntigravityWorkspaceRoot(projectRoot), ".agents", "mcp_config.json");
+        }
+
+        internal static MCPConfigTarget CreateAntigravityTarget(string projectRoot)
+        {
+            return new MCPConfigTarget
+            {
+                Name = "Antigravity",
+                ConfigPath = GetAntigravityConfigPath(projectRoot),
+                UrlFieldName = "serverUrl",
+                ActivationHint =
+                    "Open this workspace in a current Antigravity version and reload its MCP servers:\n" +
+                    GetAntigravityWorkspaceRoot(projectRoot) +
+                    "\nNested Unity projects use their repository root as the workspace."
+            };
+        }
+
+        // Older previews wrote a global entry. Merely finding a matching name is not proof that
+        // it belongs to this project, so report existing entries without rewriting either file.
+        internal static string GetAntigravityGlobalConfigNotice(string homePath)
+        {
+            var notices = new List<string>();
+            foreach (var directory in new[] { "config", "antigravity" })
+            {
+                var path = Path.Combine(homePath, ".gemini", directory, "mcp_config.json");
+                var names = ReadFunplayEntryNames(new MCPConfigTarget { ConfigPath = path });
+                if (names.Count > 0)
+                    notices.Add($"{path}: {string.Join(", ", names.OrderBy(name => name, StringComparer.Ordinal))}");
+            }
+
+            return notices.Count == 0 ? string.Empty :
+                "\nGlobal Funplay entries also exist and remain visible in other workspaces:\n" +
+                string.Join("\n", notices) +
+                "\nReview them after configuring each workspace; Configure leaves these global files unchanged.";
         }
 
         private static string GetUserHomePath()
@@ -1907,7 +1948,7 @@ namespace Funplay.Editor.MCP.Server
             return Path.Combine(homePath, ".vscode", "mcp.json");
         }
 
-        private struct MCPConfigTarget
+        internal struct MCPConfigTarget
         {
             public string Name;
             public string ConfigPath;
@@ -1949,8 +1990,8 @@ namespace Funplay.Editor.MCP.Server
 
             /// <summary>
             /// True only for Claude Code. Its config file supports a <c>projects["&lt;path&gt;"]</c>
-            /// section that Claude Code applies only to sessions opened at that path; every other
-            /// client here has no such concept and keeps writing at the config's top level.
+            /// section that Claude Code applies only to sessions opened at that path. Other clients
+            /// write at the config's top level, which may itself be a workspace-local file.
             /// </summary>
             public bool UseProjectScope;
         }

@@ -629,8 +629,14 @@ namespace Funplay.Editor.Tests
 
                 StringAssert.Contains(
                     ProjectSkillsManager.ManagedEndMarker,
-                    File.ReadAllText(ProjectSkillsManager.GetCodexAgentsPath(unityProject)),
-                    "Antigravity reads AGENTS.md natively and shares the block with the other agent platforms.");
+                    File.ReadAllText(ProjectSkillsManager.GetAntigravityAgentsPath(unityProject)),
+                    "Antigravity instructions must be visible beside its workspace config and skills.");
+                Assert.IsFalse(File.Exists(ProjectSkillsManager.GetCodexAgentsPath(unityProject)));
+                var manifest = ProjectSkillsManager.LoadManifest(unityProject);
+                CollectionAssert.Contains(
+                    ProjectSkillsManager.GetGeneratedPathsForPlatform(unityProject, manifest, "antigravity"),
+                    Path.Combine(repoRoot, "AGENTS.md"));
+                Assert.IsFalse(ProjectSkillsManager.GetUpgradeStatus(unityProject, manifest, "antigravity").HasUpdates);
             }
             finally
             {
@@ -672,6 +678,77 @@ namespace Funplay.Editor.Tests
                 ProjectSkillsManager.ApplyConfiguration(repoRoot, Array.Empty<string>(), Array.Empty<string>());
                 Assert.IsFalse(File.Exists(agentsPath));
                 Assert.IsFalse(File.Exists(antigravitySkill));
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        [Test]
+        public void NestedAntigravityTogglePreservesUserInstructionsAndOtherPlatforms()
+        {
+            var tempRoot = CreateTempProjectPath();
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+            var unityProject = Path.Combine(repoRoot, "UnityProject");
+            Directory.CreateDirectory(unityProject);
+            var workspaceAgents = Path.Combine(repoRoot, "AGENTS.md");
+            var localAgents = ProjectSkillsManager.GetCodexAgentsPath(unityProject);
+            File.WriteAllText(workspaceAgents, "# Workspace rules\nKeep this workspace guidance.\n");
+            File.WriteAllText(localAgents, "# Unity rules\nKeep this Unity guidance.\n");
+
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(unityProject, new[] { "codex", "antigravity" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(workspaceAgents));
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(localAgents));
+
+                ProjectSkillsManager.ApplyConfiguration(unityProject, new[] { "codex" }, Array.Empty<string>());
+                StringAssert.Contains("Keep this workspace guidance.", File.ReadAllText(workspaceAgents));
+                StringAssert.DoesNotContain(ProjectSkillsManager.ManagedMarker, File.ReadAllText(workspaceAgents));
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(localAgents));
+                Assert.IsTrue(File.Exists(GetCodexWorkflowSkillPath(unityProject)));
+                Assert.IsFalse(File.Exists(Path.Combine(ProjectSkillsManager.GetAntigravitySkillsRoot(unityProject),
+                    "funplay-unity-mcp-workflow", "SKILL.md")));
+
+                ProjectSkillsManager.ApplyConfiguration(unityProject, new[] { "antigravity" }, Array.Empty<string>());
+                StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(workspaceAgents));
+                StringAssert.Contains("Keep this Unity guidance.", File.ReadAllText(localAgents));
+                StringAssert.DoesNotContain(ProjectSkillsManager.ManagedMarker, File.ReadAllText(localAgents));
+                Assert.IsFalse(File.Exists(GetCodexWorkflowSkillPath(unityProject)));
+            }
+            finally
+            {
+                DeleteTempProjectPath(tempRoot);
+            }
+        }
+
+        [Test]
+        public void ConfiguringAnotherNestedProjectDoesNotRemoveWorkspaceAntigravitySkills()
+        {
+            var tempRoot = CreateTempProjectPath();
+            var repoRoot = Path.Combine(tempRoot, "repo");
+            Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+            var first = Path.Combine(repoRoot, "First");
+            var second = Path.Combine(repoRoot, "Second");
+            Directory.CreateDirectory(first);
+            Directory.CreateDirectory(second);
+            try
+            {
+                ProjectSkillsManager.ApplyConfiguration(first, new[] { "antigravity" }, Array.Empty<string>());
+                var agentsPath = ProjectSkillsManager.GetAntigravityAgentsPath(first);
+                var before = File.ReadAllText(agentsPath);
+                var skillPath = Path.Combine(ProjectSkillsManager.GetAntigravitySkillsRoot(first),
+                    "funplay-unity-mcp-workflow", "SKILL.md");
+
+                ProjectSkillsManager.ApplyConfiguration(second, new[] { "codex" }, Array.Empty<string>());
+                Assert.AreEqual(before, File.ReadAllText(agentsPath));
+                Assert.IsTrue(File.Exists(skillPath));
+                Assert.Throws<InvalidOperationException>(() =>
+                    ProjectSkillsManager.ApplyConfiguration(second, new[] { "antigravity" }, Array.Empty<string>()));
+                Assert.AreEqual(before, File.ReadAllText(agentsPath));
+                CollectionAssert.AreEqual(new[] { "codex" }, ProjectSkillsManager.LoadManifest(second).platforms);
             }
             finally
             {

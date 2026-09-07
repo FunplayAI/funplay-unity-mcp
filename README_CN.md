@@ -275,9 +275,11 @@ url = "http://127.0.0.1:<port>/"
 <details>
 <summary>Antigravity</summary>
 
-写入全局 `~/.gemini/config/mcp_config.json`。Antigravity 的远程服务器配置把端点字段命名为 `serverUrl`（写成 `url` 会被忽略）；其 language server 用 MCP streamable-HTTP transport 连接该端点，正是本 server 使用的协议。配置后重启 Antigravity，可在 **Additional Options (...) > MCP Servers** 中查看。
+写入工作区级 `.agents/mcp_config.json`，在 `mcpServers` 中使用 `serverUrl` 指向 Funplay 的 Streamable HTTP 端点，使服务器配置仅在该工作区中生效。请使用支持[工作区 MCP 配置](https://antigravity.google/docs/mcp/)的当前 Antigravity 版本，配置后重新加载 MCP 服务器。
 
-Project Skills 会把 `SKILL.md` 写入仓库根目录的 `.agents/skills/`（Antigravity 从会话工作目录向上查找 `.agents/`），并与其他 agent 客户端共用 `AGENTS.md` 托管块（Antigravity 原生读取该文件）。
+工作区根目录取最近的包含 `.git` 的祖先目录（包括 worktree 的 `.git` 文件）；项目不在 Git 仓库中时使用 Unity 工程目录。请在 Antigravity 中打开该目录。**Configure + Skills** 会将 `.agents/mcp_config.json`、`.agents/skills/` 和 `AGENTS.md` 托管块放在同一根目录下，也适用于 Unity 工程嵌套在仓库中的情况。其他客户端沿用现有指引位置，路径相同时共用托管块。
+
+如果 `~/.gemini/config/mcp_config.json` 或旧版 `~/.gemini/antigravity/mcp_config.json` 中已有 Funplay 条目，面板会显示提示并保留原文件。完成各工作区配置后再检查这些全局条目；一键配置不会自动回退到全局配置。同一仓库中的多个 Unity 工程共用工作区，其 MCP 条目各自命名；Project Skills 遇到其他工程已有的工作区托管指引时会停止，避免覆盖工程身份。
 
 ```json
 {

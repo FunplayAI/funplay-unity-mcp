@@ -240,38 +240,51 @@ namespace Funplay.Editor.MCP.Server
         }
 
         /// <summary>
-        /// Antigravity discovers workspace customizations in a <c>.agents/</c> directory (it also
-        /// accepts <c>.agent</c>, <c>_agents</c> and <c>_agent</c>; the documented primary spelling is
-        /// used here) and reads skills from <c>.agents/skills/&lt;name&gt;/SKILL.md</c>. It finds that
-        /// directory by walking from the session's working directory up to the repository root, so --
-        /// exactly like DeepSeek Harness -- the skills are written at the discovered git root: in a
-        /// monorepo layout (git root above the Unity project folder) a <c>.agents</c> inside the Unity
-        /// folder would only ever be seen by a session started at or below it, while one at the repo
-        /// root is reachable from anywhere inside the repo.
+        /// Antigravity's workspace skills, MCP config and instructions share one resolved root.
+        /// Open that root as the Antigravity workspace, including for a nested Unity project.
         /// </summary>
         internal static string GetAntigravitySkillsRoot(string projectRoot)
         {
-            return Path.Combine(FunplayMCPClientConfigPanel.FindGitRootOrSelf(projectRoot), ".agents", "skills");
+            return Path.Combine(FunplayMCPClientConfigPanel.GetAntigravityWorkspaceRoot(projectRoot), ".agents", "skills");
+        }
+
+        internal static string GetAntigravityAgentsPath(string projectRoot)
+        {
+            return Path.Combine(FunplayMCPClientConfigPanel.GetAntigravityWorkspaceRoot(projectRoot), "AGENTS.md");
         }
 
         internal static void ApplyConfiguration(string projectRoot, IEnumerable<string> selectedPlatforms, IEnumerable<string> selectedOptionalSkills)
         {
+            var previousManifest = LoadManifest(projectRoot);
             var manifest = new ProjectSkillsManifest
             {
                 platforms = selectedPlatforms?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>(),
                 optionalSkills = selectedOptionalSkills?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>()
             };
 
-            SaveManifest(projectRoot, manifest);
+            var normalized = NormalizeManifest(manifest);
+            var syncAntigravity =
+                normalized.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase) ||
+                previousManifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
+            if (syncAntigravity)
+            {
+                var workspaceAgents = GetAntigravityAgentsPath(projectRoot);
+                if (!string.Equals(Path.GetFullPath(GetCodexAgentsPath(projectRoot)), workspaceAgents, StringComparison.Ordinal) &&
+                    IsManagedFile(workspaceAgents) && !AgentsBlockBelongsToProject(workspaceAgents, projectRoot))
+                    throw new InvalidOperationException(
+                        $"'{workspaceAgents}' already contains Funplay guidance for another Unity project. " +
+                        "Resolve the workspace's shared guidance before applying Antigravity skills.");
+            }
 
-            var normalized = LoadManifest(projectRoot);
-            SyncAgentsInstructions(projectRoot, normalized);
+            SaveManifest(projectRoot, normalized);
+            SyncAgentsInstructions(projectRoot, normalized, syncAntigravity);
             SyncCodex(projectRoot, normalized);
             SyncClaude(projectRoot, normalized);
             SyncCursor(projectRoot, normalized);
             SyncOpenCode(projectRoot, normalized);
             SyncDsh(projectRoot, normalized);
-            SyncAntigravity(projectRoot, normalized);
+            if (syncAntigravity)
+                SyncAntigravity(projectRoot, normalized);
         }
 
         internal static bool IsPlatformConfigured(string projectRoot, string platformId)
@@ -382,7 +395,7 @@ namespace Funplay.Editor.MCP.Server
                     paths.Add(GetDshSkillsRoot(projectRoot));
                     break;
                 case "antigravity":
-                    paths.Add(GetCodexAgentsPath(projectRoot));
+                    paths.Add(GetAntigravityAgentsPath(projectRoot));
                     paths.Add(GetAntigravitySkillsRoot(projectRoot));
                     break;
             }
@@ -390,19 +403,44 @@ namespace Funplay.Editor.MCP.Server
             return paths;
         }
 
-        // AGENTS.md is shared by Codex, OpenCode, DeepSeek Harness and Antigravity (all four read it
-        // natively), so the single managed block is written while ANY of them is enabled and removed
-        // only when ALL are disabled. Splitting it per platform would need two blocks in one file,
-        // which WriteManagedBlock's single begin..end marker model cannot represent.
-        private static void SyncAgentsInstructions(string projectRoot, ProjectSkillsManifest manifest)
+        // Platforms share one block when their instruction paths coincide. Antigravity additionally
+        // needs the block at the workspace root when Unity lives inside a repository subdirectory.
+        private static void SyncAgentsInstructions(
+            string projectRoot, ProjectSkillsManifest manifest, bool syncAntigravity)
         {
+            var antigravityEnabled = manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
+            var agentsPath = GetCodexAgentsPath(projectRoot);
+            var antigravityPath = GetAntigravityAgentsPath(projectRoot);
+            var sharedPath = string.Equals(Path.GetFullPath(agentsPath), antigravityPath, StringComparison.Ordinal);
+
+            if (!sharedPath && syncAntigravity)
+            {
+                SyncAgentsBlock(antigravityPath, projectRoot, manifest, antigravityEnabled);
+            }
+
             var enabled =
                 manifest.platforms.Contains("codex", StringComparer.OrdinalIgnoreCase) ||
                 manifest.platforms.Contains("opencode", StringComparer.OrdinalIgnoreCase) ||
                 manifest.platforms.Contains("dsh", StringComparer.OrdinalIgnoreCase) ||
-                manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
-            var agentsPath = GetCodexAgentsPath(projectRoot);
+                (antigravityEnabled && sharedPath);
 
+            SyncAgentsBlock(agentsPath, projectRoot, manifest, enabled);
+        }
+
+        private static bool AgentsBlockBelongsToProject(string path, string projectRoot)
+        {
+            var content = File.ReadAllText(path);
+            var begin = content.IndexOf(ManagedMarker, StringComparison.Ordinal);
+            if (begin < 0)
+                return false;
+            var end = content.IndexOf(ManagedEndMarker, begin, StringComparison.Ordinal);
+            var block = end > begin ? content.Substring(begin, end - begin) : content.Substring(begin);
+            return block.Contains($"- Project root: `{projectRoot}`");
+        }
+
+        private static void SyncAgentsBlock(
+            string agentsPath, string projectRoot, ProjectSkillsManifest manifest, bool enabled)
+        {
             if (!enabled)
             {
                 RemoveManagedBlock(agentsPath, "# AGENTS.md", BuildLegacyCodexAgentsContentVariants(projectRoot, manifest));
@@ -811,7 +849,7 @@ namespace Funplay.Editor.MCP.Server
                     }
                     break;
                 case "antigravity":
-                    AddProjectVersionFile(result, GetCodexAgentsPath(projectRoot), skills);
+                    AddProjectVersionFile(result, GetAntigravityAgentsPath(projectRoot), skills);
                     foreach (var skill in skills)
                     {
                         result.Add(new ExpectedSkillVersionFile(

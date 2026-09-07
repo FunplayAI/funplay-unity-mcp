@@ -275,9 +275,11 @@ Written as a delimited managed block into every DeepSeek Harness profile's `~/.d
 <details>
 <summary>Antigravity</summary>
 
-Written to the global `~/.gemini/config/mcp_config.json`. Antigravity's remote-server spec names the endpoint `serverUrl` (a plain `url` key is ignored); its language server connects that with the MCP streamable-HTTP transport, which is what this server speaks. Restart Antigravity afterwards, then check **Additional Options (...) > MCP Servers**.
+Written to the workspace-local `.agents/mcp_config.json` with `mcpServers` entries using `serverUrl` for Funplay's Streamable HTTP endpoint. This keeps the server out of unrelated workspaces. Use a current Antigravity version supporting [workspace MCP configuration](https://antigravity.google/docs/mcp/), then reload its MCP servers.
 
-Project Skills write `SKILL.md` bundles to `.agents/skills/` at the repository root (Antigravity walks up from the session's working directory to find `.agents/`), and Antigravity reads the shared `AGENTS.md` managed block natively.
+The workspace root is the nearest ancestor containing `.git` (including a worktree's `.git` file), or the Unity project directory when it is outside Git. Open that directory as the Antigravity workspace. **Configure + Skills** places `.agents/mcp_config.json`, `.agents/skills/`, and the managed `AGENTS.md` block at this same root, including when the Unity project is nested inside a repository. Other clients retain their existing instruction locations and share the block when paths coincide.
+
+Existing Funplay entries in `~/.gemini/config/mcp_config.json` or the older `~/.gemini/antigravity/mcp_config.json` are reported in the panel and left unchanged. Review them after configuring each workspace; the one-click action does not fall back to global configuration. Multiple Unity projects in the same repository share a workspace: their MCP entries remain separately named, while Project Skills refuses to replace another project's managed workspace guidance.
 
 ```json
 {

@@ -3,10 +3,18 @@
 ## [Unreleased]
 
 ### Added
-- **Antigravity** is now a one-click client-config target. Its entry is written to the global `~/.gemini/config/mcp_config.json` (`{"mcpServers": {"funplay-<project>": {"serverUrl": ...}}}`), the only location a Unity plugin can reasonably own -- the alternative, `plugins/<name>/mcp_config.json`, loads only with its plugin. The endpoint key is `serverUrl`, not the `url` every other JSON client here uses: Antigravity's `McpServerSpec` has no `url` field, so an entry written in the usual shape would sit in the config connecting to nothing. Its documentation labels that field "SSE transport", but the shipped language server registers exactly two connectors -- `LocalSubprocessConnector` for `command` and `StreamableHTTPConnector` for `serverUrl` -- so the streamable-HTTP endpoint this server exposes is what it actually speaks. Like Cursor/VS Code/Trae/Kiro, Antigravity has no project-scoping concept in its config, so the entry is global and stays distinguishable only by its per-project name. Antigravity is also a Project Skills platform: `SKILL.md` bundles are written to `.agents/skills/` at the **repository root** -- its customization discovery walks from the session's working directory up to the repo root, so in a monorepo layout (git root above the Unity project folder) a `.agents` inside the Unity folder would only be found by a session started at or below it, the same trap the DeepSeek Harness `.dsh/skills` placement avoids. It reads `AGENTS.md` natively, so it joins Codex/OpenCode/DSH on the single shared managed block (written while any of them is enabled, removed only when all are disabled); the block's skills bullet gained the `.agents/skills/` entry, with the previous wording kept in the legacy-migration variant list so files already on disk keep migrating instead of erroring.
+- **Antigravity** is now a one-click client-config and Project Skills target. Configuration uses the workspace-local `.agents/mcp_config.json` with `mcpServers` / `serverUrl`, following the [current Antigravity MCP format](https://antigravity.google/docs/mcp/). MCP config, `.agents/skills/`, and the managed `AGENTS.md` block share the nearest Git root (or Unity project directory outside Git). Existing global entries are reported without being rewritten, and configuration never silently falls back to global scope.
 
 ### Fixed
-- The rename cleanup (`RemoveSupersededFunplayEntries`) now reads the endpoint under the target's own key. It only ever looked at `url`, so an Antigravity entry (written under `serverUrl`) looked hand-edited and this project's previous entry was never retired after a product rename or project-hash toggle, leaving two funplay entries on the same port in `~/.gemini/config/mcp_config.json`.
+- Endpoint matching and rename cleanup use the target's endpoint key, including Antigravity's `serverUrl`, so reconfiguring a renamed project retires its recorded previous entry without deleting other servers.
+- Antigravity instruction paths and version checks agree with its workspace Skills location for nested Unity projects. Platform toggles preserve shared instructions and user-authored text; configuring another Unity project without Antigravity no longer deletes workspace Antigravity Skills. Another project's managed workspace guidance is protected from replacement.
+
+### Pull requests and issues
+- [PR #56](https://github.com/FunplayAI/funplay-unity-mcp/pull/56): Antigravity client configuration and Project Skills support, with workspace isolation and shared-instruction fixes.
+- No GitHub issues were closed by these changes.
+
+### Contributors
+- Thanks [@dehuaichendragonplus](https://github.com/dehuaichendragonplus) for PR #56.
 
 ## [0.6.5] - 2026-09-03
 
