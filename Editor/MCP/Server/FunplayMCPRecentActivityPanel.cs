@@ -53,6 +53,16 @@ namespace Funplay.Editor.MCP.Server
         private readonly MCPServerService _server;
         private readonly List<Texture2D> _previewTextures = new List<Texture2D>();
         private ScrollView _scrollView;
+        private RowExpandState _autoExpandedRow;
+
+        // Tracks one row's expand/collapse so the "latest entry auto-expands" behavior can
+        // later collapse it again once a newer entry arrives - but only if the user never
+        // touched it themselves in the meantime (manual choices always win).
+        private sealed class RowExpandState
+        {
+            public bool ManuallyToggled;
+            public Action<bool> ApplyExpanded;
+        }
 
         public FunplayMCPRecentActivityPanel(MCPServerService server)
         {
@@ -102,9 +112,12 @@ namespace Funplay.Editor.MCP.Server
             _scrollView.style.paddingBottom = 4;
             parent.Add(_scrollView);
 
+            _autoExpandedRow = null;
+            // GetEntries() returns newest-first (index 0 = most recent); this loop walks it
+            // back-to-front so the oldest row is added (and rendered) first, newest last/bottom.
             var entries = _server.InteractionLog.GetEntries();
             for (int i = entries.Count - 1; i >= 0; i--)
-                AddRow(entries[i]);
+                AddRow(entries[i], isLatest: i == 0);
         }
 
         public void OnEntryAdded(MCPLogEntry entry)
@@ -114,7 +127,7 @@ namespace Funplay.Editor.MCP.Server
                 if (_scrollView == null)
                     return;
 
-                AddRow(entry);
+                AddRow(entry, isLatest: true);
                 EditorApplication.delayCall += () =>
                 {
                     if (_scrollView != null)
@@ -127,9 +140,10 @@ namespace Funplay.Editor.MCP.Server
         {
             ClearPreviewTextures();
             _scrollView = null;
+            _autoExpandedRow = null;
         }
 
-        private void AddRow(MCPLogEntry entry)
+        private void AddRow(MCPLogEntry entry, bool isLatest = false)
         {
             var badgeText = GetBadgeText(entry.Status);
             var accentColor = GetAccentColor(entry.Status);
@@ -151,6 +165,13 @@ namespace Funplay.Editor.MCP.Server
             var topRow = new VisualElement();
             topRow.style.flexDirection = FlexDirection.Row;
             topRow.style.alignItems = Align.Center;
+
+            var expandArrow = new Label("▸");
+            expandArrow.style.fontSize = 10;
+            expandArrow.style.color = new Color(0.5f, 0.5f, 0.5f);
+            expandArrow.style.marginRight = 4;
+            expandArrow.style.width = 10;
+            topRow.Add(expandArrow);
 
             var timeLabel = new Label(entry.Timestamp.ToString("HH:mm:ss"));
             timeLabel.style.fontSize = 10;
@@ -198,28 +219,115 @@ namespace Funplay.Editor.MCP.Server
                 isStructuredResult = true;
             }
 
+            var detailsContainer = new VisualElement();
+            var hasDetails = false;
+
             if (!string.IsNullOrEmpty(displayResult))
             {
                 if (isStructuredResult)
                 {
-                    card.Add(CreateStructuredResult(displayResult));
+                    detailsContainer.Add(CreateStructuredResult(displayResult));
                 }
                 else
                 {
                     var summaryLabel = CreateWrappedLabel(displayResult, new Color(0.6f, 0.6f, 0.6f));
                     summaryLabel.style.fontSize = 11;
                     summaryLabel.style.marginTop = 3;
-                    card.Add(summaryLabel);
+                    detailsContainer.Add(summaryLabel);
                 }
+                hasDetails = true;
             }
 
             if (!string.IsNullOrEmpty(entry.ImageDataUri) &&
                 TryCreateImagePreview(entry.ImageDataUri, out var preview))
             {
-                card.Add(preview);
+                detailsContainer.Add(preview);
+                hasDetails = true;
+            }
+
+            if (isLatest)
+            {
+                // A new entry became the latest: collapse whichever row was auto-expanded for
+                // that reason before, unless the user has since touched it themselves -
+                // manual choices are never overridden by the "latest" auto-expand behavior.
+                if (_autoExpandedRow != null && !_autoExpandedRow.ManuallyToggled)
+                    _autoExpandedRow.ApplyExpanded(false);
+                _autoExpandedRow = null;
+            }
+
+            if (hasDetails)
+            {
+                var collapsedSummary = CreateCollapsedSummaryLabel(entry.ResultSummary);
+                card.Add(collapsedSummary);
+
+                card.Add(detailsContainer);
+
+                // Native Editor tooltip: show the same formatted detail text the expanded view
+                // renders, everywhere in the card. Plain `card.tooltip` is not enough: an ellipsis-
+                // truncated Label (the collapsed summary line) supplies its own default tooltip
+                // (its raw, unformatted text) at the moment it is hovered, which pre-empts an
+                // ancestor's tooltip and made the header and the summary line disagree. Intercept
+                // the TooltipEvent during the trickle-down (capture) phase instead, before it
+                // reaches any such child, so this one formatted value always wins.
+                card.RegisterCallback<TooltipEvent>(evt =>
+                {
+                    evt.tooltip = displayResult;
+                    evt.rect = card.worldBound;
+                    evt.StopImmediatePropagation();
+                }, TrickleDown.TrickleDown);
+
+                var rowState = new RowExpandState();
+                var expanded = false;
+                rowState.ApplyExpanded = value =>
+                {
+                    expanded = value;
+                    expandArrow.text = expanded ? "▾" : "▸";
+                    detailsContainer.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
+                    collapsedSummary.style.display = expanded ? DisplayStyle.None : DisplayStyle.Flex;
+                };
+
+                EventCallback<ClickEvent> toggle = _ =>
+                {
+                    rowState.ManuallyToggled = true;
+                    rowState.ApplyExpanded(!expanded);
+                };
+                // Both the header row and the collapsed summary line must open the card -
+                // they are siblings, not nested, so each needs its own click registration.
+                topRow.RegisterCallback(toggle);
+                collapsedSummary.RegisterCallback(toggle);
+
+                if (isLatest)
+                    _autoExpandedRow = rowState;
+
+                rowState.ApplyExpanded(isLatest);
+            }
+            else
+            {
+                expandArrow.style.display = DisplayStyle.None;
             }
 
             _scrollView?.contentContainer.Add(card);
+        }
+
+        private static Label CreateCollapsedSummaryLabel(string resultSummary)
+        {
+            var text = string.IsNullOrEmpty(resultSummary) ? "" : resultSummary.Replace('\n', ' ').Trim();
+
+            var label = new Label(text);
+            label.enableRichText = false;
+            label.style.fontSize = 10;
+            label.style.color = new Color(0.55f, 0.55f, 0.55f);
+            label.style.marginTop = 2;
+            label.style.whiteSpace = WhiteSpace.NoWrap;
+            label.style.overflow = Overflow.Hidden;
+            label.style.textOverflow = TextOverflow.Ellipsis;
+            // No manual char cap and no explicit width: the label relies on the default
+            // stretch-to-parent cross-axis sizing (same as topRow) so it tracks the card's
+            // actual width on every relayout, growing back on widen as well as shrinking on
+            // narrow. minWidth=0 stops the NoWrap text's intrinsic width from acting as a
+            // lower bound that would otherwise fight that resize in one direction.
+            label.style.minWidth = 0;
+            return label;
         }
 
         private static VisualElement CreateStructuredResult(string displayResult)
