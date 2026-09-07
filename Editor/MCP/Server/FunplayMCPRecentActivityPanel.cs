@@ -50,28 +50,37 @@ namespace Funplay.Editor.MCP.Server
         private static readonly Color PendingValueColor = new Color(0.95f, 0.68f, 0.25f);
         private static readonly Color MutedValueColor = new Color(0.56f, 0.56f, 0.56f);
 
-        private readonly MCPServerService _server;
-        private readonly List<Texture2D> _previewTextures = new List<Texture2D>();
+        private readonly MCPInteractionLog _interactionLog;
+        private readonly Action<Action> _defer;
+        private readonly List<RowExpandState> _rows = new List<RowExpandState>();
         private ScrollView _scrollView;
         private RowExpandState _autoExpandedRow;
+        private int _generation;
 
         // Tracks one row's expand/collapse so the "latest entry auto-expands" behavior can
         // later collapse it again once a newer entry arrives - but only if the user never
         // touched it themselves in the meantime (manual choices always win).
         private sealed class RowExpandState
         {
+            public VisualElement Card;
             public bool ManuallyToggled;
             public Action<bool> ApplyExpanded;
+            public Action ReleaseDetails;
         }
 
-        public FunplayMCPRecentActivityPanel(MCPServerService server)
+        public FunplayMCPRecentActivityPanel(MCPServerService server) : this(server.InteractionLog)
         {
-            _server = server;
+        }
+
+        internal FunplayMCPRecentActivityPanel(MCPInteractionLog interactionLog, Action<Action> defer = null)
+        {
+            _interactionLog = interactionLog ?? throw new ArgumentNullException(nameof(interactionLog));
+            _defer = defer ?? (callback => EditorApplication.delayCall += () => callback());
         }
 
         public void AddTo(VisualElement parent)
         {
-            ClearPreviewTextures();
+            ClearRows();
 
             var header = new VisualElement();
             header.style.flexDirection = FlexDirection.Row;
@@ -88,10 +97,10 @@ namespace Funplay.Editor.MCP.Server
 
             var clearButton = new Button(() =>
             {
-                _server.InteractionLog.Clear();
-                ClearPreviewTextures();
-                _scrollView?.contentContainer.Clear();
+                _interactionLog.Clear();
+                ClearRows();
             });
+            clearButton.name = "recent-activity-clear";
             clearButton.text = "Clear";
             clearButton.style.height = 20;
             clearButton.style.width = 50;
@@ -100,6 +109,7 @@ namespace Funplay.Editor.MCP.Server
             parent.Add(header);
 
             _scrollView = new ScrollView(ScrollViewMode.Vertical);
+            _scrollView.name = "recent-activity-scroll";
             _scrollView.style.flexGrow = 1;
             _scrollView.style.backgroundColor = new Color(0.14f, 0.14f, 0.14f);
             _scrollView.style.borderTopLeftRadius = 4;
@@ -115,32 +125,33 @@ namespace Funplay.Editor.MCP.Server
             _autoExpandedRow = null;
             // GetEntries() returns newest-first (index 0 = most recent); this loop walks it
             // back-to-front so the oldest row is added (and rendered) first, newest last/bottom.
-            var entries = _server.InteractionLog.GetEntries();
+            var entries = _interactionLog.GetEntries();
             for (int i = entries.Count - 1; i >= 0; i--)
                 AddRow(entries[i], isLatest: i == 0);
         }
 
         public void OnEntryAdded(MCPLogEntry entry)
         {
-            EditorApplication.delayCall += () =>
+            var generation = _generation;
+            _defer(() =>
             {
-                if (_scrollView == null)
+                // Clear/rebuild/dispose invalidates already-queued entries and scroll requests.
+                if (_scrollView == null || generation != _generation)
                     return;
 
                 AddRow(entry, isLatest: true);
-                EditorApplication.delayCall += () =>
+                _defer(() =>
                 {
-                    if (_scrollView != null)
+                    if (_scrollView != null && generation == _generation)
                         _scrollView.scrollOffset = new Vector2(0, float.MaxValue);
-                };
-            };
+                });
+            });
         }
 
         public void Dispose()
         {
-            ClearPreviewTextures();
+            ClearRows();
             _scrollView = null;
-            _autoExpandedRow = null;
         }
 
         private void AddRow(MCPLogEntry entry, bool isLatest = false)
@@ -149,6 +160,7 @@ namespace Funplay.Editor.MCP.Server
             var accentColor = GetAccentColor(entry.Status);
 
             var card = new VisualElement();
+            card.name = "recent-activity-row";
             card.style.backgroundColor = new Color(0.19f, 0.19f, 0.19f);
             card.style.borderTopLeftRadius = 4;
             card.style.borderTopRightRadius = 4;
@@ -163,6 +175,7 @@ namespace Funplay.Editor.MCP.Server
             card.style.marginBottom = 3;
 
             var topRow = new VisualElement();
+            topRow.name = "recent-activity-header";
             topRow.style.flexDirection = FlexDirection.Row;
             topRow.style.alignItems = Align.Center;
 
@@ -219,31 +232,9 @@ namespace Funplay.Editor.MCP.Server
                 isStructuredResult = true;
             }
 
-            var detailsContainer = new VisualElement();
-            var hasDetails = false;
-
-            if (!string.IsNullOrEmpty(displayResult))
-            {
-                if (isStructuredResult)
-                {
-                    detailsContainer.Add(CreateStructuredResult(displayResult));
-                }
-                else
-                {
-                    var summaryLabel = CreateWrappedLabel(displayResult, new Color(0.6f, 0.6f, 0.6f));
-                    summaryLabel.style.fontSize = 11;
-                    summaryLabel.style.marginTop = 3;
-                    detailsContainer.Add(summaryLabel);
-                }
-                hasDetails = true;
-            }
-
-            if (!string.IsNullOrEmpty(entry.ImageDataUri) &&
-                TryCreateImagePreview(entry.ImageDataUri, out var preview))
-            {
-                detailsContainer.Add(preview);
-                hasDetails = true;
-            }
+            var detailsContainer = new VisualElement { name = "recent-activity-details" };
+            var hasDetails = !string.IsNullOrEmpty(displayResult) || !string.IsNullOrEmpty(entry.ImageDataUri);
+            var rowState = new RowExpandState { Card = card };
 
             if (isLatest)
             {
@@ -257,7 +248,9 @@ namespace Funplay.Editor.MCP.Server
 
             if (hasDetails)
             {
-                var collapsedSummary = CreateCollapsedSummaryLabel(entry.ResultSummary);
+                // DisplayResult is readable text with a larger, bounded display budget. The
+                // compact ResultSummary is raw protocol text capped at 200 chars for resources.
+                var collapsedSummary = CreateCollapsedSummaryLabel(displayResult);
                 card.Add(collapsedSummary);
 
                 card.Add(detailsContainer);
@@ -276,18 +269,54 @@ namespace Funplay.Editor.MCP.Server
                     evt.StopImmediatePropagation();
                 }, TrickleDown.TrickleDown);
 
-                var rowState = new RowExpandState();
                 var expanded = false;
+                Texture2D previewTexture = null;
+                rowState.ReleaseDetails = () =>
+                {
+                    detailsContainer.Clear();
+                    if (previewTexture != null)
+                        UnityEngine.Object.DestroyImmediate(previewTexture);
+                    previewTexture = null;
+                };
                 rowState.ApplyExpanded = value =>
                 {
+                    if (value && !expanded)
+                    {
+                        if (!string.IsNullOrEmpty(displayResult))
+                        {
+                            if (isStructuredResult)
+                                detailsContainer.Add(CreateStructuredResult(displayResult));
+                            else
+                            {
+                                var text = CreateWrappedLabel(displayResult, new Color(0.6f, 0.6f, 0.6f));
+                                text.style.fontSize = 11;
+                                text.style.marginTop = 3;
+                                detailsContainer.Add(text);
+                            }
+                        }
+
+                        if (TryCreateImagePreview(entry.ImageDataUri, out var preview))
+                        {
+                            previewTexture = preview.image as Texture2D;
+                            detailsContainer.Add(preview);
+                        }
+                    }
+                    else if (!value && expanded)
+                    {
+                        // Hiding the subtree alone retains its Labels and decoded GPU texture.
+                        // Recreate on demand so collapsed history stays lightweight.
+                        rowState.ReleaseDetails();
+                    }
                     expanded = value;
                     expandArrow.text = expanded ? "▾" : "▸";
                     detailsContainer.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
                     collapsedSummary.style.display = expanded ? DisplayStyle.None : DisplayStyle.Flex;
                 };
 
-                EventCallback<ClickEvent> toggle = _ =>
+                EventCallback<ClickEvent> toggle = evt =>
                 {
+                    if (evt.button != 0)
+                        return;
                     rowState.ManuallyToggled = true;
                     rowState.ApplyExpanded(!expanded);
                 };
@@ -306,14 +335,26 @@ namespace Funplay.Editor.MCP.Server
                 expandArrow.style.display = DisplayStyle.None;
             }
 
+            _rows.Add(rowState);
             _scrollView?.contentContainer.Add(card);
+            // The log is a ring buffer; mirror its bound instead of retaining evicted UI rows.
+            while (_rows.Count > _interactionLog.Capacity)
+            {
+                var oldest = _rows[0];
+                oldest.ReleaseDetails?.Invoke();
+                oldest.Card.RemoveFromHierarchy();
+                if (_autoExpandedRow == oldest)
+                    _autoExpandedRow = null;
+                _rows.RemoveAt(0);
+            }
         }
 
         private static Label CreateCollapsedSummaryLabel(string resultSummary)
         {
-            var text = string.IsNullOrEmpty(resultSummary) ? "" : resultSummary.Replace('\n', ' ').Trim();
+            var text = string.IsNullOrEmpty(resultSummary) ? "" : resultSummary.Replace('\r', ' ').Replace('\n', ' ').Trim();
 
             var label = new Label(text);
+            label.name = "recent-activity-summary";
             label.enableRichText = false;
             label.style.fontSize = 10;
             label.style.color = new Color(0.55f, 0.55f, 0.55f);
@@ -610,24 +651,23 @@ namespace Funplay.Editor.MCP.Server
             }
         }
 
-        private bool TryCreateImagePreview(string imageDataUri, out Image preview)
+        private static bool TryCreateImagePreview(string imageDataUri, out Image preview)
         {
             preview = null;
             const string prefix = "data:image/png;base64,";
             if (string.IsNullOrEmpty(imageDataUri) || !imageDataUri.StartsWith(prefix, StringComparison.Ordinal))
                 return false;
 
+            Texture2D texture = null;
             try
             {
                 var bytes = Convert.FromBase64String(imageDataUri.Substring(prefix.Length));
-                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 if (!texture.LoadImage(bytes))
                 {
                     UnityEngine.Object.DestroyImmediate(texture);
                     return false;
                 }
-
-                _previewTextures.Add(texture);
 
                 preview = new Image
                 {
@@ -645,19 +685,20 @@ namespace Funplay.Editor.MCP.Server
             }
             catch
             {
+                if (texture != null)
+                    UnityEngine.Object.DestroyImmediate(texture);
                 return false;
             }
         }
 
-        private void ClearPreviewTextures()
+        private void ClearRows()
         {
-            foreach (var texture in _previewTextures)
-            {
-                if (texture != null)
-                    UnityEngine.Object.DestroyImmediate(texture);
-            }
-
-            _previewTextures.Clear();
+            _generation++;
+            foreach (var row in _rows)
+                row.ReleaseDetails?.Invoke();
+            _rows.Clear();
+            _autoExpandedRow = null;
+            _scrollView?.contentContainer.Clear();
         }
     }
 }

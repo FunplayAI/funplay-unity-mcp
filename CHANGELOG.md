@@ -5,6 +5,16 @@
 ### Changed
 - The MCP Server window's Recent Activity panel now renders each entry collapsed to a one-line summary by default, instead of always rendering the full structured result (or image preview) for every row. On a busy session the panel previously accumulated dozens of fully-expanded cards -- each with its own parsed JSON tree or embedded screenshot -- which made the window noticeably slower to lay out and repaint, and buried the one entry a user actually wanted to check under a wall of detail from unrelated calls. Clicking a row's header or its summary line expands it in place; the most recently added entry still expands automatically so the latest result is visible without an extra click, but any entry a user has manually expanded or collapsed keeps that state even as newer entries arrive afterward (only the automatic "latest entry" expansion is superseded). The summary line stretches to the panel's actual width on every relayout -- growing back on widen as well as shrinking on narrow -- instead of a fixed character count that left it either truncated well short of the available space or unable to grow into a wider window. Hovering a row (its header or its summary line) shows the same formatted, multi-line detail text the expanded view renders, by intercepting the tooltip during the trickle-down phase before Unity's own default per-Label ellipsis tooltip (which otherwise shows raw, unformatted text and could disagree with what the header showed) has a chance to supply it.
 
+- Collapsed summaries use the human-readable formatted result instead of raw JSON and retain text beyond the compact resource summary's 200-character limit, while keeping the existing 4,000-character display bound. Plain-text results use that same display budget.
+- Detail controls and screenshot textures are created only when a row expands and released when it collapses, is cleared, or is evicted. The panel mirrors the activity log's bounded capacity, and queued callbacks cannot resurrect cleared rows or duplicate rows after a rebuild.
+
+### Pull requests and issues
+- [PR #57](https://github.com/FunplayAI/funplay-unity-mcp/pull/57): collapsible Recent Activity, with readable summaries, lazy detail loading, resource cleanup, and Editor UI regression tests.
+- No GitHub issues were closed by these changes.
+
+### Contributors
+- Thanks [@dehuaichendragonplus](https://github.com/dehuaichendragonplus) for PR #57.
+
 ## [0.6.6] - 2026-09-07
 
 ### Added

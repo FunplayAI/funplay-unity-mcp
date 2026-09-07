@@ -43,6 +43,7 @@ namespace Funplay.Editor.MCP.Server
         private readonly object _lock = new object();
 
         public event Action<MCPLogEntry> OnEntryAdded;
+        internal int Capacity => _buffer.Length;
 
         public MCPInteractionLog(int capacity = 200)
         {
@@ -57,7 +58,11 @@ namespace Funplay.Editor.MCP.Server
             var compactSummary = imageDataUri != null
                 ? "Screenshot captured successfully."
                 : CreateCompactSummary(resultSummary);
-            var displayResult = compactSummary;
+            // Keep the compact resource/log summary bounded at 200 characters, but do not
+            // irreversibly truncate the panel's plain-text display at that smaller limit.
+            var displayResult = imageDataUri != null
+                ? compactSummary
+                : TruncateDisplayResult(resultSummary ?? "");
             var isJsonResult = false;
 
             if (imageDataUri == null && TryFormatJsonForDisplay(resultSummary, out var formattedJson))
