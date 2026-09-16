@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-09-16
+
+### Changed
+- Built-in `unity-ui-composition` Project Skill is now v1.0.5. Sliced Image guidance requires checking the displayed Sprite's border, choosing pixel insets from the actual artwork, applying and reading back source Sprite import settings, and verifying resized corners and edges. It covers Single/Multiple sprites, atlas sources, and shared-asset scope; existing skill installations are detected as needing an update.
+- Design-reference guidance now maps multiple images to individual screens and states, checks visible details against actual Unity captures, and asks focused questions about material ambiguity after inspecting the references and project assets. Preserving an existing prefab is not a reason to retain visual mismatches; approximations, unresolved differences, and unverified screens must be disclosed rather than reported as a complete match.
+
+### Validation
+- Skill upgrade regression coverage verifies that all six supported client targets update the UI skill while leaving the unchanged workflow skill current and clearing the skills-update notice.
+- All 438 plugin EditMode cases passed: 421 in batch mode and the remaining 17 Recent Activity UI cases in the interactive FunplayMcp Editor. Generated skill documents and Cursor rule metadata were also validated.
+
+### Pull requests and issues
+- No GitHub pull requests were merged or issues closed by this release. These improvements address direct user feedback about Sprite borders and design-reference fidelity.
+
 ## [0.6.7] - 2026-09-07
 
 ### Added
