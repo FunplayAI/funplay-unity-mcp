@@ -46,13 +46,17 @@ namespace Funplay.Editor.Tools.Builtins
         /// write-to-disk + JSON path result when the caller asked for a file (or when the
         /// payload is too large to send inline, in which case it auto-falls back to a file).
         /// </summary>
-        private static string FinishCapture(byte[] pngBytes, bool saveToFile, string outputPath, string defaultBaseName)
+        private static string FinishCapture(byte[] pngBytes, bool saveToFile, string outputPath, string defaultBaseName, VisualGeometry geometry = null)
         {
+            var pngSize = VisualCoordinates.PngSize(pngBytes);
+            geometry = geometry ?? VisualCoordinates.Create(defaultBaseName.Replace('-', '_'), pngSize.x, pngSize.y, pngSize.x, pngSize.y, false);
+            VisualCoordinates.Register(geometry);
             var spillToFile = ShouldSpillScreenshotToFile(pngBytes.Length, saveToFile);
             var autoFallback = spillToFile && !saveToFile;
 
             if (!spillToFile)
-                return ImagePrefix + Convert.ToBase64String(pngBytes);
+                return JsonConvert.SerializeObject(Response.Success("Screenshot captured.",
+                    new { bytes = pngBytes.Length, geometry, inline_image = ImagePrefix + Convert.ToBase64String(pngBytes) }, new { funplay_capture = 1 }));
 
             if (!TrySaveScreenshotBytes(pngBytes, outputPath, defaultBaseName, out var savedPath, out var error))
                 return ToolResultFormatter.Error("SCREENSHOT_SAVE_FAILED", error);
@@ -61,7 +65,7 @@ namespace Funplay.Editor.Tools.Builtins
                 autoFallback
                     ? $"Screenshot ({pngBytes.Length} bytes) exceeded the inline transport limit and was saved to a file instead. Read the file to view it."
                     : "Screenshot saved to file.",
-                new { path = savedPath, bytes = pngBytes.Length, fell_back_to_file = autoFallback }));
+                new { path = savedPath, bytes = pngBytes.Length, fell_back_to_file = autoFallback, geometry }));
         }
 
         private static bool TrySaveScreenshotBytes(byte[] pngBytes, string outputPath, string baseName, out string savedPath, out object error)
@@ -182,7 +186,14 @@ namespace Funplay.Editor.Tools.Builtins
 
             var playModePng = TryCapturePlayModeViewPngBytes(playModeView, width, height);
             if (playModePng != null)
-                return FinishCapture(playModePng, save_to_file, output_path, "game-view");
+            {
+                var dimensions = VisualCoordinates.PngSize(playModePng);
+                var sourceWidth = width; var sourceHeight = height;
+                bool actualRender = TryGetPlayModeViewRenderTexture(playModeView, out var sourceTexture);
+                if (actualRender) { sourceWidth = sourceTexture.width; sourceHeight = sourceTexture.height; }
+                var geometry = VisualCoordinates.Create("game_view", sourceWidth, sourceHeight, dimensions.x, dimensions.y, actualRender);
+                return FinishCapture(playModePng, save_to_file, output_path, "game-view", geometry);
+            }
 
             var camera = Camera.main;
             if (camera == null)
@@ -193,7 +204,10 @@ namespace Funplay.Editor.Tools.Builtins
 
             try
             {
-                return FinishCapture(CaptureWithUIPngBytes(camera, width, height), save_to_file, output_path, "game-view");
+                // Camera fallback is a separately rendered image; do not map clicks as if it were
+                // the live Game View framebuffer (especially with camera viewport/overlay changes).
+                return FinishCapture(CaptureWithUIPngBytes(camera, width, height), save_to_file, output_path, "game-view",
+                    VisualCoordinates.Create("camera_fallback", width, height, width, height, false));
             }
             catch (Exception ex)
             {

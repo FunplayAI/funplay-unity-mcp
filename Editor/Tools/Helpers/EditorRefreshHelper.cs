@@ -249,7 +249,7 @@ namespace Funplay.Editor.Tools.Helpers
             return await tcs.Task;
         }
 
-        private static ScriptChangeState CaptureScriptChangeState(bool scanForUnknownProjectScripts)
+        internal static ScriptChangeState CaptureScriptChangeState(bool scanForUnknownProjectScripts)
         {
             try
             {

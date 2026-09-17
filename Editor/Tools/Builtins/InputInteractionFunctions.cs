@@ -15,11 +15,40 @@ namespace Funplay.Editor.Tools.Builtins
     [ToolProvider("InputSimulation")]
     internal static class InputInteractionFunctions
     {
+        [Description("Dispatch one UI scroll event at a validated screen/image point in Play Mode. Uses the top raycast hit's IScrollHandler (no click-through). Deltas are uGUI wheel units, not pixels; ScrollRect sensitivity belongs to the project. Records a timeline marker when recording is active.")]
+        public static object SimulateUiScroll(
+            [ToolParam("X coordinate")] float x,
+            [ToolParam("Y coordinate")] float y,
+            [ToolParam("Vertical wheel delta; negative normally scrolls down")] float delta_y,
+            [ToolParam("Horizontal wheel delta", Required = false)] float delta_x = 0,
+            [ToolParam("render_pixels, image_pixels or normalized", Required = false)] string coordinate_space = "render_pixels",
+            [ToolParam("bottom_left or top_left", Required = false)] string origin = "bottom_left",
+            [ToolParam("Fresh screenshot ID; required for image_pixels", Required = false)] string capture_id = null)
+        {
+            if (!EditorApplication.isPlaying) return Response.Error("PLAY_MODE_REQUIRED");
+            if (float.IsNaN(delta_x) || float.IsNaN(delta_y) || float.IsInfinity(delta_x) || float.IsInfinity(delta_y) ||
+                Mathf.Abs(delta_x) > 1000 || Mathf.Abs(delta_y) > 1000) return Response.Error("INVALID_SCROLL_DELTA");
+            if (!VisualCoordinates.TryResolve(x, y, coordinate_space, origin, capture_id, out var point, out var geometry, out var error)) return Response.Error(error);
+            var events = EventSystem.current; if (events == null) return Response.Error("NO_EVENT_SYSTEM");
+            var data = new PointerEventData(events) { position = point, scrollDelta = new Vector2(delta_x, delta_y) };
+            var hits = new List<RaycastResult>(); events.RaycastAll(data, hits);
+            var target = hits.Count > 0 ? ExecuteEvents.GetEventHandler<IScrollHandler>(hits[0].gameObject) : null;
+            if (target == null) return Response.Error("NO_SCROLL_HANDLER", new { geometry, top_hit = hits.Count > 0 ? ObjectsHelper.GetGameObjectPath(hits[0].gameObject) : null });
+            VideoRecordingFunctions.RecordMarker("scroll", "UI wheel delta " + data.scrollDelta.ToString(), point, geometry: geometry);
+            ExecuteEvents.Execute(target, data, ExecuteEvents.scrollHandler);
+            return Response.Success("Scroll event dispatched; capture/record to verify the resulting layout.", new
+            { target_id = ObjectIdHelper.GetSerializableId(target), target_path = ObjectsHelper.GetGameObjectPath(target),
+                point = new { x = point.x, y = point.y }, delta_x, delta_y, geometry });
+        }
+
         [Description("Simulate a mouse click at a screen position in Play Mode. Coordinates are in screen pixels with 0,0 at the bottom-left. Works without the Input System by dispatching UI and physics events. Returns a structured result reporting whether a target was actually hit, by which strategy, and the object that was clicked (or null when nothing was hit).")]
         public static object SimulateMouseClick(
-            [ToolParam("Screen X coordinate in pixels")] int x,
-            [ToolParam("Screen Y coordinate in pixels")] int y,
-            [ToolParam("Mouse button: left, right, or middle", Required = false)] string button = "left")
+            [ToolParam("X coordinate (pixels by default)")] float x,
+            [ToolParam("Y coordinate (pixels by default)")] float y,
+            [ToolParam("Mouse button: left, right, or middle", Required = false)] string button = "left",
+            [ToolParam("render_pixels (legacy default), image_pixels, or normalized", Required = false)] string coordinate_space = "render_pixels",
+            [ToolParam("bottom_left (legacy default) or top_left", Required = false)] string origin = "bottom_left",
+            [ToolParam("Screenshot capture ID; required for image_pixels. Rejects changed geometry/mode or captures older than 30 seconds.", Required = false)] string capture_id = null)
         {
             if (!EditorApplication.isPlaying)
                 return Response.Error("PLAY_MODE_REQUIRED", new { message = "SimulateMouseClick only works in Play Mode." });
@@ -35,10 +64,14 @@ namespace Funplay.Editor.Tools.Builtins
                     });
                 }
 
-                var uiPosition = ResolveUiClickPosition(x, y, out var uiMessage);
-                var viewportPosition = ResolveViewportClickPosition(x, y, out var viewportMessage);
+                if (!VisualCoordinates.TryResolve(x, y, coordinate_space, origin, capture_id, out var uiPosition, out var geometry, out var coordinateError))
+                    return Response.Error(coordinateError, new { hint = "Capture a fresh Game View and pass its capture_id for image coordinates." });
+                var viewportPosition = new Vector2(uiPosition.x / geometry.render_width, uiPosition.y / geometry.render_height);
+                var uiMessage = "Converted to bottom-left render pixels using the visual coordinate contract.";
+                var viewportMessage = "Normalized full-render coordinates; camera rect is applied by physics dispatch.";
 
                 var attempts = new List<ClickOutcome>();
+                VideoRecordingFunctions.RecordMarker("click", button + " click dispatched", uiPosition, geometry: geometry);
                 var uiOutcome = PerformUiClick(
                     Mathf.RoundToInt(uiPosition.x),
                     Mathf.RoundToInt(uiPosition.y),
@@ -84,6 +117,7 @@ namespace Funplay.Editor.Tools.Builtins
                 var data = new
                 {
                     hit,
+                    geometry,
                     strategy = hit ? winner.Strategy : null,
                     target = BuildTargetPayload(hit ? winner.Target : null),
                     blockedBy = BuildTargetPayload(blockedBy),
@@ -91,6 +125,7 @@ namespace Funplay.Editor.Tools.Builtins
                     {
                         x,
                         y,
+                        coordinate_space, origin, capture_id,
                         button = inputButton.ToString().ToLowerInvariant()
                     },
                     attempted,
@@ -321,7 +356,13 @@ namespace Funplay.Editor.Tools.Builtins
             }
 
             Physics.SyncTransforms();
-            var ray = mainCamera.ViewportPointToRay(new Vector3(viewportPosition.x, viewportPosition.y, 0f));
+            var cameraRect = mainCamera.rect;
+            if (!cameraRect.Contains(viewportPosition) || cameraRect.width <= 0 || cameraRect.height <= 0)
+            {
+                var outside = ClickOutcome.Miss("physics-raycast", "point is outside the Main Camera viewport");
+                attempts.Add(outside); return outside;
+            }
+            var ray = mainCamera.ViewportPointToRay(new Vector3((viewportPosition.x - cameraRect.x) / cameraRect.width, (viewportPosition.y - cameraRect.y) / cameraRect.height, 0f));
             if (Physics.Raycast(ray, out var hit, 1000f))
             {
                 var hitObject = hit.collider.gameObject;

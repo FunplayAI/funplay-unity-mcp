@@ -26,7 +26,7 @@ namespace Funplay.Editor.Tools.Builtins
         private const int HistoryMaxEntries = 50;
         private const string FunplayScriptingNamespace = "Funplay.Editor.Tools.Scripting";
 
-        [Description("Primary high-flexibility execution tool. Compiles a C# snippet with Unity's Roslyn csc first " +
+        [Description("Fallback for project-specific operations. Prefer structured tools when available. Compiles a C# snippet with Unity's Roslyn csc first " +
                      "while preserving the in-memory compilation/execution flow, then runs the compiled assembly on the editor thread. " +
                      "Two templates are supported:\n" +
                      "  1) Recommended: implement IFunplayCommand on a class — receives an ExecutionContext (ctx) " +

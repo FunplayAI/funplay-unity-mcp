@@ -32,7 +32,8 @@ namespace Funplay.Editor.Tools.Builtins
                 isPlayingOrWillChange = EditorApplication.isPlayingOrWillChangePlaymode,
                 applicationPath = EditorApplication.applicationPath,
                 timeSinceStartup = EditorApplication.timeSinceStartup,
-                unityVersion = Application.unityVersion
+                unityVersion = Application.unityVersion,
+                readiness = Funplay.Editor.State.EditorOperationService.CurrentEditor()
             });
         }
 

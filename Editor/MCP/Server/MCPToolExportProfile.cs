@@ -23,21 +23,26 @@ namespace Funplay.Editor.MCP.Server
             "get_scene_info",
             "get_hierarchy",
             "get_console_logs",
-            "get_performance_snapshot",
-            "analyze_scene_complexity",
             "capture_scene_view",
             "capture_game_view",
             "record_game_view",
-            "capture_simulator_view",
-            "capture_editor_window",
+            "extract_recording_frames",
+            "get_recording_frame",
+            "simulate_ui_scroll",
             "raycast_at_point",
-            "wait_for_compilation",
-            "request_recompile",
             "get_compilation_errors",
-            "get_reload_recovery_status",
-            "enter_play_mode",
-            "exit_play_mode",
-            "get_time_scale",
+            "prepare_editor",
+            "get_task",
+            "cancel_editor_operation",
+            "audit_ui",
+            "cancel_ui_audit",
+            "find_project_types",
+            "inspect_ui_sprites",
+            "get_tool_capabilities",
+            "get_visual_coordinates",
+            "get_object_screen_bounds",
+            "get_ui_defaults",
+            "create_project_ui",
             // Editor state -- high-frequency reads/writes
             "get_editor_state",
             "get_selection",
@@ -123,7 +128,7 @@ namespace Funplay.Editor.MCP.Server
         public static int GetSortRank(string toolName, MCPToolExportProfile profile)
         {
             if (string.Equals(toolName, "execute_code", StringComparison.OrdinalIgnoreCase))
-                return 0;
+                return 10000;
 
             if (profile == MCPToolExportProfile.Core && CoreTools.Contains(toolName))
                 return 100;
@@ -134,7 +139,7 @@ namespace Funplay.Editor.MCP.Server
         public static string BuildDescriptionPrefix(string toolName, MCPToolExportProfile profile)
         {
             if (string.Equals(toolName, "execute_code", StringComparison.OrdinalIgnoreCase))
-                return "[primary] " + BuildDescriptionPrefix(profile);
+                return "[fallback] " + BuildDescriptionPrefix(profile);
 
             return BuildDescriptionPrefix(profile);
         }

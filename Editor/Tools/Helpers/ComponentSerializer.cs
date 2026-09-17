@@ -173,7 +173,7 @@ namespace Funplay.Editor.Tools.Helpers
             return value.ToString();
         }
 
-        private static object ReadPropertyValue(SerializedProperty p)
+        internal static object ReadPropertyValue(SerializedProperty p)
         {
             switch (p.propertyType)
             {

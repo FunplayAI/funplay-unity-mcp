@@ -60,6 +60,15 @@ namespace Funplay.Editor.Tools.Helpers
 #endif
         }
 
+        internal static string GetSerializedReferenceId(SerializedProperty property)
+        {
+#if UNITY_6000_4_OR_NEWER
+            return property.objectReferenceEntityIdValue == EntityId.None ? "0" : property.objectReferenceEntityIdValue.ToString();
+#else
+            return property.objectReferenceInstanceIDValue.ToString(CultureInfo.InvariantCulture);
+#endif
+        }
+
         public static UnityObject ToObject(string objectId)
         {
             if (string.IsNullOrWhiteSpace(objectId) || objectId == "0")

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using DescriptionAttribute = System.ComponentModel.DescriptionAttribute;
 using Funplay.Editor.Tools.Helpers;
+using Funplay.Editor.State;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
@@ -13,7 +14,7 @@ namespace Funplay.Editor.Tools.Builtins
     /// <summary>
     /// Unity Test Runner integration with an async job pattern: run_tests starts a run and
     /// returns a job id immediately (test runs can take minutes and PlayMode runs trigger
-    /// domain reloads, so a synchronous MCP call would time out); get_test_job polls for
+    /// domain reloads, so a synchronous MCP call would time out); get_task waits for
     /// status/results. Job state lives in SessionState so it survives the domain reloads
     /// that PlayMode test runs cause; the results callback is re-registered on every domain
     /// load via [InitializeOnLoad].
@@ -24,7 +25,7 @@ namespace Funplay.Editor.Tools.Builtins
         private const string ActiveJobKey = "Funplay.TestRunner.ActiveJob";
 
         [Description("Run Unity Test Runner tests (EditMode or PlayMode) asynchronously. Returns a job_id immediately; " +
-                     "poll get_test_job for status and results. Only one test run can be active at a time (a Unity Test " +
+                     "use get_task for bounded status waits and results (get_test_job remains compatible). Only one test run can be active at a time (a Unity Test " +
                      "Runner limitation). PlayMode runs enter Play Mode and trigger domain reloads -- the job state survives " +
                      "them. Optional filters narrow the run to specific tests, categories, or assemblies.")]
         public static object RunTests(
@@ -48,7 +49,7 @@ namespace Funplay.Editor.Tools.Builtins
                 return Response.Error("TESTS_ALREADY_RUNNING", new
                 {
                     job_id = active.Value<string>("jobId"),
-                    hint = "Poll get_test_job, or cancel_test_run if the run is stuck."
+                    hint = "Read get_task with kind=tests and this job_id as task_id; cancel_test_run remains an explicit control action."
                 });
             }
 
@@ -85,9 +86,9 @@ namespace Funplay.Editor.Tools.Builtins
             };
             SaveJob(job);
 
-            return Response.Success(
-                $"Test run started ({testMode}). Poll get_test_job with this job_id; PlayMode runs may take a while and reload the domain.",
-                new { job_id = guid, mode = testMode.ToString() });
+            return TaskStatusService.Observe("tests", Response.Success(
+                $"Test run started ({testMode}). Use get_task with data.task.task_id for bounded waits; PlayMode runs can reload the domain.",
+                new { job_id = guid, mode = testMode.ToString() }));
         }
 
         [Description("Get the status and results of a test run started by run_tests. While running, reports progress; " +

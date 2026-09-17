@@ -334,13 +334,24 @@ namespace Funplay.Editor.Tools.Builtins
         [Description("Find GameObjects by id/name/path/tag/layer/component. Returns full structured results so the agent can chain by_id calls.")]
         [ReadOnlyTool]
         public static object FindGameObjects(
-            [ToolParam("Search query (id, name, path, tag name, layer name/index, or component type)")] string query,
+            [ToolParam("Search query; omit for a structured filter-only scan", Required = false)] string query = null,
             [ToolParam("Search method (by_id/by_name/by_path/by_tag/by_layer/by_component)", Required = false)] string find_method = null,
             [ToolParam("Include inactive objects", Required = false)] string include_inactive = null,
             [ToolParam("Limit results to children of this GameObject identifier (used with find_method=by_*)", Required = false)] string in_parent = null,
-            [ToolParam("Maximum results to return (default 50)", Required = false)] string max = "50")
+            [ToolParam("Maximum results to return (default 50)", Required = false)] string max = "50",
+            [ToolParam("JSON {component, assembly?, where:[{property,op,value}], select:[serializedPaths]}. Predicates AND on the same component; no arbitrary property getters.", Required = false)] string filter = null,
+            [ToolParam("Structured scope: scene, selection, prefabs; omitted preserves legacy query behavior", Required = false)] string scope = null,
+            [ToolParam("JSON prefab paths/folders for scope=prefabs", Required = false)] string asset_paths = null,
+            [ToolParam("Structured result page offset", Required = false)] int offset = 0,
+            [ToolParam("Structured scan limit, 1..50000", Required = false)] int scan_limit = 10000,
+            [ToolParam("Read a stable query snapshot page (120-second lifetime; lost on reload)", Required = false)] string snapshot_id = null)
         {
             bool inactive = include_inactive == "true" || include_inactive == "1";
+            if (filter != null || scope != null || asset_paths != null || snapshot_id != null || offset != 0)
+            {
+                if (!int.TryParse(max, out var limit)) return Response.Error("INVALID_QUERY_LIMIT");
+                return StructuredObjectQuery.Execute(query, find_method, inactive, in_parent, limit, filter, scope, asset_paths, offset, scan_limit, snapshot_id);
+            }
             GameObject root = null;
             if (!string.IsNullOrEmpty(in_parent))
             {

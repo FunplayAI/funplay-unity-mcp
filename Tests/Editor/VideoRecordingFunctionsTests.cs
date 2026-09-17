@@ -60,10 +60,10 @@ namespace Funplay.Editor.Tests
             Assert.IsTrue(MCPToolExportPolicy.DefaultCoreTools.Contains("record_game_view"));
             Assert.AreEqual(typeof(VideoRecordingFunctions), ToolRegistry.GetMethod("record_game_view").DeclaringType);
             var methods = typeof(VideoRecordingFunctions).GetMethods(BindingFlags.Public | BindingFlags.Static);
-            Assert.AreEqual(1, methods.Length);
-            Assert.AreEqual("RecordGameView", methods[0].Name);
-            Assert.IsTrue(methods[0].GetParameters().All(p => p.HasDefaultValue));
-            Assert.IsFalse(ToolRegistry.IsReadOnly(methods[0]));
+            CollectionAssert.AreEquivalent(new[] { "RecordGameView", "MarkRecording" }, methods.Select(x => x.Name));
+            var recording = methods.Single(x => x.Name == "RecordGameView");
+            Assert.IsTrue(recording.GetParameters().All(p => p.HasDefaultValue));
+            Assert.IsFalse(ToolRegistry.IsReadOnly(recording));
         }
 
         [Test]

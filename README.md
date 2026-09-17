@@ -23,7 +23,7 @@
 
 Funplay MCP for Unity is an MIT-licensed Unity Editor MCP server that lets AI assistants like Claude Code, Cursor, Kimi Code, LM Studio, Windsurf, Codex, and VS Code Copilot operate directly inside your running Unity project.
 
-Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's 157 built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
+Describe your game in one sentence — your AI assistant builds it in Unity through Funplay MCP for Unity's built-in tools for scene creation, script generation, runtime validation, input simulation, performance analysis, and editor automation.
 
 > *"Build a snake game with a 10x10 grid, food spawning, score UI, and game-over screen"*
 >
@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.8"
+    "com.gamebooom.unity.mcp": "0.6.9"
   }
 }
 ```
@@ -319,7 +319,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - This package is **Editor-only**. It does not add runtime components to your built game.
 - The MCP server port is derived per project (range 20000-29999) for new projects, or pinned — projects upgraded from an earlier version keep their existing port as a pin, and any port you type is a pin. The MCP Server window shows where the port came from and the active URL. A project's client-config entry is named after the project directory (for example `funplay-love-town`), so configuring several projects no longer overwrites one shared `funplay` entry. Two projects that share a product name would resolve to the same entry name; the second one configured appends a project hash automatically, so nothing is overwritten and no setting has to be turned on.
 - Local MCP server settings are stored in `UserSettings/FunplayMcpSettings.json`.
-- The package defaults to the `core` MCP tool profile to reduce tool-list noise for AI clients. `core` currently exposes 35 high-signal tools centered on `execute_code`, play mode control, input simulation, screenshots, performance inspection, logs, compilation checks, structured object and component editing, field-level prefab asset editing, editor selection / prefab-stage state, and `execute_menu_item` as a low-friction fallback. Switch to `full` in the MCP Server window if you want all 157 tools exposed.
+- The package defaults to `core`: 40 focused tools for structured inspection/editing, UI audits and authoring, recoverable Editor preparation, shared task status, visual evidence, input and logs. Short MCP tasks can complete in one response; `get_task` supports bounded waits and state-change revisions. `execute_code` remains a project-specific fallback. `full` retains all 180 tools, including legacy status/compile/Play APIs, configuration, preview management and specialized diagnostics. Custom exposure lists are preserved; `get_tool_capabilities` distinguishes implementation from exposure.
 - `execute_code` safety checks and the stricter filesystem guard are enabled by default from **Funplay > MCP Settings**. The guard blocks obvious destructive snippets, broad `System.IO` writes, raw file streams, and absolute/user/system/traversal paths, but it is not a complete sandbox. Clients may still override the default per call with the optional `safety_checks` argument.
 - Plugin debug logging is off by default and can also be enabled from **Funplay > MCP Settings**. Warnings and errors are always written to the Unity Console.
 - All exposed MCP tools run directly. There is no extra approval toggle.
@@ -331,13 +331,13 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Default Safety Checks** — `execute_code` now has persistent default-on safety toggles, including a stricter filesystem guard for clients that do not expose per-call arguments clearly
 - **Play Mode Automation** — Enter play mode, simulate keyboard/mouse input, capture screenshots, inspect logs, and validate behavior from the same MCP session
 - **Project Context Built In** — Exposes live resources for project state, active scene, selection, compilation, console output, and MCP interaction history
-- **Focused by Default, Full When Needed** — `core` exposes a compact high-signal toolset; `full` exposes all 157 tools
+- **Focused by Default, Full When Needed** — `core` exposes 40 focused tools; `full` exposes all 180 built-in tools
 - **Single Unity Package** — No extra approval UI, no external daemon to click through, and no Python requirement for the Unity-side plugin itself
 - **Extensible** — Add custom tools with attribute-based discovery, or connect Unity to external MCP services when needed
 
 ## Highlights
 
-- **157 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 36 modules
+- **180 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 42 modules
 - **Structured Returns + `instanceId` Chaining** — Tools return `{success, message, data}` JSON with stable `instanceId` fields so agents can chain `by_id` calls reliably instead of re-resolving by name
 - **`IFunplayCommand` for `execute_code`** — New snippet template with auto-Undo (`ctx.RegisterObjectCreation/Modification/DestroyObject`), structured logs (`ctx.Log/LogWarning/LogError`), and a tracked changelog returned to the agent
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
@@ -407,7 +407,7 @@ The table below compares this repository with Unity Technologies' official `com.
 | License | MIT, open source | Unity Terms of Service, proprietary |
 | Deployment | Local HTTP MCP server in Editor, no cloud | Editor + native Relay subprocess + Unity Cloud backend |
 | Billing | Free, user brings their own AI client | Credits-based (Unity Dashboard) |
-| Tool exposure | 157 tools across 36 modules, `core` (35) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
+| Tool exposure | 180 tools across 42 modules, `core` (40) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
 | Generic escape hatch | `execute_code` — Roslyn-first in-memory compile, `IFunplayCommand` + Undo, no sandbox (client-side approval) | `RunCommand` — namespace blacklist sandbox |
 | Play mode validation | Full loop: enter / simulate input / capture / read logs / exit | Enter/Exit only; no input simulation |
 | Asset generators | Not built-in (compose external APIs via `execute_code`) | Native Image / Mesh / PBR / Sound / Animation generators |
@@ -420,7 +420,7 @@ For a long-form comparison of the two approaches see [Funplay Unity MCP vs Unity
 
 The current open-source package exposes four high-value capability layers:
 
-- **Tools** — 157 total tools in `full`, 35 focused tools in `core`
+- **Tools** — 180 total tools in `full`, 40 focused tools in `core`
 - **Primary execution** — `execute_code` for rich editor/runtime orchestration
 - **Prompts** — parameterized workflow prompts: `edit_prefab_safely`, `verify_compilation`, `enter_play_and_recover`, `wire_serialized_references`, `create_playable_prototype`. Projects can add their own through `mcp-prompts/*.md` files in the project root.
 - **Resources** — project context, scene summaries, selection state, compile errors, console errors, MCP interaction history, plus resource templates for scene objects, components, and asset paths
@@ -442,7 +442,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Funplay MCP for Unity currently ships with **157 tool functions** across 36 modules:
+Version 0.6.9 includes **180 tool functions** across 42 modules, with 40 high-frequency tools exposed by default.
 
 | Category | Tools |
 |----------|-------|
@@ -464,18 +464,24 @@ Funplay MCP for Unity currently ships with **157 tool functions** across 36 modu
 | **Timeline** | `director_evaluate` |
 | **Prefabs** | `create_prefab`, `instantiate_prefab`, `unpack_prefab`, `open_prefab_stage`, `save_prefab_stage`, `close_prefab_stage`, `set_prefab_property`, `set_prefab_properties` |
 | **ScriptableObject** | `create_scriptable_object`, `get_scriptable_object`, `set_scriptable_object_properties` |
-| **UI** | `create_canvas`, `create_button`, `create_text`, `create_image`, `raycast_at_point` |
+| **UI** | `create_canvas`, `create_button`, `create_text`, `create_image`, `raycast_at_point`, `get_ui_defaults`, `configure_ui_defaults`, `create_project_ui` |
+| **UI Audit** | `audit_ui`, `get_ui_audit`, `cancel_ui_audit` |
+| **UI Preview** | `start_ui_preview_session`, `get_ui_preview_session`, `end_ui_preview_session` |
+| **Inspection** | `find_project_types`, `inspect_ui_sprites`, `get_tool_capabilities` |
+| **Visual Inspection** | `get_visual_coordinates`, `get_object_screen_bounds` |
 | **Animation** | `create_animation_clip`, `create_animator_controller`, `assign_animator`, `get_animator_state`, `set_animator_parameter`, `play_animator_state` |
 | **Camera** | `get_camera_properties`, `set_camera_projection`, `set_camera_settings`, `set_camera_culling_mask` |
 | **Screenshot** | `capture_game_view`, `capture_simulator_view`, `capture_scene_view`, `capture_multiview`, `capture_editor_window` |
-| **Video** | `record_game_view` |
+| **Video** | `record_game_view`, `mark_recording`, `extract_recording_frames`, `get_recording_frame` |
 | **Script Execution** | `execute_code`, `get_execute_code_history`, `replay_execute_code`, `clear_execute_code_history` |
-| **Input Simulation** | `simulate_key_press`, `simulate_key_combo`, `simulate_mouse_click`, `simulate_mouse_drag` |
+| **Input Simulation** | `simulate_key_press`, `simulate_key_combo`, `simulate_mouse_click`, `simulate_mouse_drag`, `simulate_ui_scroll` |
 | **Performance** | `get_performance_snapshot`, `analyze_scene_complexity` |
 | **Profiler** | `profiler_start`, `profiler_stop`, `profiler_status`, `get_frame_timing`, `get_counters`, `get_object_memory`, `get_top_memory_objects`, `memory_take_snapshot`, `memory_list_snapshots`, `memory_compare_snapshots`, `frame_debugger_enable`, `frame_debugger_disable`, `frame_debugger_get_events` |
 | **Memory Snapshot** | `memory_take_full_snapshot`, `memory_list_full_snapshots`, `memory_open_snapshot_in_profiler`, `memory_query_top_objects`, `memory_query_references` |
 | **Packages** | `install_package`, `remove_package`, `list_packages` |
 | **Compilation** | `wait_for_compilation`, `request_recompile`, `get_compilation_errors`, `get_reload_recovery_status` |
+| **Editor Operations** | `prepare_editor`, `get_editor_operation`, `list_editor_operations`, `cancel_editor_operation` |
+| **Tasks** | `get_task` (shared read-only status and bounded waits) |
 | **Testing** | `run_tests`, `get_test_job`, `cancel_test_run` |
 | **Editor State** | `get_editor_state`, `get_selection`, `set_selection`, `get_prefab_stage`, `get_active_tool`, `set_active_tool`, `get_windows`, `get_tags`, `add_tag`, `remove_tag`, `get_layers`, `add_layer`, `get_build_settings` |
 | **Project Settings** | `get_project_settings` |
@@ -484,6 +490,8 @@ Funplay MCP for Unity currently ships with **157 tool functions** across 36 modu
 | **Visual Feedback** | `select_object`, `focus_on_object`, `ping_asset`, `log_message`, `show_dialog`, `get_console_logs` |
 
 > 📊 See [PROFILER_TOOLS.md](PROFILER_TOOLS.md) for the full Profiler tool reference, implementation notes, known limitations, and test report.
+
+See [Reliable UI workflows](Documentation~/ui-workflows.md) for end-to-end preparation, read-only audits, structured queries, project TMP/prefab/input defaults, capture-coordinate mapping, recording markers/keyframes, and recoverable preview sessions. Both built-in Project Skills include these workflows; use **Project Skills** to update existing installations. These tools and skill updates are included starting with v0.6.9.
 
 ### Recording Game View video
 
@@ -529,7 +537,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (protocol handling)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (reflection-based invocation)
-                └─ Tool Functions (157 built-in tools across 36 modules)
+                └─ Tool Functions (180 built-in tools across 42 modules)
 ```
 
 ```

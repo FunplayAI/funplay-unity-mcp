@@ -488,15 +488,20 @@ namespace Funplay.Editor.MCP.Server
                     return;
                 }
 
-                var response = await _threadHelper.ExecuteAsyncOnEditorThreadAsync(
+                // get_task owns a bounded initial Editor read in the bridge. Do not put an
+                // unbounded Editor-queue hop in front of it. Only this read-only entry can
+                // bypass the outer dispatch; Unity APIs and exposure checks still run there.
+                var response = IsBoundedStatusRequest(request)
+                    ? await Task.Run(() => requestHandler.HandleRequestAsync(request, default)).ConfigureAwait(false)
+                    : await _threadHelper.ExecuteAsyncOnEditorThreadAsync(
                     async () =>
                     {
                         var redeliveryResponse = TryCreateBrokerRedeliveryResponse(request);
                         if (redeliveryResponse != null)
                             return redeliveryResponse;
 
-                        return await requestHandler.HandleRequestAsync(request, default);
-                    });
+                        return await requestHandler.HandleRequestAsync(request, default).ConfigureAwait(false);
+                    }).ConfigureAwait(false);
                 sendResponse(response);
             }
             catch (Exception ex) when (IsShutdownCancellation(ex))
@@ -648,7 +653,7 @@ namespace Funplay.Editor.MCP.Server
             }
 
             var toolName = GetToolName(request);
-            if (string.Equals(toolName, "get_reload_recovery_status", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(toolName, "get_reload_recovery_status", StringComparison.OrdinalIgnoreCase) || IsBoundedStatusRequest(request))
                 return null;
 
             var recovery = DomainReloadHandler.GetLastRecoveryInfo(false);
@@ -703,6 +708,9 @@ namespace Funplay.Editor.MCP.Server
 
             return request.Params.TryGetValue("name", out var value) ? value?.ToString() ?? string.Empty : string.Empty;
         }
+
+        internal static bool IsBoundedStatusRequest(MCPRequest request) => request?.JsonRpc == "2.0" &&
+            request.Method == "tools/call" && string.Equals(GetToolName(request), "get_task", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// The port this project wants to bind: a port the user picked always wins, otherwise it is

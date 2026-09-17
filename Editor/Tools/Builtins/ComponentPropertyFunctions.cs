@@ -122,6 +122,7 @@ namespace Funplay.Editor.Tools.Builtins
                 {
                     componentInstanceId = ObjectIdHelper.GetSerializableId(resolved.Component),
                     property,
+                    readback = DescribeReadback(resolved.Component, false),
                     newValue = readBack.TryGetValue(property, out var nv) ? nv : null
                 });
         }
@@ -175,6 +176,7 @@ namespace Funplay.Editor.Tools.Builtins
                 {
                     componentInstanceId = ObjectIdHelper.GetSerializableId(resolved.Component),
                     successCount = success,
+                    readback = DescribeReadback(resolved.Component, false),
                     failCount = fail,
                     fields = results,
                     applied
@@ -238,6 +240,7 @@ namespace Funplay.Editor.Tools.Builtins
                     componentType = verified.Component.GetType().FullName,
                     componentIndex = verified.ComponentIndex,
                     property,
+                    readback = DescribeReadback(verified.Component, true),
                     newValue = readBack.TryGetValue(property, out var nv) ? nv : null
                 });
         }
@@ -300,6 +303,7 @@ namespace Funplay.Editor.Tools.Builtins
                     componentType = verified.Component.GetType().FullName,
                     componentIndex = verified.ComponentIndex,
                     successCount = success,
+                    readback = DescribeReadback(verified.Component, true),
                     failCount = fail,
                     fields = results,
                     applied
@@ -391,6 +395,7 @@ namespace Funplay.Editor.Tools.Builtins
                         instanceId = ObjectIdHelper.GetSerializableId(g),
                         componentInstanceId = ObjectIdHelper.GetSerializableId(comp),
                         ok = f == 0,
+                        readback = DescribeReadback(comp, false),
                         successCount = s,
                         failCount = f,
                         fields = res,
@@ -405,6 +410,7 @@ namespace Funplay.Editor.Tools.Builtins
                         instanceId = ObjectIdHelper.GetSerializableId(g),
                         componentInstanceId = ObjectIdHelper.GetSerializableId(comp),
                         ok = f == 0,
+                        readback = DescribeReadback(comp, false),
                         successCount = s,
                         failCount = f,
                         fields = res,
@@ -434,6 +440,17 @@ namespace Funplay.Editor.Tools.Builtins
             foreach (var name in names)
             {
                 if (result.ContainsKey(name)) continue;
+                // FindProperty is authoritative for nested fields/array elements, too. The old
+                // top-level snapshot-only path could return null after a successful nested write.
+                using (var serialized = new SerializedObject(comp))
+                {
+                    var exact = serialized.FindProperty(name);
+                    if (exact != null)
+                    {
+                        result[name] = new { type = exact.propertyType.ToString(), value = ComponentSerializer.ReadPropertyValue(exact) };
+                        continue;
+                    }
+                }
                 // Prefer an exact serialized-Name match (the authoritative write key via FindProperty),
                 // then exact DisplayName, then case-insensitive on both. WriteProperties' reflection
                 // fallback resolves member names case-insensitively (e.g. 'mass' -> Rigidbody.mass), so an
@@ -470,6 +487,18 @@ namespace Funplay.Editor.Tools.Builtins
                 }
             }
             return result;
+        }
+
+        private static object DescribeReadback(Component component, bool saved)
+        {
+            var path = EditorUtility.IsPersistent(component) ? AssetDatabase.GetAssetPath(component) : component.gameObject.scene.path;
+            return new
+            {
+                value_source = saved ? "saved_and_reimported_asset" : EditorUtility.IsPersistent(component) ? "loaded_asset" : "live_scene",
+                persisted = saved, affected_assets = string.IsNullOrEmpty(path) ? Array.Empty<string>() : new[] { path },
+                dirty = EditorUtility.IsDirty(component),
+                hint = saved ? "Values read after save and synchronous reimport." : "In-memory readback only; save the intended scene/asset explicitly before assuming persistence."
+            };
         }
 
         private static string NormalizePropertyName(string value)

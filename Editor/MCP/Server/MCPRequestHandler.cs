@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Funplay.Editor.Settings;
+using Newtonsoft.Json.Linq;
+using Funplay.Editor.Tools.Helpers;
 using UnityEngine;
 
 namespace Funplay.Editor.MCP.Server
@@ -50,7 +52,7 @@ namespace Funplay.Editor.MCP.Server
                 if (request.JsonRpc != "2.0")
                     return CreateErrorResponse(request.Id, -32600, "Invalid Request: jsonrpc must be '2.0'");
 
-                if (ShouldLogRequest(request.Method))
+                if (ShouldLogRequest(request.Method) && !MCPServerService.IsBoundedStatusRequest(request))
                     PluginDebugLogger.Log($"[Funplay MCP Server] Handling request: {request.Method}");
 
                 return request.Method switch
@@ -59,7 +61,7 @@ namespace Funplay.Editor.MCP.Server
                     "notifications/initialized" => null,
                     "notifications/cancelled" => null,
                     "tools/list" => HandleToolsList(request),
-                    "tools/call" => await HandleToolsCallAsync(request, ct),
+                    "tools/call" => await HandleToolsCallAsync(request, ct).ConfigureAwait(false),
                     "prompts/list" => HandlePromptsList(request),
                     "prompts/get" => HandlePromptsGet(request),
                     "resources/list" => HandleResourcesList(request),
@@ -130,8 +132,11 @@ namespace Funplay.Editor.MCP.Server
                     ? args
                     : new Dictionary<string, object>();
 
-                PluginDebugLogger.Log($"[Funplay MCP Server] Calling tool: {toolName}");
-                var result = await _executionBridge.ExecuteToolAsync(toolName, arguments, ct);
+                // The bounded status path starts on a pool thread. Avoid settings/Unity access
+                // in logging here; the bridge logs after marshalling the actual read.
+                if (!MCPServerService.IsBoundedStatusRequest(request))
+                    PluginDebugLogger.Log($"[Funplay MCP Server] Calling tool: {toolName}");
+                var result = await _executionBridge.ExecuteToolAsync(toolName, arguments, ct).ConfigureAwait(false);
 
                 return new MCPResponse
                 {
@@ -256,6 +261,22 @@ namespace Funplay.Editor.MCP.Server
         private List<Dictionary<string, object>> BuildContentFromResult(string result)
         {
             var content = new List<Dictionary<string, object>>();
+
+            if (result != null && result.Contains("funplay_capture"))
+            {
+                try
+                {
+                    var receipt = JObject.Parse(result);
+                    var inline = (string)receipt["data"]?["inline_image"];
+                    if ((int?)receipt["_meta"]?["funplay_capture"] == 1 && inline != null && inline.StartsWith(ImageDataUriPrefix, StringComparison.Ordinal))
+                    {
+                        content.Add(new Dictionary<string, object> { ["type"] = "image", ["data"] = inline.Substring(ImageDataUriPrefix.Length), ["mimeType"] = "image/png" });
+                        content.Add(new Dictionary<string, object> { ["type"] = "text", ["text"] = VisualCoordinates.WithoutInlineImage(result) });
+                        return content;
+                    }
+                }
+                catch (Newtonsoft.Json.JsonException) { /* Ordinary tool text retains its original representation. */ }
+            }
 
             if (result != null && result.StartsWith(ImageDataUriPrefix))
             {

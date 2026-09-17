@@ -182,7 +182,8 @@ namespace Funplay.Editor.Tools.Builtins
                     status = "none",
                     tool = (string)null,
                     timestamp = (string)null,
-                    summary = (string)null
+                    summary = (string)null,
+                    current_editor = EditorOperationService.CurrentEditor()
                 });
             }
 
@@ -192,7 +193,8 @@ namespace Funplay.Editor.Tools.Builtins
                 status = info.Status,
                 tool = info.ToolName,
                 timestamp = info.Timestamp.ToString("O"),
-                summary = info.Summary
+                summary = info.Summary,
+                current_editor = EditorOperationService.CurrentEditor()
             });
         }
 

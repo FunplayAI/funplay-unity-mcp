@@ -1,10 +1,12 @@
 // Copyright (C) Funplay. Licensed under MIT.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using DescriptionAttribute = System.ComponentModel.DescriptionAttribute;
 using Funplay.Editor.Tools.Helpers;
+using Funplay.Editor.State;
 using UnityEditor;
 using UnityEditor.Media;
 using UnityEngine;
@@ -47,8 +49,8 @@ namespace Funplay.Editor.Tools.Builtins
         }
 
         [Description("Record a silent MP4 of the rendered Game View, including UI, on macOS or Windows. " +
-                     "Use action=start in Play Mode, then perform actions and poll action=status or request action=stop. " +
-                     "Start and stop return immediately; recording ends automatically at duration_seconds. " +
+                     "Use action=start in Play Mode, then perform actions and use get_task for bounded status waits or action=stop to finish early. " +
+                     "Start returns immediately for interaction; stop/status may briefly wait. Recording ends at duration_seconds. " +
                      "Only read the local video path when ready=true. No video/base64 is sent through MCP. " +
                      "Use this for visual review, not frame-accurate performance measurement. Requires a visible, rendering Game View.")]
         public static object RecordGameView(
@@ -56,12 +58,21 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Maximum wall-clock duration in seconds, 1-120. Used by start only.", Required = false)] int duration_seconds = 10,
             [ToolParam("Target capture rate, 1-60 frames per second. Slow frames retain their real timestamps.", Required = false)] int fps = 15,
             [ToolParam("Maximum output width or height, 128-1920. Preserves aspect ratio without upscaling.", Required = false)] int max_dimension = 1280,
-            [ToolParam("Recording ID returned by start. Recommended for status/stop to avoid controlling a newer recording.", Required = false)] string recording_id = null)
+            [ToolParam("Recording ID returned by start. Recommended for status/stop to avoid controlling a newer recording.", Required = false)] string recording_id = null,
+            [ToolParam("MCP wait for stop/status, 0..30 seconds; start always returns immediately", Required = false)] int wait_seconds = 2)
+            => TaskStatusService.ValidateWait(wait_seconds) ?? TaskStatusService.Attach("recording", RecordCore(action, duration_seconds, fps, max_dimension, recording_id));
+
+        private static object RecordCore(string action, int duration_seconds, int fps, int max_dimension, string recording_id)
         {
             switch ((action ?? "start").Trim().ToLowerInvariant())
             {
                 case "status":
                 case "stop":
+                    if (!string.IsNullOrEmpty(recording_id) && (_last == null || _last.recording_id != recording_id))
+                    {
+                        var historical = FindRecording(recording_id);
+                        return historical == null ? Response.Error("RECORDING_NOT_FOUND") : Response.Success("Historical recording; no active recording was stopped.", historical);
+                    }
                     if (_last == null)
                         return Response.Error("NO_VIDEO_RECORDING", new { hint = "Start a recording first." });
                     if (!MatchesRecording(_last, recording_id))
@@ -113,6 +124,7 @@ namespace Funplay.Editor.Tools.Builtins
                     height = size.y,
                     fps = fps,
                     duration_seconds = durationSeconds,
+                    geometry = VisualCoordinates.Create("game_view", source.width, source.height, size.x, size.y, false),
                     started_at = DateTime.UtcNow.ToString("o")
                 };
                 sink = new GameViewVideoSink(view, source.width, source.height, state);
@@ -149,8 +161,58 @@ namespace Funplay.Editor.Tools.Builtins
         private static void SaveState()
         {
             if (_last != null)
+            {
                 SessionState.SetString(StateKey, JsonUtility.ToJson(_last));
+                try
+                {
+                    Directory.CreateDirectory(RecordingDirectory);
+                    var path = Path.Combine(RecordingDirectory, _last.recording_id + ".json");
+                    File.WriteAllText(path + ".tmp", JsonUtility.ToJson(_last, true));
+                    if (File.Exists(path)) File.Replace(path + ".tmp", path, null); else File.Move(path + ".tmp", path);
+                }
+                catch (Exception ex) { _last.receipt_warning = ex.Message; }
+            }
             _lastSavedAt = EditorApplication.timeSinceStartup;
+        }
+
+        internal static string RecordingDirectory => Path.Combine(Path.GetDirectoryName(Application.dataPath), "Library/FunplayMcp/Recordings");
+        internal static RecordingState FindRecording(string id)
+        {
+            if (!Guid.TryParseExact(id, "N", out _)) return null;
+            if (_last != null && _last.recording_id == id) return _last;
+            var receipt = Path.Combine(RecordingDirectory, id + ".json");
+            try
+            {
+                var state = File.Exists(receipt) ? JsonUtility.FromJson<RecordingState>(File.ReadAllText(receipt)) : null;
+                if (state == null || state.recording_id != id || string.IsNullOrEmpty(state.path) ||
+                    Path.GetDirectoryName(Path.GetFullPath(state.path)) != RecordingDirectory) return null;
+                return state;
+            }
+            catch { return null; }
+        }
+        [Description("Add a named marker to the active recording's real elapsed-time timeline. Use before/after project-specific actions. Click, drag and scroll tools also record markers automatically. No recording means an explicit error.")]
+        public static object MarkRecording(
+            [ToolParam("Short marker label, 1..160 characters")] string label,
+            [ToolParam("Active recording ID")] string recording_id)
+        {
+            if (_active == null || _last.recording_id != recording_id) return Response.Error("RECORDING_NOT_ACTIVE");
+            if (string.IsNullOrWhiteSpace(label) || label.Length > 160) return Response.Error("INVALID_MARKER_LABEL");
+            var marker = RecordMarker("explicit", label);
+            return marker == null ? Response.Error("RECORDING_MARKER_LIMIT") : Response.Success("Recording marker added.", marker);
+        }
+        internal static RecordingMarker RecordMarker(string action, string label, Vector2? point = null, Vector2? destination = null, VisualGeometry geometry = null)
+        {
+            if (_active == null) return null;
+            var marker = _active.AddMarker(EditorApplication.timeSinceStartup, action, label, point, destination, geometry);
+            SaveState(); return marker;
+        }
+        [Serializable] internal sealed class RecordingMarker
+        {
+            public string marker_id, action, label;
+            public double seconds;
+            public bool has_coordinates;
+            public float x, y, to_x, to_y;
+            public VisualGeometry geometry;
         }
 
         private static void BeforeReload() => FinishActive("domain_reload", true);
@@ -227,6 +289,10 @@ namespace Funplay.Editor.Tools.Builtins
             public long bytes;
             public string stop_reason;
             public string error;
+            public VisualGeometry geometry;
+            public string receipt_warning;
+            public int dropped_markers;
+            public List<RecordingMarker> markers = new List<RecordingMarker>();
         }
 
         internal interface IVideoSink : IDisposable
@@ -259,6 +325,16 @@ namespace Funplay.Editor.Tools.Builtins
                     _state.status = "stopping";
             }
 
+            internal RecordingMarker AddMarker(double now, string action, string label, Vector2? point, Vector2? destination, VisualGeometry geometry)
+            {
+                if (IsFinished) return null;
+                if (_state.markers.Count >= 256) { _state.dropped_markers++; return null; }
+                var marker = new RecordingMarker { marker_id = Guid.NewGuid().ToString("N"), action = action,
+                    label = label, seconds = Math.Max(0, now - _started), has_coordinates = point.HasValue,
+                    x = point?.x ?? 0, y = point?.y ?? 0, to_x = destination?.x ?? point?.x ?? 0, to_y = destination?.y ?? point?.y ?? 0, geometry = geometry };
+                _state.markers.Add(marker); return marker;
+            }
+
             internal void Tick(double now)
             {
                 if (IsFinished)
@@ -276,9 +352,10 @@ namespace Funplay.Editor.Tools.Builtins
                 {
                     // The native encoder can prepend an empty frame if the first timestamp is
                     // positive. Anchor only the first frame at zero; subsequent gaps stay real.
-                    _sink.Capture(_state.frame_count == 0 ? 0 : elapsed);
+                    var timestamp = _state.frame_count == 0 ? 0 : elapsed;
+                    _sink.Capture(timestamp);
                     _state.frame_count++;
-                    _state.last_frame_seconds = elapsed;
+                    _state.last_frame_seconds = timestamp;
                     _nextFrame = elapsed + 1d / _state.fps;
                 }
                 catch (Exception ex)

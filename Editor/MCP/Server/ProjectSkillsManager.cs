@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.4",
+                "1.0.5",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,
@@ -58,19 +58,19 @@ namespace Funplay.Editor.MCP.Server
                     "Unless the user explicitly requests a full rebuild, preserve the existing hierarchy when editing UI or GameObject prefabs and modify only the required objects, components, and serialized fields; do not recreate the entire prefab.",
                     "Inspect editor-level state through dedicated tools: `get_selection`, `set_selection`, `get_prefab_stage`, `get_active_tool`, `get_windows`, `get_tags`, `get_layers`, `get_build_settings`. Do not write `execute_code` snippets just to read this.",
                     "When no specialized MCP tool covers an editor action, try `execute_menu_item` (e.g. 'GameObject/2D Object/Sprite', 'Window/Layouts/Default', 'Edit/Project Settings...') before falling back to `execute_code`.",
-                    "When Tool Exposure uses the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, Game View recording, input simulation, and performance inspection.",
-                    "When Tool Exposure uses the default `full` profile, all registered MCP tools are available. Prefer specific tools for simple scene, asset, GameObject, component, prefab, camera, UI, package, animation, file, or visual-feedback operations.",
+                    "Use `get_tool_capabilities` to distinguish implemented tools from current exposure. Prefer structured queries, Sprite inspection, audits, editor preparation, UI defaults, preview sessions and visual evidence tools; `execute_code` is the fallback for project-specific gaps.",
+                    "Tool Exposure defaults to a focused `core`; `full` retains all registered tools unless customized. Prefer specific tools for scene, asset, GameObject, component, prefab, camera, UI, package, animation, file, or visual-feedback operations that are actually exposed.",
                     "If Tool Exposure has been customized and a named tool is unavailable, adapt to the exposed tool list and report which expected tool is missing.",
                     "Never edit Unity serialized files (`.unity`, `.prefab`, `.asset`) with shell text tools or patches. Use Unity MCP or Editor APIs for scenes, prefabs, and ScriptableObject assets; shell tools may only inspect or locate these files.",
                     "Choose the correct edit surface: source files with normal repo tools, scene objects through Unity APIs and saved scenes, prefab assets through `PrefabUtility.LoadPrefabContents` and `SaveAsPrefabAsset`.",
                     "For `execute_code`, prefer the IFunplayCommand template over the legacy `static string Run()`: include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation`, `ctx.RegisterObjectModification`, `ctx.DestroyObject` so created/modified objects participate in editor Undo automatically. Use `ctx.Log` / `ctx.LogWarning` / `ctx.LogError` for traceable output that comes back in the response (without polluting the Unity console).",
                     "Batch related Unity-side changes in one guarded `execute_code` snippet. Null-guard every lookup, return explicit missing path/object/component messages, and include concise before/after values.",
-                    "`execute_code` now refreshes the asset database and waits for compilation to finish before compiling the snippet, so external file edits are picked up automatically. For other tools that depend on the latest assemblies (e.g. `get_compilation_errors`), still call `request_recompile` after external file edits.",
-                    "After code or resource edits, exit Play Mode if needed, call `request_recompile`, call `wait_for_compilation`, then read compilation errors or console errors before claiming success.",
-                    "Call `wait_for_compilation` before Play Mode, screenshots, or conclusions when a previous edit has not yet been confirmed.",
-                    "After `enter_play_mode`, the MCP HTTP server briefly drops while Unity reloads the domain. Before the next tool call, poll a cheap tool such as `tools/list` or `get_reload_recovery_status` until the server responds again — do not assume the connection is immediately ready.",
+                    "`execute_code` refreshes by default. Use skip_refresh only after independently verifying that the intended assemblies are ready, for example when initiating a test that must not be interrupted by another refresh.",
+                    "After source/resource edits use `prepare_editor` with the intended edit/play target and a unique request_key; retain data.task.task_id and use `get_task` with bounded waiting and the last revision. Require operation.status=ready, current_editor.ready=true and the expected current mode before validation.",
+                    "Check compiler errors, console exceptions and project initialization separately from Editor preparation.",
+                    "After a dropped connection, retry the operation status read using the same ID/key. Historical reload recovery and HTTP reachability alone do not establish current readiness.",
                     "`request_recompile` is rejected while Unity is in Play Mode — Unity does not process script compilation or domain reloads while playing. Call `exit_play_mode` first, then retry `request_recompile`.",
-                    "If a request is interrupted by script recompilation or domain reload, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm the final state.",
+                    "If an arbitrary edit is interrupted, its result remains unknown until exact object/asset readback establishes what executed; preparation IDs do not make arbitrary scripts replay-safe.",
                     "Read back exact values from Unity after changes, not only success messages.",
                     "Test actual behavior in Unity through hierarchy, console logs, Play Mode, UI interactions, screenshots, or targeted `execute_code` checks.",
                     "Use `capture_game_view` for static visual checks and short `record_game_view` clips for animation or interaction sequences; retain the returned `recording_id`, poll status or stop that recording, and inspect the local MP4 only after `data.ready=true`. A successful tool response alone does not prove a completed recording or correct behavior.",
@@ -81,7 +81,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.5",
+                "1.0.6",
                 "Unity UI Composition",
                 "Build and revise responsive Unity uGUI mobile interfaces, including portrait and landscape layouts, safe areas, prefabs, auto layout, scrolling, text, input, animation, and performance validation.",
                 true,
@@ -1021,7 +1021,7 @@ $@"{ManagedMarker}
 ## Agent workflow rules
 
 - Prefer project-local Funplay skills: `.codex/skills/` for Codex, `.opencode/skills/` for OpenCode, `.dsh/skills/` for DeepSeek Harness, `.agents/skills/` for Antigravity.
-- Use `execute_code` as the primary Unity automation tool. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo automatically.
+- Prefer structured MCP tools; use `execute_code` for project-specific gaps. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo automatically.
 - Confirm the Unity project root, active scene, and real object/prefab/asset path before edits. Treat user-provided object names as hints, not paths.
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
 - Tool returns are structured JSON (`{{success, message, data}}` / `{{success: false, code, error, data}}`). Branch on `code`, not free-form text.
@@ -1030,14 +1030,14 @@ $@"{ManagedMarker}
 - Read editor state through dedicated tools (`get_selection`, `get_prefab_stage`, `get_tags`, `get_layers`, `get_build_settings`); use `execute_menu_item` before falling back to ad-hoc `execute_code`.
 - Never edit `.unity`, `.prefab`, or `.asset` files with shell text tools or patches; use Unity MCP / Editor APIs for scenes, prefabs, and ScriptableObject assets.
 - Save only the scene or prefab assets intentionally modified, then read back exact values.
-- With default `core` exposure, use the focused workflow tools. With default `full` exposure, prefer specific MCP tools for simple editor operations.
-- `execute_code` refreshes the asset database and waits for compilation before running. For other tools that depend on freshly compiled code, still call `request_recompile` after external script edits.
+- Prefer structured query/audit/edit tools in Core; low-frequency configuration and preview management remain in Full. Use `get_tool_capabilities` to check exposure; respect customized allowlists.
+- `execute_code` refreshes by default; use skip_refresh only after verifying the intended assemblies are ready.
 - In `execute_code`, null-guard every lookup and return explicit missing path/object/component messages; do not run self-healing fallback loops.
 - For Unity object references, do not use `??=` for lazy rebinding; use explicit `if (field == null) field = Resolve();`.
-- After code or resource edits, exit Play Mode if needed, call `request_recompile`, `wait_for_compilation`, then read compilation or console errors.
+- After edits use `prepare_editor` with the intended mode and a unique request_key; use the returned task_id with `get_task`, wait_seconds and after_revision until operation.status=ready and current_editor confirms readiness and mode, then check console errors. Honor poll_after_ms on unchanged results.
 - `request_recompile` is rejected while Unity is in Play Mode. Call `exit_play_mode` first, then retry.
-- After `enter_play_mode`, the HTTP server briefly drops while Unity reloads the domain. Poll `tools/list` or `get_reload_recovery_status` until it responds again before issuing the next tool call.
-- If recompilation triggers a domain reload or interrupts a request, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm it.
+- On disconnect, retry the same operation status read by ID/key. Historical reload recovery or HTTP reachability alone does not establish current readiness.
+- An interrupted arbitrary mutation has unknown outcome until exact object/asset readback confirms it; never automatically replay it.
 - Avoid changing `Library/`, `Temp/`, `Logs/`, or `obj/`.
 
 ## Project
@@ -1069,7 +1069,7 @@ $@"{ManagedMarker}
 ## Preferred workflow
 
 - Use Funplay MCP tools for Unity editor state and automation.
-- Use `execute_code` for non-trivial Unity orchestration. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo and `ctx.Log` for traceable output.
+- Prefer structured MCP operations; use `execute_code` only for project-specific orchestration not covered by them. For new snippets, include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation` / `RegisterObjectModification` / `DestroyObject` so changes participate in Undo and `ctx.Log` for traceable output.
 - Confirm the Unity project root, active scene, and real object/prefab/asset path before edits. Treat user-provided object names as hints, not paths.
 - Inspect Unity objects through MCP before changing user-named scene or prefab targets. Carry the returned `instanceId` into follow-up calls (`find_method=by_id`) instead of re-resolving by name.
 - Tool returns are structured JSON (`{{success, message, data}}` / `{{success: false, code, error, data}}`). Branch on `code`, not free-form text.
@@ -1078,14 +1078,14 @@ $@"{ManagedMarker}
 - Read editor state through `get_selection`, `get_prefab_stage`, `get_tags`, `get_layers`, `get_build_settings`; try `execute_menu_item` before writing ad-hoc `execute_code`.
 - Never edit `.unity`, `.prefab`, or `.asset` files with shell text tools or patches; use Unity MCP / Editor APIs for scenes, prefabs, and ScriptableObject assets.
 - Save only the scene or prefab assets intentionally modified, then read back exact values.
-- With default `core` exposure, use the focused workflow tools. With default `full` exposure, prefer specific MCP tools for simple editor operations.
-- `execute_code` refreshes assets and waits for compilation before running. For other tools that depend on freshly compiled code, still call `request_recompile` after external script edits.
+- Prefer structured query/audit/edit tools in Core; low-frequency configuration and preview management remain in Full. Use `get_tool_capabilities` to check exposure; respect customized allowlists.
+- `execute_code` refreshes by default; use skip_refresh only after verifying the intended assemblies are ready.
 - In `execute_code`, null-guard every lookup and return explicit missing path/object/component messages; do not run self-healing fallback loops.
 - For Unity object references, do not use `??=` for lazy rebinding; use explicit `if (field == null) field = Resolve();`.
-- After code or resource edits, exit Play Mode if needed, call `request_recompile`, `wait_for_compilation`, then read compilation or console errors.
+- After edits use `prepare_editor` with the intended mode and a unique request_key; use the returned task_id with `get_task`, wait_seconds and after_revision until operation.status=ready and current_editor confirms readiness and mode, then check console errors. Honor poll_after_ms on unchanged results.
 - `request_recompile` is rejected while Unity is in Play Mode. Call `exit_play_mode` first, then retry.
-- After `enter_play_mode`, the HTTP server briefly drops while Unity reloads the domain. Poll `tools/list` or `get_reload_recovery_status` until it responds again before issuing the next tool call.
-- If domain reload interrupts a request, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm it.
+- On disconnect, retry the same operation status read by ID/key. Historical reload recovery or HTTP reachability alone does not establish current readiness.
+- An interrupted arbitrary mutation has unknown outcome until exact object/asset readback confirms it; never automatically replay it.
 - If a Claude Code session reports another `funplay-*` MCP server entry as unreachable, check whether its name matches this project's own before treating Funplay as broken. Funplay registers one independent entry per Unity project, but Claude Code's connection check surfaces every registered entry on the machine regardless of which project the session is in — a different project's entry being disconnected is expected when that project's Editor isn't currently open, and it should not be deleted, since it may still be in active use by that project.
 - Additional installed skills are available under `.claude/skills/`.
 
@@ -1100,7 +1100,7 @@ $@"{ManagedMarker}
         {
             var block = RemoveManagedEndMarker(BuildAgentsManagedBlock(projectRoot, manifest))
                 .Replace(CodexManagedNotice, "This file is managed by Funplay MCP for Unity.");
-            return "# AGENTS.md\n" + block + "\n";
+            return "# AGENTS.md\n" + RestoreLegacyWorkflowWording(block, false) + "\n";
         }
 
         /// <summary>
@@ -1143,7 +1143,25 @@ $@"{ManagedMarker}
         {
             var block = RemoveManagedEndMarker(BuildClaudeManagedBlock(projectRoot, manifest))
                 .Replace(ClaudeManagedNotice, "This file is managed by Funplay MCP for Unity for Claude Code.");
-            return "# CLAUDE.md\n" + block + "\n";
+            return "# CLAUDE.md\n" + RestoreLegacyWorkflowWording(block, true) + "\n";
+        }
+
+        // Legacy begin-marker-only files are matched exactly before replacement. Keep their
+        // released wording stable when the current managed guidance gains new tool workflows.
+        private static string RestoreLegacyWorkflowWording(string block, bool claude)
+        {
+            return block
+                .Replace("Prefer structured MCP tools; use `execute_code` for project-specific gaps.", "Use `execute_code` as the primary Unity automation tool.")
+                .Replace("Prefer structured MCP operations; use `execute_code` only for project-specific orchestration not covered by them.", "Use `execute_code` for non-trivial Unity orchestration.")
+                .Replace("Prefer structured query/audit/edit tools in Core; low-frequency configuration and preview management remain in Full. Use `get_tool_capabilities` to check exposure; respect customized allowlists.", "With default `core` exposure, use the focused workflow tools. With default `full` exposure, prefer specific MCP tools for simple editor operations.")
+                .Replace("`execute_code` refreshes by default; use skip_refresh only after verifying the intended assemblies are ready.", claude
+                    ? "`execute_code` refreshes assets and waits for compilation before running. For other tools that depend on freshly compiled code, still call `request_recompile` after external script edits."
+                    : "`execute_code` refreshes the asset database and waits for compilation before running. For other tools that depend on freshly compiled code, still call `request_recompile` after external script edits.")
+                .Replace("After edits use `prepare_editor` with the intended mode and a unique request_key; use the returned task_id with `get_task`, wait_seconds and after_revision until operation.status=ready and current_editor confirms readiness and mode, then check console errors. Honor poll_after_ms on unchanged results.", "After code or resource edits, exit Play Mode if needed, call `request_recompile`, `wait_for_compilation`, then read compilation or console errors.")
+                .Replace("On disconnect, retry the same operation status read by ID/key. Historical reload recovery or HTTP reachability alone does not establish current readiness.", "After `enter_play_mode`, the HTTP server briefly drops while Unity reloads the domain. Poll `tools/list` or `get_reload_recovery_status` until it responds again before issuing the next tool call.")
+                .Replace("An interrupted arbitrary mutation has unknown outcome until exact object/asset readback confirms it; never automatically replay it.", claude
+                    ? "If domain reload interrupts a request, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm it."
+                    : "If recompilation triggers a domain reload or interrupts a request, treat the result as unknown until `get_reload_recovery_status`, compilation checks, and MCP readback confirm it.");
         }
 
         private static string RemoveManagedEndMarker(string block)
@@ -1160,8 +1178,9 @@ $@"{ManagedMarker}
                 return BuildUnityUiCompositionCursorRuleContent(skill);
 
             var alwaysApply = skill.IsBuiltIn ? "true" : "false";
-            var recordingGuidance = string.Equals(skill.Id, "unity-mcp-workflow", StringComparison.OrdinalIgnoreCase)
-                ? BuildGameViewRecordingGuidance()
+            var isWorkflow = string.Equals(skill.Id, "unity-mcp-workflow", StringComparison.OrdinalIgnoreCase);
+            var recordingGuidance = isWorkflow
+                ? BuildReliableUiToolGuidance() + BuildGameViewRecordingGuidance()
                 : string.Empty;
             return
 $@"---
@@ -1175,6 +1194,7 @@ version: {skill.Version}
 # {skill.Title}
 
 {skill.WhenToUse}
+{(isWorkflow ? BuildUiAutomationGuidance() : string.Empty)}
 
 ## Rules
 
@@ -1272,7 +1292,7 @@ description: {skill.Description}
 
         private static string BuildUnityUiCompositionBody()
         {
-            return
+            return BuildUiAutomationGuidance() +
 @"
 ## Operating Loop
 
@@ -1460,6 +1480,29 @@ safeAreaRoot.offsetMax = Vector2.zero;
 - [Screen.safeArea](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Screen-safeArea.html), [relative RectTransform bounds](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/RectTransformUtility.CalculateRelativeRectTransformBounds.html), and [Device Simulator](https://docs.unity3d.com/6000.0/Documentation/Manual/device-simulator-introduction.html)
 - [Sprite Atlas](https://docs.unity3d.com/6000.0/Documentation/Manual/sprite/atlas/create-sprite-atlas.html), [platform texture overrides](https://docs.unity3d.com/6000.0/Documentation/Manual/class-TextureImporter-type-specific.html), and [official uGUI optimization guide](https://learn.unity.com/course/introduction-to-ui-in-unity/tutorial/optimizing-unity-ui)
 
+" + BuildReliableUiToolGuidance();
+        }
+
+
+        private static string BuildUiAutomationGuidance()
+        {
+            return "\n## MCP-First Unity UI Operations\n\n" + MCPServerInstructions.UiAutomationGuidance + "\n";
+        }
+
+        private static string BuildReliableUiToolGuidance()
+        {
+            return
+@"
+## Structured UI Workflows
+
+- Short MCP tasks briefly wait for completion (wait_seconds defaults to 2; zero returns immediately). For longer tasks use `get_task(data.task.task_id, wait_seconds=20, after_revision=<last revision>)`; it waits for completion or a meaningful state change. Honor poll_after_ms on unchanged responses instead of making the model poll every second. wait_complete is not proof of success: inspect native status, errors and ready/complete/restoration fields. A read_timeout carries only the snapshot_at observation. Cancellation of the HTTP wait does not cancel the task. On lost preparation/preview responses recover through kind + the original request_key; do not replay mutations. Recording and Test Runner starts return immediately, as do preparation/preview starts without a recovery key.
+- Inspect before modifying: use `find_game_objects` with component/property filters and projections, `inspect_ui_sprites` for Image/effective Sprite/importer/border/local-ID associations, and `find_project_types` for exact type and assembly names. Check ambiguity, partial errors, scan completeness and pagination; an incomplete scan is not proof of absence. Component setters distinguish live in-memory readback from saved/reimported prefab values.
+- Run `audit_ui` on relevant live roots or saved prefabs/scenes; small scans can finish in one call, otherwise read status and finding pages through `get_task`. It checks missing borders, missing/required references, transparent raycast blockers, text/clipping and layout conflicts without fixing or saving assets. Review measured evidence and contextual warnings; suppress intentional exceptions only with an explicit project reason. Do not invent border values or infer design fidelity from a clean audit.
+- Before creating new UI, read `get_ui_defaults`. `create_project_ui` can reuse templates and retain their prefab connection, label bindings, font/material and authored geometry. Explicit overrides take precedence; existing template component types are not converted. `configure_ui_defaults` changes project-scoped authoring preferences, so use it only when that shared convention is intended. Tied/incomplete convention scans or missing TMP resources require a deliberate choice/action, never a silent legacy fallback. This is Edit Mode authoring: save the intended scene/prefab explicitly and preserve existing UI when revising it.
+- When preview management is exposed (Full by default), use `start_ui_preview_session` with verified prefab_paths and/or a project scene_template, optionally enter_play_mode and target width/height. It needs saved clean original scenes and no open Prefab Stage; do not save/discard unrelated user work merely to satisfy this precondition. Retain session_id and data.task.task_id; use `get_task` until ready. Business data and initialization remain project-specific; entering the scene may run lifecycle code.
+- End the matching session with `end_ui_preview_session`, then inspect scenes_restored, view_restored, selection_restored, assets_cleaned and warnings. Do not claim full restoration from a success envelope. Changed scene setup, dirty preview or modified temporary scene requires inspection; discard_preview_changes applies only to the owned preview scene and must reflect an intended discard. Network/save-game effects and source asset edits are not rolled back. Preserve user-created files and changed window choices; report recovery still needed.
+- Use screenshot `geometry`, not an unrelated `Screen` size: render size and returned image size can differ. Pass coordinate_space=image_pixels, origin=top_left and a fresh capture_id to click/drag/scroll or `raycast_at_point` when measuring a screenshot. `get_object_screen_bounds` and `get_visual_coordinates` share the mapping. Expired IDs or changed mode/view/scene/camera viewport/render dimensions require a fresh capture, not clamping or guessing. Geometry validity does not prove animated content stayed unchanged.
+
 ";
         }
 
@@ -1472,7 +1515,7 @@ safeAreaRoot.offsetMax = Vector2.zero;
 
 Use `capture_game_view` for static layout or a single visual state. Use `record_game_view` when the task needs evidence over time, such as animation, transitions, or a reproducible interaction sequence; do not record every routine UI edit.
 
-1. Prepare. Finish compilation, enter Play Mode when needed, and wait for MCP reload recovery. Recording requires a graphics-enabled macOS or Windows Unity Editor with a visible, rendering Game tab. Keep that tab visible and its resolution unchanged throughout capture; hiding it or resizing the source can fail the recording. The MP4 includes overlay UI but no audio.
+1. Prepare. Use `prepare_editor` targeting play (or a ready preview session) and verify current readiness. Recording requires a graphics-enabled macOS or Windows Unity Editor with a visible, rendering Game tab. Keep that tab visible and its resolution unchanged throughout capture; hiding it or resizing the source can fail the recording. The MP4 includes overlay UI but no audio.
 2. Start a short, bounded clip before performing the relevant actions. For example, call `record_game_view` with:
 
    ```json
@@ -1480,11 +1523,14 @@ Use `capture_game_view` for static layout or a single visual state. Use `record_
    ```
 
    Save `data.recording_id` from the response, then perform the interaction. Start returns immediately; recording stops automatically at the duration limit. These are the default settings; accepted ranges are 1-120 seconds, 1-60 fps, and a 128-1920 pixel maximum edge. Aspect ratio is preserved without upscaling. Prefer a shorter clip or lower sampling rate/resolution if capture overhead is disruptive.
-3. Poll `record_game_view` with `{""action"":""status"",""recording_id"":""<returned id>""}`. To finish early, use `{""action"":""stop"",""recording_id"":""<returned id>""}`, then poll status until finalization. Always pass the saved ID so a stale request cannot inspect or stop a newer recording. If another recording is already active, report it rather than stopping someone else's capture.
+3. After performing the interactions, use `get_task` with the returned data.task.task_id for bounded status waits. To finish early, use `record_game_view` with `{""action"":""stop"",""recording_id"":""<returned id>""}`, then query the matching task if finalization is still pending. Legacy action=status remains compatible. Always pass the saved ID so a stale request cannot inspect or stop a newer recording. If another recording is already active, report it rather than stopping someone else's capture.
 4. Check the receipt, not just `success`. While `data.status` is `recording` or `stopping`, the file is not ready. Read the MP4 only when `data.ready=true`; a `success=true` status query can still describe a failed recording. Stop polling on terminal `completed`, `interrupted`, or `failed` status and inspect `error`, `stop_reason`, and the actual captured extent (`frame_count`, `elapsed_seconds`, `last_frame_seconds`). Leaving Play Mode or reloading scripts finalizes early; recover the receipt after reload and treat any usable partial clip as partial evidence, not a complete test.
 5. Review the actual file at `data.path`, under `<UnityProject>/Library/FunplayMcp/Recordings/`. MCP returns a local-file receipt, not video bytes or base64; the client must have access to that filesystem and a video viewer. A remote MCP connection alone does not provide file access. If video viewing is unavailable, inspect extracted frames when supported and state their limits, or report that the clip was saved but not reviewed. Do not claim to have watched an inaccessible clip or upload project footage without authorization.
 
-- Report the reproduction steps, clip path, observed result, and any interruption or unverified portion. Combine visual evidence with Unity state readback and console checks.
+- Report reproduction steps, clip path, observed result, and interruptions or unverified portions. Combine visual evidence with Unity state readback and console checks.
+- Use `mark_recording` when exposed (Full by default) for named before/after project actions. Click, drag and `simulate_ui_scroll` tools record automatic markers in Core; a marker identifies dispatch, not proof that the intended behavior succeeded.
+- Once ready, use `extract_recording_frames` with recording_id and 1..16 timestamps; if still pending use `get_task`, then inspect images with `get_recording_frame`. Check requested_seconds, actual_seconds and delta_seconds: it selects the first decoded frame at or after the request, not an exact-time guarantee. Markers after last_frame_seconds have no captured frame. Historical frame geometry is not valid for live input.
+- Frame extraction can be cancelled; cleanup deletes only that job's generated PNGs, never the video. Preserve needed evidence before cleanup. Native decoder support depends on Unity version; interrupted/failed extraction and partial clips are not complete verification. Sparse frames cannot establish motion or timing between samples.
 - Capture is best-effort with real elapsed timestamps, not guaranteed target-fps sampling. Use it for visual behavior, not frame-accurate performance measurement; use Profiler and device tests for performance.
 - If the tool, platform, or rendering prerequisites are unavailable, report the limitation and use screenshots or state checks only for what they can establish. Do not loop on terminal failures or install recording dependencies merely to bypass the limitation.
 
@@ -1504,6 +1550,7 @@ description: {skill.Description}
 # {skill.Title}
 
 {skill.WhenToUse}
+{BuildUiAutomationGuidance()}
 ";
 
             var body =
@@ -1524,7 +1571,7 @@ description: {skill.Description}
    - Never patch `.unity`, `.prefab`, or `.asset` YAML with shell text tools.
    - If the user is looking at an open scene instance, update the visible scene instance as well as the prefab asset when appropriate.
 3. Execute changes.
-   - Prefer one well-guarded `execute_code` batch over many fragile UI clicks.
+   - Prefer structured query/edit/audit tools for supported work. Use a guarded `execute_code` batch only for project-specific gaps, after resolving full type names and assemblies when needed.
    - Use null guards for every object, component, asset, and path lookup.
    - Return explicit missing-path/object/component messages that include the expected path and the scene or prefab searched.
    - Return concise before/after values from snippets.
@@ -1532,7 +1579,7 @@ description: {skill.Description}
    - Do not run self-healing fallback loops; if a reference, path, package, or tool is missing, report it once and stop or skip that item.
 4. Validate.
    - Read back the changed objects through MCP.
-   - For code or resource edits, exit Play Mode if needed, call `request_recompile`, call `wait_for_compilation`, then inspect compilation errors and console errors.
+   - For code or resource edits, use `prepare_editor` and poll its durable operation ID to verified readiness in the intended mode, then inspect compilation errors and console errors.
    - For runtime behavior, enter Play Mode or inspect live objects when needed.
    - If MCP is unreachable, do not claim scene, prefab, asset, or runtime verification.
    - Report exactly what was verified and what still requires device, store, network, or manual validation.
@@ -1548,9 +1595,9 @@ description: {skill.Description}
 
 ## Tool Exposure
 
-- With the default `core` profile, rely on the focused workflow tools: `execute_code`, recompilation, Play Mode control, hierarchy, console logs, screenshots, Game View recording, input simulation, and performance inspection.
-- With the default `full` profile, prefer specific MCP tools for simple scene, asset, GameObject, component, prefab, camera, UI, package, animation, file, or visual-feedback operations.
-- If Tool Exposure is customized and a named tool is unavailable, adapt to the exposed tool list and report which expected tool is missing.
+- With default `core` exposure, prefer structured inspection/editing, audits, durable preparation, unified task reads, project-aware UI creation and visual evidence. `execute_code` remains a fallback for project-specific gaps.
+- `full` retains legacy status and compile/Play tools, history, project-default configuration, preview management, explicit recording markers and specialized diagnostics. Check exposure before choosing those workflows; do not silently widen a custom list.
+- Use `get_tool_capabilities` to distinguish implemented/enabled/exposed tools. Respect customized allowlists; report missing exposure rather than claiming an implementation does not exist.
 
 ## MCP Call Pattern
 
@@ -1702,40 +1749,19 @@ return ""Scene saved: size "" + before + "" -> "" + rect.sizeDelta;
 
 After external C# or asset file edits:
 
-1. If Unity is in Play Mode, call `exit_play_mode` first — `request_recompile` is rejected during play because Unity does not run script compilation or domain reloads while playing.
-2. Call `request_recompile`.
-3. Call `wait_for_compilation`.
-4. Read `get_compilation_errors` and `get_console_logs` errors before continuing.
-5. If a domain reload drops or interrupts the request, call `get_reload_recovery_status` when available, re-scan the MCP endpoint if needed, then continue from `wait_for_compilation`.
+1. Call `prepare_editor` with target=edit or play, refresh_assets=true and a unique request_key.
+2. Retain data.task.task_id and use `get_task` with bounded waiting and the last revision. If HTTP drops during reload, reconnect and repeat the status read with that handle or kind=editor and the original request_key.
+3. Continue only when operation.status=ready, current_editor.ready=true and current_editor.is_playing matches the intended mode.
+4. Stop on failed/cancelled/interrupted status; inspect compiler errors, phase history, deadline and current state before deciding the next action.
+5. Check console/runtime initialization separately. Preparation does not prove business logic, visual fidelity or event routing.
 
-Do not treat a disconnected, interrupted, or domain-reload-recovered request as a successful compile or edit. It only means the state is unknown until compilation checks and MCP readback confirm the final values.
+Do not replay an interrupted arbitrary mutation. Its outcome is unknown until exact object/asset readback establishes what executed.
 
-After `enter_play_mode`, the HTTP server is briefly unreachable while Unity reloads the domain. Before issuing the next tool call, poll a cheap endpoint such as `tools/list` (or `get_reload_recovery_status` if exposed) until you get a response — do not assume the connection survives the Play Mode transition.
+If durable preparation is unavailable in an older/customized configuration, use the legacy exit/request_recompile/wait/error-check/enter sequence and explicitly read back state after reconnection. `get_reload_recovery_status` is historical information, not a readiness flag.
 
 ## Verification Checklist
 
-Use readback snippets that print exact values, not only `success`:
-
-```csharp
-var all = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.Transform>();
-UnityEngine.Transform target = null;
-for (int i = 0; i < all.Length; i++)
-{
-    if (all[i].name == ""SwingCancelZone"")
-    {
-        target = all[i];
-        break;
-    }
-}
-
-if (target == null)
-{
-    return ""SwingCancelZone not found"";
-}
-
-var rect = target.GetComponent<UnityEngine.RectTransform>();
-return ""path="" + target.name + ""; pos="" + rect.anchoredPosition + ""; size="" + rect.sizeDelta;
-```
+Use structured component/property readback that returns exact values and persistence state. Resolve all candidates with `find_game_objects`, choose the verified ID, and query `get_component_properties`; never select the first duplicate name. Only use a guarded readback snippet when the structured API cannot express the project-specific check.
 
 For UI work, verify prefab or scene hierarchy, sprite references, anchors, sorting order, active state, text fit, and button listeners. A populated `Content` hierarchy does not prove the user can see the UI.
 
@@ -1761,7 +1787,7 @@ $@"
 - Source repository: `https://github.com/FunplayAI/funplay-unity-mcp`
 ";
 
-            return header + body + BuildGameViewRecordingGuidance() + footer;
+            return header + body + BuildReliableUiToolGuidance() + BuildGameViewRecordingGuidance() + footer;
         }
 
         private static ProjectSkillsManifest CreateDefaultManifest()

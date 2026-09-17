@@ -108,26 +108,33 @@ namespace Funplay.Editor.Tools.Builtins
         }
 
         [Description("Simulate a mouse drag from one screen position to another in Play Mode using the Unity Input System.")]
-        [ReadOnlyTool]
         public static string SimulateMouseDrag(
-            [ToolParam("Start X coordinate in pixels")] int start_x,
-            [ToolParam("Start Y coordinate in pixels")] int start_y,
-            [ToolParam("End X coordinate in pixels")] int end_x,
-            [ToolParam("End Y coordinate in pixels")] int end_y,
+            [ToolParam("Start X coordinate (pixels by default)")] float start_x,
+            [ToolParam("Start Y coordinate (pixels by default)")] float start_y,
+            [ToolParam("End X coordinate (pixels by default)")] float end_x,
+            [ToolParam("End Y coordinate (pixels by default)")] float end_y,
             [ToolParam("Duration of the drag in seconds", Required = false)] float duration = 0.5f,
-            [ToolParam("Mouse button: left, right, or middle", Required = false)] string button = "left")
+            [ToolParam("Mouse button: left, right, or middle", Required = false)] string button = "left",
+            [ToolParam("render_pixels, image_pixels or normalized", Required = false)] string coordinate_space = "render_pixels",
+            [ToolParam("bottom_left or top_left", Required = false)] string origin = "bottom_left",
+            [ToolParam("Fresh screenshot ID, required for image_pixels", Required = false)] string capture_id = null)
         {
             if (!EditorApplication.isPlaying)
                 return ToolResultFormatter.ErrorMessage("PLAY_MODE_REQUIRED", "SimulateMouseDrag only works in Play Mode.");
 
             try
             {
+                if (!VisualCoordinates.TryResolve(start_x, start_y, coordinate_space, origin, capture_id, out var startPoint, out var geometry, out var coordinateError) ||
+                    !VisualCoordinates.TryResolve(end_x, end_y, coordinate_space, origin, capture_id, out var endPoint, out _, out coordinateError))
+                    return ToolResultFormatter.Error(coordinateError);
+                start_x = startPoint.x; start_y = startPoint.y; end_x = endPoint.x; end_y = endPoint.y;
                 var mouse = EnsureMouse();
                 if (mouse == null)
                     return ToolResultFormatter.ErrorMessage("INPUT_DEVICE_NOT_FOUND", "No mouse device found in Input System");
 
                 duration = Mathf.Clamp(duration, 0.1f, 3f);
                 var pressButton = GetMouseButton(mouse, button);
+                VideoRecordingFunctions.RecordMarker("drag", "Mouse drag events queued", startPoint, endPoint, geometry);
 
                 InputState.Change(mouse.position, new Vector2(start_x, start_y));
                 QueueStateEvent(mouse, pressEvent =>
@@ -155,7 +162,9 @@ namespace Funplay.Editor.Tools.Builtins
                     mouse.position.WriteValueIntoEvent(new Vector2(end_x, end_y), releaseEvent);
                 });
 
-                return $"Mouse drag from ({start_x},{start_y}) to ({end_x},{end_y}) ({steps} steps queued)";
+                return Newtonsoft.Json.JsonConvert.SerializeObject(Response.Success("Mouse drag events dispatched.", new
+                { start = new { x = start_x, y = start_y }, end = new { x = end_x, y = end_y }, geometry, steps,
+                    timing = "Legacy synchronous dispatch: duration sets the interpolation step count, not wall-clock playback. Verify scrolling with a recording." }));
             }
             catch (Exception ex)
             {

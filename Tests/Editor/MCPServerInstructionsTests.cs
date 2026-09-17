@@ -21,13 +21,25 @@ namespace Funplay.Editor.Tests
             Assert.Greater(MCPServerInstructions.Text.Length, 200);
         }
 
+        [Test]
+        public void Text_IncludesSharedUiAutomationGuidanceOnce()
+        {
+            Assert.IsFalse(string.IsNullOrWhiteSpace(MCPServerInstructions.UiAutomationGuidance));
+            var first = MCPServerInstructions.Text.IndexOf(
+                MCPServerInstructions.UiAutomationGuidance, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(first, 0);
+            Assert.AreEqual(-1, MCPServerInstructions.Text.IndexOf(
+                MCPServerInstructions.UiAutomationGuidance,
+                first + MCPServerInstructions.UiAutomationGuidance.Length, System.StringComparison.Ordinal));
+        }
+
         [TestCase("success")]                 // structured envelope convention
         [TestCase("code")]                    // branch-on-code convention
         [TestCase("set_prefab_property")]     // safe prefab edit path
-        [TestCase("request_recompile")]       // recompile discipline
-        [TestCase("wait_for_compilation")]    // do not read errors while compilation is active
-        [TestCase("exit_play_mode")]          // play-mode guard before recompile
-        [TestCase("get_reload_recovery_status")] // domain-reload poll
+        [TestCase("prepare_editor")]          // durable preparation
+        [TestCase("get_task")]                // shared bounded status waiting
+        [TestCase("current_editor.ready")]    // current readiness, not only historical success
+        [TestCase("request_key")]             // recover a lost response without replay
         [TestCase("find_method=by_id")]       // instanceId reuse
         [TestCase("group_duplicates")]        // console log ergonomics
         public void Text_MentionsCoreDiscipline(string phrase)

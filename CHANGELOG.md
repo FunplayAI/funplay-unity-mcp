@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-09-17
+
+### Added
+- Shared read-only `get_task` receipts across Editor preparation, UI audits/previews, recording/frame extraction and Test Runner jobs. MCP short-completion waits and bounded state-change waits reduce round trips; stable revisions ignore frame/scan counters, unchanged phases recommend capped backoff, and interrupted HTTP waits never restart/cancel/clean tasks. Native IDs, recovery keys, payloads and legacy readers remain supported.
+- Durable `prepare_editor` operations with status/list/cancel tools, request-key idempotency, phase/error history, deadlines, overlap protection and domain-reload recovery. Current readiness is separate from historical success; arbitrary mutating calls are never replayed.
+- Read-only, bounded `audit_ui` jobs for scene/selection/prefab/saved-scene scopes. Findings cover Sliced borders, missing scripts/references, required bindings, invisible raycast targets, live text overflow, clipping and layout ownership, with contextual warnings, project rules, suppressions and explicit incomplete results.
+- Structured component/property searches with stable pagination; batch Image/Sprite/importer inspection and reverse dependencies; full project type/assembly lookup; capability discovery distinguishing available from exposed tools. Setters return actual values and persistence/affected-asset provenance.
+- Shared capture/recording/input geometry, `get_visual_coordinates` and `get_object_screen_bounds`. Resized screenshot coordinates map into render pixels; stale, reloaded or changed geometry is rejected. Inline images retain native MCP image blocks plus metadata.
+- Project UI configuration and prefab templates through `get_ui_defaults`, `configure_ui_defaults` and `create_project_ui`, also used by existing canvas/button/text creation. Verified project conventions select TMP/legacy and input modules; new projects prefer TMP. Fonts/material atlas compatibility, missing resources and ambiguous template labels are validated before mutation. Existing prefab bindings and EventSystems are preserved.
+- Explicit and automatic click/drag/scroll recording markers, `simulate_ui_scroll`, asynchronous native keyframe extraction and image retrieval. Receipts include actual presentation timestamps, geometry, interruption/cleanup state and historical recording identity.
+- Durable UI preview start/status/end tools using real prefabs or copied scene templates. Saved clean original scenes, selection and supported Game View settings are restored with readback; unrelated/dirty/user-edited state is protected and only owned temporary assets are removed. Business data and side effects remain project responsibilities.
+
+### Changed
+- The catalog contains 180 tools across 42 modules. Default Core exposes 40 tools (35 in v0.6.8, curated down from the intermediate 57-tool development set); legacy status/compile/Play APIs, history, project-default configuration, preview management, explicit markers and specialized diagnostics remain in Full. Existing custom lists stay authoritative. Unified status reads enforce enabled/exposed per-kind capabilities; cancellation and cleanup remain separate operations.
+- Built-in `unity-mcp-workflow` v1.0.5 and `unity-ui-composition` v1.0.6 guide all six supported skill targets through structured inspection, editor preparation, audits, prefab authoring, coordinate-aware evidence and preview restoration. Both remain built-in, not optional.
+- Both built-in skills and server initialization share MCP-first UI authoring/review guidance: supported Unity operations use MCP; desktop computer use is limited to confirmed capability gaps or explicit user requests. Missing exposure and temporary reload/disconnection are distinguished from unsupported functionality, without bypassing custom allowlists.
+- Preview status uses runtime-safe scene reads in Play Mode; Game View zoom is restored against the original resolution's constraints and verified after repaint. Corrupt operation journals fail closed without preventing diagnostics.
+
+### Compatibility
+- The new Core defaults replace separate compile/Play/status choices with `prepare_editor` and `get_task`. All original APIs remain available in Full or an explicitly customized exposure list. Update the built-in Project Skills so clients use the new workflow; configured custom lists are not overwritten.
+
+### Pull requests and issues
+- No GitHub pull requests were merged or issues closed by this release. It addresses direct user feedback on UI authoring, verification/recovery costs, MCP-first operation and tool-selection overhead.
+
+### Validation
+- All 653 EditMode cases passed in the graphics-enabled FunplayMcp Unity 2022.3 Editor on macOS (0 failures/skips; 215 cases added over v0.6.8). Native MCP calls verified single-response small audits, recording/frame waits, preview ID ownership and restoration, shared Test Runner status, Core permission guards and a busy Editor returning an explicit unknown outcome within its initial-read budget. Compact default-tool definitions decreased from 44,938 to 36,105 characters compared with the intermediate development set (about 20%); this measures schema size, not billed token savings.
+- Real MCP validation also covered compile failures/reload recovery, Play transitions with domain reload on/off, TMP prefab/input creation, resized and camera-viewport clicks, scroll readback, native recording markers/keyframes and preview restoration.
+- Both built-in skills were generated for all six targets; ten SKILL.md files passed validation and two Cursor rules retained their metadata. Test-owned resources were moved out of Assets with recoverable backups, and the original clean scene/window/settings restored. Windows and other Unity versions are not claimed as live-tested.
+
 ## [0.6.8] - 2026-09-16
 
 ### Changed

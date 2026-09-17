@@ -45,8 +45,11 @@ namespace Funplay.Editor.MCP.Server
             Dictionary<string, object> arguments,
             CancellationToken ct)
         {
-            return await _threadHelper.ExecuteAsyncOnEditorThreadAsync(async () =>
+            bool tracksPending = !string.Equals(toolName, "get_task", StringComparison.OrdinalIgnoreCase);
+            var queryClock = System.Diagnostics.Stopwatch.StartNew();
+            var invocation = _threadHelper.ExecuteAsyncOnEditorThreadAsync(async () =>
             {
+                ct.ThrowIfCancellationRequested();
                 try
                 {
                     var functionCall = new FunctionCall
@@ -63,9 +66,10 @@ namespace Funplay.Editor.MCP.Server
                     if (method == null && manualTool == null)
                     {
                         var error = ToolResultFormatter.Error("UNKNOWN_TOOL", new { tool = toolName });
-                        _interactionLog?.Add(toolName, MCPToolCallStatus.Error, error);
                         return error;
                     }
+                    if (!ToolRegistry.IsEnabled(toolName))
+                        return ToolResultFormatter.Error("TOOL_DISABLED", new { tool = toolName });
 
                     var profile = MCPToolExportPolicy.Parse(_settings.MCPToolExportProfile);
                     if (!MCPToolExportPolicy.IsToolAllowed(
@@ -81,46 +85,66 @@ namespace Funplay.Editor.MCP.Server
                             tool = toolName,
                             profile = MCPToolExportPolicy.ToSettingValue(profile)
                         });
-                        _interactionLog?.Add(toolName, MCPToolCallStatus.Error, error);
                         return error;
                     }
 
                     functionCall.IsReadOnly = method != null &&
                         method.GetCustomAttribute<ReadOnlyToolAttribute>() != null;
 
-                    DomainReloadHandler.ResetResumeCounter();
-                    _stateController.SetState(FunplayState.ExecutingFunction);
-                    DomainReloadHandler.SavePendingFunction(functionCall);
+                    if (tracksPending)
+                    {
+                        DomainReloadHandler.ResetResumeCounter();
+                        _stateController.SetState(FunplayState.ExecutingFunction);
+                        DomainReloadHandler.SavePendingFunction(functionCall);
+                    }
 
                     PluginDebugLogger.Log($"[Funplay MCP Server] Executing tool: {toolName}");
                     var result = await _invoker.InvokeAsync(functionCall);
-                    DomainReloadHandler.CompletePendingFunction(_stateController);
+                    if (tracksPending) DomainReloadHandler.CompletePendingFunction(_stateController);
 
                     if (!string.IsNullOrEmpty(functionCall.Error))
                     {
                         var errMsg = ToolResultFormatter.Error("TOOL_ERROR",
                             new { tool = toolName, message = functionCall.Error });
-                        _interactionLog?.Add(toolName, MCPToolCallStatus.Error, errMsg);
                         return errMsg;
                     }
 
                     var resultText = result ?? "Completed successfully";
-                    _interactionLog?.Add(toolName,
-                        ToolResultFormatter.IsError(resultText) ? MCPToolCallStatus.Error : MCPToolCallStatus.Success,
-                        resultText);
                     return resultText;
                 }
                 catch (Exception ex)
                 {
-                    DomainReloadHandler.ClearPendingFunction();
-                    _stateController.ClearState();
+                    if (tracksPending)
+                    {
+                        DomainReloadHandler.ClearPendingFunction();
+                        _stateController.ClearState();
+                    }
                     var exError = ToolResultFormatter.Error("TOOL_EXCEPTION",
                         new { tool = toolName, message = ex.Message });
                     Debug.LogError($"[Funplay MCP Server] Error executing tool '{toolName}': {ex.Message}\n{ex.StackTrace}");
-                    _interactionLog?.Add(toolName, MCPToolCallStatus.Error, exError);
                     return exError;
                 }
             });
+            double? remainingWaitSeconds = null;
+            string initialResult;
+            if (!tracksPending)
+            {
+                int seconds = MCPTaskWaiter.QueryBudget(arguments);
+                initialResult = await MCPTaskWaiter.InitialReadAsync(invocation, Math.Max(1000, seconds * 1000), ct).ConfigureAwait(false);
+                remainingWaitSeconds = Math.Max(0, seconds - queryClock.Elapsed.TotalSeconds);
+            }
+            else initialResult = await invocation.ConfigureAwait(false);
+            // The mutating invocation is already complete. Waiting only re-reads its receipt;
+            // it must not occupy the pending-function slot or block Editor update processing.
+            var finalResult = await MCPTaskWaiter.CompleteAsync(toolName, arguments, initialResult, _threadHelper, ct, remainingWaitSeconds).ConfigureAwait(false);
+            // Logging must not re-block an already timed-out status response on the same busy
+            // Editor queue. It remains one final activity entry, delivered when the UI can run.
+            var logging = _threadHelper.ExecuteOnEditorThreadAsync(() => _interactionLog?.Add(toolName,
+                ToolResultFormatter.IsError(finalResult) ? MCPToolCallStatus.Error : MCPToolCallStatus.Success,
+                VisualCoordinates.WithoutInlineImage(finalResult)));
+            _ = logging.ContinueWith(t => { var ignored = t.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return finalResult;
         }
 
         private string ConvertArgumentToString(object value)

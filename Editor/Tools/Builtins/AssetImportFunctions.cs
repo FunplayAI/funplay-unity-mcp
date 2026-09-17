@@ -45,6 +45,7 @@ namespace Funplay.Editor.Tools.Builtins
                             path,
                             importerType = "TextureImporter",
                             textureType = ti.textureType.ToString(),
+                            sprite = SpriteInspection.DescribeImporter(ti),
                             maxTextureSize = ti.maxTextureSize,
                             textureCompression = ti.textureCompression.ToString(),
                             filterMode = ti.filterMode.ToString(),

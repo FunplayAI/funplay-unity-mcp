@@ -17,121 +17,49 @@ namespace Funplay.Editor.Tools.Builtins
     [ToolProvider("UI")]
     internal static class UIFunctions
     {
-        [Description("Create a Canvas in the scene (required for UI elements)")]
+        [Description("Create an Edit Mode Canvas from the project template/defaults, preserving existing EventSystems. Does not save automatically.")]
         [SceneEditingTool]
-        public static string CreateCanvas(
-            [ToolParam("Name for the Canvas", Required = false)] string name = "Canvas",
-            [ToolParam("Render mode: ScreenSpaceOverlay, ScreenSpaceCamera, WorldSpace", Required = false)] string render_mode = "ScreenSpaceOverlay")
-        {
-            var canvasGo = new GameObject(name);
-            Undo.RegisterCreatedObjectUndo(canvasGo, $"Create Canvas {name}");
+        public static object CreateCanvas(
+            [ToolParam("Canvas name", Required = false)] string name = "Canvas",
+            [ToolParam("Optional render-mode override; omitted preserves the template", Required = false)] string render_mode = null,
+            [ToolParam("Optional Canvas prefab asset", Required = false)] string template_path = null,
+            [ToolParam("auto, input_system or legacy; never replaces existing modules", Required = false)] string input_module = null)
+            => UICreationService.Create("canvas", name, null, null, null, null, null, null, null, render_mode, null, template_path, null, null, null, input_module);
 
-            var canvas = canvasGo.AddComponent<Canvas>();
-            switch (render_mode.ToLowerInvariant())
-            {
-                case "screenspacecamera": canvas.renderMode = RenderMode.ScreenSpaceCamera; break;
-                case "worldspace": canvas.renderMode = RenderMode.WorldSpace; break;
-                default: canvas.renderMode = RenderMode.ScreenSpaceOverlay; break;
-            }
-
-            canvasGo.AddComponent<CanvasScaler>();
-            canvasGo.AddComponent<GraphicRaycaster>();
-
-            // Ensure EventSystem exists
-            if (UnityEngine.Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
-            {
-                var esGo = new GameObject("EventSystem");
-                esGo.AddComponent<UnityEngine.EventSystems.EventSystem>();
-                esGo.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
-                Undo.RegisterCreatedObjectUndo(esGo, "Create EventSystem");
-            }
-
-            Selection.activeGameObject = canvasGo;
-            return $"Created Canvas '{name}' with {render_mode} render mode";
-        }
-
-        [Description("Create a UI Button")]
+        [Description("Create an Edit Mode UI Button using project prefab/typography defaults. Preserves template bindings; no runtime UI reconstruction.")]
         [SceneEditingTool]
-        public static string CreateButton(
-            [ToolParam("Name for the button")] string name,
-            [ToolParam("Button label text")] string text,
-            [ToolParam("Parent Canvas/UI element name, hierarchy path, or instance ID (finds inactive too)", Required = false)] string parent_name = "Canvas",
-            [ToolParam("Anchored position as 'x,y'", Required = false)] string position = "0,0",
-            [ToolParam("Size as 'width,height'", Required = false)] string size = "160,40",
-            [ToolParam("Anchor preset: 'top-left','top-center','top-right','middle-left','center','middle-right','bottom-left','bottom-center','bottom-right','stretch-horizontal','stretch-vertical','stretch-full'", Required = false)] string anchor = null,
-            [ToolParam("Pivot as 'x,y' (0-1)", Required = false)] string pivot = null)
-        {
-            var parent = FindParent(parent_name);
-            if (parent == null)
-                return ToolResultFormatter.Error("PARENT_NOT_FOUND", new { parent_name, hint = "Create a Canvas first." });
+        public static object CreateButton(
+            [ToolParam("Button name")] string name,
+            [ToolParam("Button label")] string text,
+            [ToolParam("Unique parent name/path/instance ID", Required = false)] string parent_name = "Canvas",
+            [ToolParam("Optional anchored x,y", Required = false)] string position = null,
+            [ToolParam("Optional width,height", Required = false)] string size = null,
+            [ToolParam("Optional anchor preset", Required = false)] string anchor = null,
+            [ToolParam("Optional pivot x,y", Required = false)] string pivot = null,
+            [ToolParam("auto, tmp or legacy", Required = false)] string text_component = null,
+            [ToolParam("Optional prefab asset", Required = false)] string template_path = null,
+            [ToolParam("Label path relative to template root", Required = false)] string text_path = null,
+            [ToolParam("Optional font asset override", Required = false)] string font_asset = null,
+            [ToolParam("Optional shared font material preset", Required = false)] string font_material = null)
+            => UICreationService.Create("button", name, text, parent_name, position, size, anchor, pivot, null, null, text_component, template_path, text_path, font_asset, font_material, null);
 
-            var buttonGo = new GameObject(name);
-            Undo.RegisterCreatedObjectUndo(buttonGo, $"Create Button {name}");
-            buttonGo.transform.SetParent(parent, false);
-
-            var rect = buttonGo.AddComponent<RectTransform>();
-            rect.sizeDelta = ParseVector2(size);
-            rect.anchoredPosition = ParseVector2(position);
-            ApplyAnchorPreset(rect, anchor, pivot);
-
-            var image = buttonGo.AddComponent<Image>();
-            image.color = new Color(0.2f, 0.5f, 0.9f, 1f);
-            buttonGo.AddComponent<Button>();
-
-            // Text child
-            var textGo = new GameObject("Text");
-            textGo.transform.SetParent(buttonGo.transform, false);
-            var textRect = textGo.AddComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.sizeDelta = Vector2.zero;
-
-            var textComp = textGo.AddComponent<Text>();
-            textComp.text = text;
-            textComp.alignment = TextAnchor.MiddleCenter;
-            textComp.color = Color.white;
-            textComp.fontSize = 16;
-            textComp.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-
-            Selection.activeGameObject = buttonGo;
-            return $"Created UI Button '{name}' with text '{text}'";
-        }
-
-        [Description("Create a UI Text element")]
+        [Description("Create an Edit Mode text element using project prefab/typography defaults. Empty projects prefer TextMeshProUGUI; missing TMP resources are reported without fallback.")]
         [SceneEditingTool]
-        public static string CreateText(
-            [ToolParam("Name for the text element")] string name,
+        public static object CreateText(
+            [ToolParam("Object name")] string name,
             [ToolParam("Text content")] string text,
-            [ToolParam("Parent Canvas/UI element name, hierarchy path, or instance ID (finds inactive too)", Required = false)] string parent_name = "Canvas",
-            [ToolParam("Font size", Required = false)] string font_size = "20",
-            [ToolParam("Anchored position as 'x,y'", Required = false)] string position = "0,0",
-            [ToolParam("Size as 'width,height'", Required = false)] string size = "300,60",
-            [ToolParam("Anchor preset: 'top-left','top-center','top-right','middle-left','center','middle-right','bottom-left','bottom-center','bottom-right','stretch-horizontal','stretch-vertical','stretch-full'", Required = false)] string anchor = null,
-            [ToolParam("Pivot as 'x,y' (0-1)", Required = false)] string pivot = null)
-        {
-            var parent = FindParent(parent_name);
-            if (parent == null)
-                return ToolResultFormatter.Error("PARENT_NOT_FOUND", new { parent_name, hint = "Create a Canvas first." });
-
-            var textGo = new GameObject(name);
-            Undo.RegisterCreatedObjectUndo(textGo, $"Create Text {name}");
-            textGo.transform.SetParent(parent, false);
-
-            var rect = textGo.AddComponent<RectTransform>();
-            rect.sizeDelta = ParseVector2(size);
-            rect.anchoredPosition = ParseVector2(position);
-            ApplyAnchorPreset(rect, anchor, pivot);
-
-            var textComp = textGo.AddComponent<Text>();
-            textComp.text = text;
-            textComp.alignment = TextAnchor.MiddleCenter;
-            textComp.color = Color.white;
-            textComp.fontSize = int.Parse(font_size);
-            textComp.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-
-            Selection.activeGameObject = textGo;
-            return $"Created UI Text '{name}'";
-        }
+            [ToolParam("Unique parent name/path/instance ID", Required = false)] string parent_name = "Canvas",
+            [ToolParam("Optional font size override", Required = false)] string font_size = null,
+            [ToolParam("Optional anchored x,y", Required = false)] string position = null,
+            [ToolParam("Optional width,height", Required = false)] string size = null,
+            [ToolParam("Optional anchor preset", Required = false)] string anchor = null,
+            [ToolParam("Optional pivot x,y", Required = false)] string pivot = null,
+            [ToolParam("auto, tmp or legacy", Required = false)] string text_component = null,
+            [ToolParam("Optional prefab asset", Required = false)] string template_path = null,
+            [ToolParam("Label path relative to template root", Required = false)] string text_path = null,
+            [ToolParam("Optional font asset override", Required = false)] string font_asset = null,
+            [ToolParam("Optional shared font material preset", Required = false)] string font_material = null)
+            => UICreationService.Create("text", name, text, parent_name, position, size, anchor, pivot, font_size, null, text_component, template_path, text_path, font_asset, font_material, null);
 
         [Description("Create a UI Image element")]
         [SceneEditingTool]
@@ -164,7 +92,7 @@ namespace Funplay.Editor.Tools.Builtins
             return $"Created UI Image '{name}'";
         }
 
-        private static void ApplyAnchorPreset(RectTransform rect, string anchor, string pivot)
+        internal static void ApplyAnchorPreset(RectTransform rect, string anchor, string pivot)
         {
             if (!string.IsNullOrEmpty(pivot))
             {
@@ -301,7 +229,9 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Y coordinate of the point to test.")] float y,
             [ToolParam("Interpret x/y as normalized 0-1 viewport coordinates instead of pixels.", Required = false)] bool normalized = false,
             [ToolParam("Coordinate origin: 'bottom_left' (Unity screen space, default) or 'top_left' (screenshot/image space).", Required = false)] string origin = "bottom_left",
-            [ToolParam("Maximum number of hits to include in the result. Default 20.", Required = false)] int max_results = 20)
+            [ToolParam("Maximum number of hits to include in the result. Default 20.", Required = false)] int max_results = 20,
+            [ToolParam("render_pixels, image_pixels or normalized. Omitted preserves the normalized flag.", Required = false)] string coordinate_space = null,
+            [ToolParam("Screenshot ID, required for image_pixels; freshness/geometry validated", Required = false)] string capture_id = null)
         {
             var eventSystem = EventSystem.current;
             if (eventSystem == null)
@@ -317,18 +247,10 @@ namespace Funplay.Editor.Tools.Builtins
             // Resolve the real Game View target size (same reflection the screenshot
             // tools use) so normalized coordinates and the top_left flip match what
             // GraphicRaycaster actually raycasts against.
-            var screenWidth = 0;
-            var screenHeight = 0;
-            if (!ScreenshotFunctions.TryResolveGameViewSize(ref screenWidth, ref screenHeight))
-            {
-                screenWidth = Screen.width;
-                screenHeight = Screen.height;
-            }
-
-            var px = normalized ? x * screenWidth : x;
-            var py = normalized ? y * screenHeight : y;
-            if (string.Equals(origin?.Trim(), "top_left", StringComparison.OrdinalIgnoreCase))
-                py = screenHeight - py;
+            if (!VisualCoordinates.TryResolve(x, y, coordinate_space ?? (normalized ? "normalized" : "render_pixels"), origin, capture_id,
+                out var point, out var geometry, out var coordinateError)) return ToolResultFormatter.Error(coordinateError);
+            var screenWidth = geometry.render_width; var screenHeight = geometry.render_height;
+            var px = point.x; var py = point.y;
 
             var pointerData = new PointerEventData(eventSystem) { position = new Vector2(px, py) };
             var results = new List<RaycastResult>();
@@ -382,6 +304,7 @@ namespace Funplay.Editor.Tools.Builtins
                 new
                 {
                     screen_position = new { x = px, y = py },
+                    geometry,
                     screen_size = new { width = screenWidth, height = screenHeight },
                     hit_count = results.Count,
                     click_receiver = clickReceiver,
