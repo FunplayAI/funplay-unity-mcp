@@ -13,6 +13,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Funplay.Editor.MCP.Server;
 using Funplay.Editor.State;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -223,6 +224,148 @@ namespace Funplay.Editor
             }
             finally
             {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator BrokerProcess_ReplacesPreviousProtocolBrokerOnSamePort()
+        {
+            var root = CreateTempRoot();
+            var paths = CreateBrokerPaths(root);
+            var port = GetFreeTcpPort();
+            Process oldProcess = null;
+
+            try
+            {
+                var mono = MCPBrokerProcessManager.ResolveMono(string.Empty);
+                Assume.That(!string.IsNullOrEmpty(mono), "Unity-bundled Mono is required for broker process tests.");
+                var oldProtocol = MCPBrokerProtocol.Version - 1;
+                var currentSource = File.ReadAllText(paths.SourcePath);
+                var oldSource = currentSource.Replace(
+                    "private const int ProtocolVersion = " + MCPBrokerProtocol.Version + ";",
+                    "private const int ProtocolVersion = " + oldProtocol + ";");
+                Assert.AreNotEqual(currentSource, oldSource, "The old broker must advertise a different protocol.");
+                var sourcePath = Path.Combine(root, "previous-broker.cs.txt");
+                File.WriteAllText(sourcePath, oldSource);
+                var oldPaths = new MCPBrokerProcessManager.MCPBrokerRuntimePaths(
+                    root, paths.PidFilePath, Path.Combine(root, "previous-cache"), sourcePath);
+                var compile = typeof(MCPBrokerProcessManager).GetMethod(
+                    "EnsureBrokerExe", BindingFlags.Static | BindingFlags.NonPublic);
+                Assert.NotNull(compile);
+                var oldExe = (string)compile.Invoke(null, new object[] { oldPaths, mono });
+                Assert.IsNotEmpty(oldExe, MCPBrokerProcessManager.LastError);
+
+                var token = Guid.NewGuid().ToString("N");
+                oldProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName = mono,
+                    Arguments = "\"" + oldExe + "\" --port " + port + " --token " + token,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                Assert.NotNull(oldProcess);
+                var healthTask = WaitForBrokerHealthAsync(port, token);
+                yield return WaitForTask(healthTask, 8f);
+                Assert.AreEqual(oldProtocol, healthTask.Result.Value<int>("protocol"));
+                Assert.AreEqual(oldProcess.Id, healthTask.Result.Value<int>("pid"));
+                WriteBrokerState(paths, oldProcess.Id, port, token, oldProtocol);
+
+                Assert.IsFalse(MCPBrokerProcessManager.TryProbeBroker(port, token, out _));
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(port, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, port, out var replacement));
+                Assert.IsTrue(MCPBrokerProcessManager.TryProbeBroker(port, replacement.Token, out var health));
+                Assert.AreEqual(replacement.Pid, health.Pid);
+                Assert.AreNotEqual(oldProcess.Id, replacement.Pid);
+                Assert.IsTrue(oldProcess.HasExited, "The previous broker must not remain on the port after an upgrade.");
+            }
+            finally
+            {
+                MCPBrokerProcessManager.Stop(paths);
+                StopProcess(oldProcess);
+                DeleteTempRoot(root);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator BrokerTransport_HandshakeNotificationsAreEmptyAcceptedAndPreserveJsonAndSse()
+        {
+            var root = CreateTempRoot();
+            var paths = CreateBrokerPaths(root);
+            var port = GetFreeTcpPort();
+            MCPBrokerClientTransport transport = null;
+            var wasPending = MCPToolListChangeNotifier.TryConsumePending();
+
+            try
+            {
+                Assume.That(!string.IsNullOrEmpty(MCPBrokerProcessManager.ResolveMono(string.Empty)),
+                    "Unity-bundled Mono is required for broker process tests.");
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(port, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, port, out var connection));
+                transport = new MCPBrokerClientTransport(port, connection.Token);
+                transport.OnRequestReceived += (request, sendResponse) =>
+                {
+                    if (request.Method.StartsWith("notifications/", StringComparison.Ordinal)) sendResponse(null);
+                    else if (request.Method == "initialize") sendResponse(new MCPResponse
+                    {
+                        Id = request.Id,
+                        Result = new Dictionary<string, object>
+                        {
+                            ["protocolVersion"] = "2024-11-05",
+                            ["capabilities"] = new Dictionary<string, object>(),
+                            ["serverInfo"] = new Dictionary<string, object> { ["name"] = "Broker handshake test", ["version"] = "1.0.0" }
+                        }
+                    });
+                    else if (request.Method == "tools/list") sendResponse(new MCPResponse
+                    {
+                        Id = request.Id,
+                        Result = new Dictionary<string, object> { ["tools"] = new[] { new Dictionary<string, object> { ["name"] = "probe", ["inputSchema"] = new Dictionary<string, object> { ["type"] = "object" } } } }
+                    });
+                    else sendResponse(CreateToolTextResponse(request.Id, "done"));
+                };
+                var startTask = transport.StartAsync();
+                yield return WaitForTask(startTask);
+                Assert.IsTrue(startTask.Result);
+                MCPToolListChangeNotifier.RestorePending();
+
+                var initialize = SendRpcAsync(port, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}", true);
+                yield return WaitForTask(initialize);
+                Assert.AreEqual(HttpStatusCode.OK, initialize.Result.Status);
+                Assert.AreEqual("application/json", initialize.Result.ContentType);
+                Assert.AreEqual(1, JObject.Parse(initialize.Result.Body).Value<int>("id"));
+
+                foreach (var acceptsSse in new[] { false, true })
+                foreach (var method in new[] { "notifications/initialized", "notifications/cancelled", "notifications/custom" })
+                {
+                    var notification = SendRpcAsync(port, "{\"jsonrpc\":\"2.0\",\"method\":\"" + method + "\",\"params\":{}}", acceptsSse);
+                    yield return WaitForTask(notification);
+                    Assert.AreEqual(HttpStatusCode.Accepted, notification.Result.Status, method);
+                    Assert.IsEmpty(notification.Result.Body, method + " must not produce a JSON-RPC response or SSE event.");
+                }
+
+                var tools = SendRpcAsync(port, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", false);
+                yield return WaitForTask(tools);
+                Assert.AreEqual(HttpStatusCode.OK, tools.Result.Status);
+                Assert.AreEqual("application/json", tools.Result.ContentType);
+                var toolsJson = JObject.Parse(tools.Result.Body);
+                Assert.AreEqual(2, toolsJson.Value<int>("id"));
+                Assert.AreEqual("probe", toolsJson["result"]["tools"][0].Value<string>("name"));
+
+                var sse = SendRpcAsync(port, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"probe\",\"arguments\":{}}}", true);
+                yield return WaitForTask(sse);
+                Assert.AreEqual(HttpStatusCode.OK, sse.Result.Status);
+                Assert.AreEqual("text/event-stream", sse.Result.ContentType);
+                Assert.That(sse.Result.Body, Does.StartWith("data: " + MCPToolListChangeNotifier.NotificationJson + "\n\n"));
+                Assert.That(sse.Result.Body, Does.Contain("\"id\":3"));
+                Assert.That(sse.Result.Body, Does.Contain("done"));
+                Assert.IsFalse(MCPToolListChangeNotifier.TryConsumePending());
+            }
+            finally
+            {
+                transport?.Dispose();
+                MCPToolListChangeNotifier.TryConsumePending();
+                if (wasPending) MCPToolListChangeNotifier.RestorePending();
+                MCPBrokerProcessManager.Stop(paths);
                 DeleteTempRoot(root);
             }
         }
@@ -602,6 +745,45 @@ namespace Funplay.Editor
         }
 
         private const string SessionStaleEnvVar = "FUNPLAY_BROKER_SESSION_STALE_MS";
+
+        private static async Task<(HttpStatusCode Status, string Body, string ContentType)> SendRpcAsync(int port, string body, bool acceptsSse)
+        {
+            using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) })
+            using (var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/"))
+            {
+                request.Headers.TryAddWithoutValidation("Accept", acceptsSse ? "application/json, text/event-stream" : "application/json");
+                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                using (var response = await client.SendAsync(request))
+                    return (response.StatusCode, await response.Content.ReadAsStringAsync(), response.Content.Headers.ContentType?.MediaType);
+            }
+        }
+
+        private static async Task<JObject> WaitForBrokerHealthAsync(int port, string token)
+        {
+            using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) })
+            {
+                var clock = Stopwatch.StartNew();
+                while (clock.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    try
+                    {
+                        using (var request = new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:" + port + MCPBrokerProtocol.HealthPath))
+                        {
+                            request.Headers.TryAddWithoutValidation(MCPBrokerProtocol.TokenHeader, token);
+                            using (var response = await client.SendAsync(request))
+                            {
+                                response.EnsureSuccessStatusCode();
+                                return JObject.Parse(await response.Content.ReadAsStringAsync());
+                            }
+                        }
+                    }
+                    catch (HttpRequestException) { }
+                    catch (TaskCanceledException) { }
+                    await Task.Delay(50);
+                }
+            }
+            throw new TimeoutException("The previous-protocol broker did not become healthy.");
+        }
 
         private static async Task SendAttachAsync(int port, string token, string session)
         {

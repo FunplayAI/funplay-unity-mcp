@@ -31,7 +31,7 @@ namespace Funplay.Editor.Tests
                 Assert.IsTrue(File.Exists(skillPath));
                 var agentsContent = File.ReadAllText(agentsPath);
                 StringAssert.Contains("unity-mcp-workflow@1.0.5", agentsContent);
-                StringAssert.Contains("unity-ui-composition@1.0.6", agentsContent);
+                StringAssert.Contains("unity-ui-composition@1.0.7", agentsContent);
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(agentsPath));
                 StringAssert.Contains(ProjectSkillsManager.ManagedEndMarker, File.ReadAllText(claudePath));
                 var skillContent = File.ReadAllText(skillPath);
@@ -48,7 +48,7 @@ namespace Funplay.Editor.Tests
                 StringAssert.Contains("\"version\": \"1.0.5\"", manifestJson);
                 StringAssert.Contains("\"id\": \"unity-ui-composition\"", manifestJson);
                 Assert.IsTrue(manifest.skillVersions.Any(entry =>
-                    entry.id == "unity-ui-composition" && entry.version == "1.0.6"));
+                    entry.id == "unity-ui-composition" && entry.version == "1.0.7"));
             }
             finally
             {
@@ -120,10 +120,8 @@ namespace Funplay.Editor.Tests
                 foreach (var path in new[] { codexSkillPath, claudeSkillPath, cursorRulePath })
                 {
                     var content = File.ReadAllText(path);
-                    StringAssert.Contains("unity-ui-composition@1.0.6", content);
+                    StringAssert.Contains("unity-ui-composition@1.0.7", content);
                     StringAssert.Contains("Screen.safeArea", content);
-                    StringAssert.Contains("720 x 1559", content);
-                    StringAssert.Contains("1559 x 720", content);
                     StringAssert.Contains("RectTransformUtility.CalculateRelativeRectTransformBounds", content);
                     StringAssert.Contains("Do not recreate an entire UI or GameObject prefab", content);
                     StringAssert.Contains("default to `TextMeshProUGUI`", content);
@@ -155,7 +153,44 @@ namespace Funplay.Editor.Tests
                 var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
                 CollectionAssert.DoesNotContain(manifest.optionalSkills, skillId);
                 Assert.IsTrue(manifest.skillVersions.Any(entry =>
-                    entry.id == skillId && entry.version == "1.0.6"));
+                    entry.id == skillId && entry.version == "1.0.7"));
+            }
+            finally
+            {
+                DeleteTempProjectPath(projectRoot);
+            }
+        }
+
+        [TestCase("codex")]
+        [TestCase("claude")]
+        [TestCase("cursor")]
+        [TestCase("opencode")]
+        [TestCase("dsh")]
+        [TestCase("antigravity")]
+        public void ApplyConfiguration_SharesUiCompositionBodyWithEveryPlatform(string platformId)
+        {
+            var projectRoot = CreateTempProjectPath();
+            Directory.CreateDirectory(Path.Combine(projectRoot, ".git"));
+
+            try
+            {
+                var bodyBuilder = typeof(ProjectSkillsManager).GetMethod(
+                    "BuildUnityUiCompositionBody", BindingFlags.Static | BindingFlags.NonPublic);
+                Assert.NotNull(bodyBuilder);
+                var body = (string)bodyBuilder.Invoke(null, null);
+                Assert.IsNotEmpty(body);
+
+                ProjectSkillsManager.ApplyConfiguration(projectRoot, new[] { platformId }, Array.Empty<string>());
+                var manifest = ProjectSkillsManager.LoadManifest(projectRoot);
+                var uiFile = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, platformId)
+                    .Files.Single(file => file.SkillId == "unity-ui-composition");
+                var content = File.ReadAllText(uiFile.Path);
+
+                // Test export wiring against the shared source, not a duplicated copy of its prose.
+                // Resolution policy and all other UI guidance must reach every target unchanged.
+                Assert.AreEqual(1, CountOccurrences(content, body), uiFile.Path);
+                if (platformId == "cursor") StringAssert.Contains("alwaysApply: true", content);
+                else AssertStandardSkillFrontmatter(uiFile.Path);
             }
             finally
             {
@@ -403,7 +438,7 @@ namespace Funplay.Editor.Tests
                 {
                     File.WriteAllText(file.Path, File.ReadAllText(file.Path)
                         .Replace("unity-mcp-workflow@1.0.5", "unity-mcp-workflow@1.0.3")
-                        .Replace("unity-ui-composition@1.0.6", "unity-ui-composition@1.0.3"));
+                        .Replace("unity-ui-composition@1.0.7", "unity-ui-composition@1.0.3"));
                 }
 
                 var previous = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, platformId);
@@ -416,7 +451,7 @@ namespace Funplay.Editor.Tests
                 {
                     Assert.AreEqual("1.0.3", skill.InstalledVersion);
                     Assert.AreEqual(
-                        skill.SkillId == "unity-ui-composition" ? "1.0.6" : "1.0.5",
+                        skill.SkillId == "unity-ui-composition" ? "1.0.7" : "1.0.5",
                         skill.ExpectedVersion);
                     Assert.IsTrue(skill.RequiresUpgrade);
                     Assert.IsFalse(skill.Missing);
@@ -471,14 +506,14 @@ namespace Funplay.Editor.Tests
                 // include shared project receipts while keeping workflow files untouched.
                 foreach (var file in current.Files.Where(file => file.SkillId != "unity-mcp-workflow"))
                     File.WriteAllText(file.Path, File.ReadAllText(file.Path)
-                        .Replace("unity-ui-composition@1.0.6", "unity-ui-composition@1.0.5"));
+                        .Replace("unity-ui-composition@1.0.7", "unity-ui-composition@1.0.6"));
 
                 var previous = ProjectSkillsManager.GetUpgradeStatus(projectRoot, manifest, platformId);
                 Assert.IsTrue(previous.HasUpdates);
                 Assert.IsFalse(previous.Files.Single(file => file.SkillId == "unity-mcp-workflow").RequiresUpgrade);
                 var ui = previous.Files.Single(file => file.SkillId == "unity-ui-composition");
-                Assert.AreEqual("1.0.5", ui.InstalledVersion);
-                Assert.AreEqual("1.0.6", ui.ExpectedVersion);
+                Assert.AreEqual("1.0.6", ui.InstalledVersion);
+                Assert.AreEqual("1.0.7", ui.ExpectedVersion);
                 Assert.IsTrue(ui.RequiresUpgrade);
 
                 var notice = FunplayMCPProjectSkillsNoticePanel.Evaluate(projectRoot, targetName);

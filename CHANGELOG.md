@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-10-04
+
+### Fixed
+- Fixed [Issue #58](https://github.com/FunplayAI/funplay-unity-mcp/issues/58): Broker Mode preserves the request handler's empty notification result and returns HTTP 202 with no body. Initialization, cancellation and custom notifications no longer produce an invalid JSON-RPC reply with `id: null`, allowing strict MCP clients such as Codex to finish their handshake. Normal JSON replies and SSE tool-list-change delivery retain their existing behavior.
+- Internal Broker protocol v4 replaces existing v3 processes on the same port when the upgraded package starts, so the corrected HTTP response behavior does not depend on manually stopping an old Broker.
+
+### Changed
+- Built-in `unity-ui-composition` Project Skill v1.0.7 makes reference-resolution priority explicit: user requirements or design specifications take precedence, existing projects retain their established baseline, and new portrait projects use the supplied full-page design image's dimensions when no resolution is specified. The `1080 x 2340` fallback applies only when no design image is supplied; conflicting or cropped references require clarification. All six skill targets receive the guidance, and existing installations are marked for an update.
+- UI composition prioritizes complete, saved page prefabs over runtime hierarchy construction. Safe-area guidance now preserves design spacing and existing project handling without proactively adding adaptation scripts, containers or extra insets; new adaptation requires an explicit request or confirmation of a demonstrated overlap.
+
+### Validation
+- All 661 EditMode cases passed in the graphics-enabled FunplayMcp Unity 2022.3 Editor on macOS (0 failures/skips). Regression coverage includes empty HTTP 202 acknowledgements for initialized/cancelled/custom notifications with JSON and SSE Accept headers, subsequent JSON tool discovery and SSE tool responses, pending tool-list-change preservation, and replacement of a previous-protocol Broker on the same port. Project Skills coverage verifies the shared UI guidance across all six targets and upgrades from UI skill v1.0.6 without changing the workflow skill.
+- A real MCP TypeScript SDK v1.32.0 client completed initialization against the actual Unity Broker, discovered 40 exposed tools, read the FunplayMcp project resource and successfully called a read-only tool. Initialization/cancellation/custom notifications returned empty HTTP 202 responses. The packaged .NET Content-Length stdio bridge also completed initialization, notifications, tool discovery and tool invocation without emitting spurious notification replies. Windows and other Unity versions are not claimed as live-tested.
+
+### Pull requests and issues
+- Fixed [Issue #58](https://github.com/FunplayAI/funplay-unity-mcp/issues/58). No pull requests are merged in this release.
+
 ## [0.6.9] - 2026-09-17
 
 ### Added

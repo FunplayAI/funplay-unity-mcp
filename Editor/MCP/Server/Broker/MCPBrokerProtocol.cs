@@ -11,7 +11,9 @@ namespace Funplay.Editor.MCP.Server
         //     (crashed editors that never detached). Bumped so a pre-v3 broker still running
         //     after a package upgrade fails the health probe and is replaced by the new one
         //     (see MCPBrokerProcessManager.EnsureRunning's upgrade-cleanup path).
-        public const int Version = 3;
+        // v4: an empty backend push acknowledges a notification with HTTP 202 and no
+        //     body. Replaces older brokers that returned a JSON-RPC reply with id:null.
+        public const int Version = 4;
         public const string Name = "funplay-unity-mcp-broker";
         public const string HealthPath = "/_funplay/broker/health";
         public const string AttachPath = "/_funplay/broker/attach";

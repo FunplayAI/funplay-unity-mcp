@@ -162,7 +162,9 @@ namespace Funplay.Editor.MCP.Server
                             var response = await responseTcs.Task;
                             if (response == null)
                             {
-                                responseJson = SerializeResponse(CreateAccepted(request.Id));
+                                // Accepted notifications have no JSON-RPC response. The broker
+                                // maps this empty push to HTTP 202 with an empty client body.
+                                responseJson = string.Empty;
                             }
                             else
                             {
@@ -368,25 +370,6 @@ namespace Funplay.Editor.MCP.Server
             {
                 Id = requestId,
                 Error = new MCPError { Code = code, Message = message }
-            };
-        }
-
-        private static MCPResponse CreateAccepted(object requestId)
-        {
-            return new MCPResponse
-            {
-                Id = requestId,
-                Result = new Dictionary<string, object>
-                {
-                    ["content"] = new[]
-                    {
-                        new Dictionary<string, object>
-                        {
-                            ["type"] = "text",
-                            ["text"] = "Accepted."
-                        }
-                    }
-                }
             };
         }
 

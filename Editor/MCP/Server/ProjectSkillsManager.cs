@@ -81,7 +81,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.6",
+                "1.0.7",
                 "Unity UI Composition",
                 "Build and revise responsive Unity uGUI mobile interfaces, including portrait and landscape layouts, safe areas, prefabs, auto layout, scrolling, text, input, animation, and performance validation.",
                 true,
@@ -91,9 +91,9 @@ namespace Funplay.Editor.MCP.Server
                     "Inspect the existing Canvas, hierarchy, prefab ownership, anchors, serialized references, layout controllers, and target orientation before editing.",
                     "Unless the user explicitly requests a full rebuild, preserve the existing UI prefab hierarchy and modify only the required objects, components, and serialized fields.",
                     "When design images are supplied, inspect every requested screen and state, reproduce visible details rather than only the rough layout, and compare actual Unity captures against each reference. Preserve prefab structure and bindings without preserving known visual mismatches; ask focused questions when material ambiguity remains after inspecting the references and project assets, and report unresolved differences instead of silently simplifying the design.",
-                    "Use Canvas Scaler with Scale With Screen Size as the usual mobile baseline, but treat the reference resolution and Match value as project decisions that must be verified across target aspect ratios.",
+                    "Use Canvas Scaler with Scale With Screen Size as the usual mobile baseline. Explicit user or design-specification resolutions take priority; otherwise preserve an existing project's reference resolution. For a new portrait project with no specified resolution, use the supplied full-page design image's dimensions, and default to 1080 x 2340 only when no design image is supplied. Resolve ambiguous reference sizes before choosing, and verify Match and responsive layout across target aspect ratios.",
                     "Use RectTransform anchors for parent-relative placement, keep UI local scale at one, and resize through width, height, offsets, or layout properties instead of Transform scale.",
-                    "Keep full-bleed art outside the safe-area container and place interactive or critical content inside a SafeAreaRoot derived from Screen.safeArea.",
+                    "Respect the design's existing edge spacing and preserve or reuse the project's existing safe-area handling. Do not proactively add safe-area adaptation scripts, SafeAreaRoot containers, or extra insets. If validation reveals an actual cutout or system-bar overlap, report it and confirm the intended fix before adding adaptation unless the user already requested it.",
                     "For portrait UI, anchor persistent controls to top and bottom regions and stretch the main viewport between them; for landscape UI, organize controls into left, center, right, and corner regions and verify 16:9, ultrawide, 16:10, and 4:3 layouts.",
                     "Use Image for Sprite-based UI and nine-sliced frames, RawImage for arbitrary Texture or RenderTexture content, and AspectRatioFitter only for isolated media whose aspect must be preserved.",
                     "Before using Image.Type.Sliced, verify the displayed Sprite has suitable Sprite.border insets derived from its artwork; all-zero borders do not produce nine-slicing. Apply source Sprite import changes, read back the imported border, and verify resized corners and edges rather than merely setting Sliced or arbitrary border values.",
@@ -102,7 +102,7 @@ namespace Funplay.Editor.MCP.Server
                     "Before creating text, inspect the relevant screens and project assets to determine whether UnityEngine.UI.Text or TextMeshProUGUI is the established convention; preserve the existing component type, follow the prevailing project choice, and default to TextMeshProUGUI only when a new project has no convention.",
                     "Do not add Outline, Shadow, or similar BaseMeshEffect components as default decoration; use them only when the design explicitly requires the effect or the project already has a verified style that uses it, and account for the added geometry and overdraw.",
                     "When the design reference explicitly shows an outline, shadow, glow, face dilation, or another text effect and the project uses TextMeshProUGUI, reproduce it with the TextMeshProUGUI component and TMP shader material properties or a dedicated project material preset; use outlineColor and outlineWidth for a simple outline, and never mutate a shared fontSharedMaterial unless the style is intentionally global.",
-                    "Author reusable user-facing UI as prefabs and instantiate those prefabs at runtime; do not procedurally reconstruct stable screens or controls in gameplay code when their hierarchy and references can be serialized and validated in the Editor.",
+                    "Prefer a complete, saved, Editor-authored page prefab as the UI deliverable, with nested control prefabs and serialized references as needed. Runtime code should instantiate or pool these prefabs, bind data and listeners, and handle state or animation; do not procedurally reconstruct stable pages or controls at runtime merely for implementation convenience.",
                     "Only when runtime construction is explicitly justified, keep a dynamic TMP_InputField inactive or disabled until its textComponent and textViewport (plus placeholder when used) are assigned; its caret renderer is initialized during OnEnable only when the text component is already bound, so bind first and enable last.",
                     "Use one EventSystem and the matching input module, keep Raycast Target enabled only on graphics that receive pointer input, and synchronize CanvasGroup alpha, interactable, and blocksRaycasts during transitions.",
                     "Animate a visual child rather than a RectTransform driven by a Layout Group, kill or cancel prior animations before replay, restore deterministic state on disable, and use unscaled time for UI that must work while gameplay is paused.",
@@ -1303,13 +1303,13 @@ description: {skill.Description}
    - Treat screenshots and design coordinates as visual intent, not as permission to replace a working hierarchy.
    - When design images are supplied, follow Design References And Clarification below to map screens and states, resolve material uncertainty, and validate the actual result against each requested reference.
 2. Classify each region.
-   - Mark art as full-bleed or safe-area content.
+   - Identify full-bleed art and the design's existing edge spacing; reuse any existing safe-area policy without adding a new adaptation layer by default.
    - Mark placement as fixed to an edge or corner, stretched between regions, content-sized, repeated-layout content, scrollable content, modal, or world-space UI.
    - Decide which component owns each axis. One axis must not be driven concurrently by a Layout Group, ContentSizeFitter, AspectRatioFitter, animation, and manual code.
 3. Make the smallest coherent change.
    - Preserve the prefab root, existing children, components, names, serialized references, animation bindings, and Prefab overrides unless a specific replacement is required.
    - Modify only the necessary RectTransforms, components, fields, and children. Do not recreate an entire UI or GameObject prefab unless the user explicitly requests a rebuild.
-   - Author reusable user-facing screens, panels, and controls as prefabs with their hierarchy and component references wired in the Editor, then instantiate and bind data at runtime. Do not move a stable UI hierarchy into procedural runtime construction merely for implementation convenience.
+   - Author reusable user-facing screens, panels, and controls as prefabs with their hierarchy and component references wired in the Editor. Prefer a complete, saved page prefab that can be inspected and reused without running a UI-construction script; use nested prefabs for repeated controls as appropriate. Runtime code should instantiate or pool the authored prefabs, bind data and listeners, and handle state or animation. Do not move a stable UI hierarchy into procedural runtime construction merely for implementation convenience.
    - Use Unity MCP or Unity Editor APIs for `.prefab`, `.unity`, and `.asset` changes; never patch Unity YAML as text.
 4. Read back and validate.
    - Read exact hierarchy, anchors, offsets, sizes, sprites (including borders for Sliced Images), text settings, raycast state, sorting, and references back from Unity.
@@ -1362,7 +1362,7 @@ description: {skill.Description}
 ## Canvas And Layering
 
 - Use a small number of semantic layers such as Background, Screen, HUD, Overlay, Modal, Loading, and Debug. Make each layer a full-stretch RectTransform and define sibling or sorting order once.
-- Let opaque or decorative backgrounds bleed to the physical screen edges. Put critical labels and all interactive controls under a separate SafeAreaRoot.
+- Preserve the design's full-bleed backgrounds and edge spacing. Reuse an existing safe-area container when the project already uses one; do not automatically insert a SafeAreaRoot or additional margins into a page prefab.
 - When Modal or Loading UI is visible, block gameplay input explicitly; a visible scrim alone does not prove input is blocked.
 - Keep one stable scrim per popup layer when a popup stack owns it. Restore the previous popup and its input state when the top popup closes.
 - Distinguish Hide from Close. Hide can retain a cached instance; Close must release instantiated assets, handles, listeners, and transient state.
@@ -1370,35 +1370,24 @@ description: {skill.Description}
 
 ## Canvas Scaler And RectTransform Rules
 
-- Treat the reference resolution as design coordinates, not a list of supported physical resolutions. A proven portrait baseline is `720 x 1559`; a proven landscape baseline is `1559 x 720`.
+- Choose the Canvas Scaler reference resolution in this order: explicit user requirements or design specifications first; otherwise preserve an existing project's established baseline, including when adding a new page. Do not silently rescale the project's Canvas to match a newly supplied image.
+- For a new portrait project with no specified reference resolution, inspect the supplied full-page design image and use its actual pixel width and height as the design coordinates. Only when no design image is supplied, default to `1080 x 2340`. This fallback is not a landscape default and does not override an existing project's baseline.
+- If design images have conflicting page sizes, show only a cropped region, or do not establish the full-page dimensions, ask which page size or source artboard to use; do not infer the Canvas size from a thumbnail or silently apply the no-image fallback. Resolve conflicting explicit requirements before changing the affected layout.
+- Record the chosen resolution and its source. Reference resolution defines design coordinates, not a fixed device or Game View resolution; continue validating other aspect ratios and safe areas.
 - Start with Scale With Screen Size and Match `0.5` when width and height are equally important, then verify. Move Match toward width when horizontal design width must remain stable, or toward height when vertical design height must remain stable.
 - Use anchors to express attachment: top bars to top stretch, bottom actions to bottom or bottom stretch, edge buttons to their corner, and center gameplay viewports to stretch between reserved regions.
 - Set anchors before recording offsets. With separated anchors, `sizeDelta` is the delta relative to the anchor rectangle, not the final absolute size.
 - Resize UI through RectTransform width, height, anchors, and offsets; leave localScale at one. Animate a child named Visual or Container when the root is layout-driven.
-- Respond to `OnRectTransformDimensionsChange` or an equivalent resolution and orientation signal when layout contains calculated page widths, aspect branches, or safe-area anchors. Do not poll and rewrite every RectTransform every frame.
+- When maintaining required dynamic layout code, respond to `OnRectTransformDimensionsChange` or an equivalent resolution and orientation signal for calculated page widths or aspect branches. Prefer authored anchors and offsets when they suffice; do not add a layout script by default or poll and rewrite every RectTransform every frame.
 - Prefer `LayoutRebuilder.MarkLayoutForRebuild` for deferred updates. Use `Canvas.ForceUpdateCanvases` or `LayoutRebuilder.ForceRebuildLayoutImmediate` only when code must measure the final layout in the same operation, never as a routine per-frame fix.
 
 ## Safe Area
 
-- Read `Screen.safeArea` in screen pixels and convert both minimum and maximum corners to normalized anchors. Reapply when screen dimensions, orientation, or safe area changes; do not cache only a top inset.
-- A minimal uGUI conversion is:
-
-```csharp
-Rect safe = Screen.safeArea;
-safeAreaRoot.anchorMin = new Vector2(
-    safe.xMin / Screen.width,
-    safe.yMin / Screen.height);
-safeAreaRoot.anchorMax = new Vector2(
-    safe.xMax / Screen.width,
-    safe.yMax / Screen.height);
-safeAreaRoot.offsetMin = Vector2.zero;
-safeAreaRoot.offsetMax = Vector2.zero;
-```
-
-- Guard zero screen dimensions and avoid duplicate application when nothing changed.
-- Check `PlayerSettings.Android.renderOutsideSafeArea`. If rendering outside is disabled, the Player window can already be fitted to the safe area and `Screen.safeArea` can equal the full Player window; do not apply a second inset blindly.
-- In portrait, verify top cutout and bottom home-indicator or navigation areas. In landscape, verify both left and right cutouts in Landscape Left and Landscape Right.
-- For edge art assembled from nested images, particles, labels, or Spine content, wait until layout and final offsets are applied, then use `RectTransformUtility.CalculateRelativeRectTransformBounds(parent, visualRoot)` to clamp the complete visual bounds inside the allowed safe rectangle.
+- Do not proactively write safe-area adaptation scripts, add a SafeAreaRoot, or apply extra edge insets merely because this is mobile UI. Assemble the page prefab with the design's intended spacing first; do not double-inset or shrink a design that already reserves sufficient space.
+- Preserve and reuse the project's existing adaptation where applicable. This default is not permission to remove an existing component, change its behavior, or change platform settings.
+- Check representative cutouts and system bars without adding adaptation code: top and bottom in portrait, and both sides in landscape. Design spacing may already be sufficient, but matching one design image does not establish support for every device. If an actual overlap remains, report the affected device, region and control, then confirm the desired fix before introducing new adaptation unless the user already requested it.
+- Only when implementing explicitly requested or confirmed safe-area adaptation, read `Screen.safeArea`, convert both minimum and maximum corners to normalized anchors, guard zero screen dimensions, and update on relevant size or orientation changes. Inspect `PlayerSettings.Android.renderOutsideSafeArea` and the existing hierarchy to avoid applying the same inset twice; keep full-bleed art outside the adapted content.
+- For that confirmed adaptation, measure nested edge content after layout using `RectTransformUtility.CalculateRelativeRectTransformBounds(parent, visualRoot)` when complete visual bounds are needed. Do not attach runtime clamping scripts to otherwise-correct authored pages by default.
 
 ## Portrait Mobile Pattern
 
@@ -1452,7 +1441,7 @@ safeAreaRoot.offsetMax = Vector2.zero;
 - Use unscaled time for menu, pause, modal, and loading animations that must continue while gameplay time is zero.
 - Preserve existing prefab objects by default. Replacing an asset at the same path can preserve the asset GUID while still changing child or component file IDs, breaking animation bindings, serialized references, Prefab Variants, and Scene overrides.
 - Prefer serialized references or stable binding components. Use `Transform.Find` only for a verified stable hierarchy and fail clearly if it is missing; never silently create an alternate hierarchy.
-- Use semantic names such as SafeAreaRoot, TopBar, ContentViewport, BottomActions, Visual, and Label. Replace ambiguous default names only when doing so will not break bindings, and update references atomically.
+- Use semantic names such as TopBar, ContentViewport, BottomActions, Visual, and Label. Replace ambiguous default names only when doing so will not break bindings, and update references atomically.
 
 ## Performance And Validation
 

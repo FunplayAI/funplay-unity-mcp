@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.9"
+    "com.gamebooom.unity.mcp": "0.6.10"
   }
 }
 ```
@@ -321,7 +321,7 @@ url = "http://127.0.0.1:<port>/"
 - 这是一个 **仅限 Editor** 的包，不会向最终构建产物添加运行时代码。
 - MCP Server 端口对**新工程**按工程派生（20000-29999 区间）；从旧版本升级的工程会保留原端口并记为 pin，手填的端口同样是 pin。MCP Server 窗口会显示端口来源与当前实际地址。客户端配置里的条目名按**工程目录名**命名（例如 `funplay-love-town`，只保留 ASCII 字母数字），多个工程不再互相覆盖同一个 `funplay` 条目。两个工程产品名相同时会解析出同一个条目名，此时后配置的那个会**自动追加工程哈希**，既不会覆盖对方，也不需要用户去开任何开关。
 - 本地 MCP Server 配置保存在 `UserSettings/FunplayMcpSettings.json`。
-- v0.6.9 默认 `core` 精选 40 个工具，覆盖结构化检查与修改、UI 巡检和创建、可恢复的编译准备、统一任务查询、视觉证据、输入和日志。短任务可一次返回结果，`get_task` 支持有限等待、状态变化后返回和退避提示；`execute_code` 保留为项目特定逻辑的兜底。`full` 保留全部 180 个工具，包括原有状态、编译与 Play 接口，以及配置、预览管理和专项诊断。已有自定义暴露列表不会被覆盖，可用 `get_tool_capabilities` 区分“已实现”和“已暴露”。升级后请通过 Project Skills 更新已安装的内置技能。
+- v0.6.10 默认 `core` 精选 40 个工具，覆盖结构化检查与修改、UI 巡检和创建、可恢复的编译准备、统一任务查询、视觉证据、输入和日志。短任务可一次返回结果，`get_task` 支持有限等待、状态变化后返回和退避提示；`execute_code` 保留为项目特定逻辑的兜底。`full` 保留全部 180 个工具，包括原有状态、编译与 Play 接口，以及配置、预览管理和专项诊断。已有自定义暴露列表不会被覆盖，可用 `get_tool_capabilities` 区分“已实现”和“已暴露”。升级后请通过 Project Skills 更新已安装的内置技能。
 - `execute_code` safety checks 和更严格的文件系统 guard 现在可在 **Funplay > MCP Settings** 设置默认值，默认开启；它会阻止明显破坏性片段、宽泛的 `System.IO` 写入、原始文件流、绝对路径、用户/系统目录路径和 `../` 穿越路径，但它不是完整沙箱。客户端仍可在单次调用中用可选 `safety_checks` 参数显式覆盖。
 - 插件 debug 日志默认关闭，也可在 **Funplay > MCP Settings** 中开启；Warning 和 Error 始终会输出到 Unity Console。
 - 所有已暴露的 MCP 工具都会直接执行，不再提供额外的 approval 开关。
@@ -444,7 +444,7 @@ Prompt 名称和参数名必须匹配 `[a-z][a-z0-9_-]{0,63}`。`prompts/get` �
 
 ## 内置工具
 
-v0.6.9 提供 **180 个工具函数**，覆盖 42 个模块，默认暴露其中 40 个高频工具。
+v0.6.10 提供 **180 个工具函数**，覆盖 42 个模块，默认暴露其中 40 个高频工具。
 
 新增 UI 工作流包括：`prepare_editor` 持久任务、`audit_ui` 只读巡检、组件属性查询和 Sprite 关联检查、统一截图/输入坐标、项目级 TMP/字体材质/预制体/输入模块默认值、录屏动作标记与关键帧提取，以及可恢复的预览会话。详见 [完整工作流指南](Documentation~/ui-workflows.md) 和 [实现与验证清单](Documentation~/ui-workflow-upgrade-plan.md)。两项内置 skills 也已同步这些规则，仍为 built-in；已有安装可通过 Project Skills 更新。
 

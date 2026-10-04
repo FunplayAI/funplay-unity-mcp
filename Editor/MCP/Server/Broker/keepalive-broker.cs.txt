@@ -17,10 +17,9 @@ namespace Funplay.UnityMcp.Broker
 {
     internal static class Program
     {
-        // Bumped 2 -> 3 for the stale-session sweep below (no client-facing wire change). A
-        // pre-v3 broker left running after a package upgrade fails the new health probe and is
-        // replaced with a freshly compiled one. Keep in sync with MCPBrokerProtocol.Version.
-        private const int ProtocolVersion = 3;
+        // v4 acknowledges empty backend pushes with HTTP 202 and no body. Older brokers
+        // are replaced on package upgrade. Keep in sync with MCPBrokerProtocol.Version.
+        private const int ProtocolVersion = 4;
         private const int PullTimeoutMs = 25000;
         private const long HoldDeadlineMs = 300000;
         private const int MaxHeaderBytes = 64 * 1024;
@@ -345,10 +344,17 @@ namespace Funplay.UnityMcp.Broker
                 Queue.Remove(reqId);
                 try
                 {
-                    var responseContentType = string.IsNullOrEmpty(contentType)
-                        ? "application/json; charset=utf-8"
-                        : contentType;
-                    WriteResponse(pending.Stream, 200, "OK", responseContentType, null, body ?? string.Empty);
+                    if (string.IsNullOrEmpty(body))
+                    {
+                        WriteResponse(pending.Stream, 202, "Accepted", "text/plain", null, string.Empty);
+                    }
+                    else
+                    {
+                        var responseContentType = string.IsNullOrEmpty(contentType)
+                            ? "application/json; charset=utf-8"
+                            : contentType;
+                        WriteResponse(pending.Stream, 200, "OK", responseContentType, null, body);
+                    }
                 }
                 catch (Exception ex)
                 {
