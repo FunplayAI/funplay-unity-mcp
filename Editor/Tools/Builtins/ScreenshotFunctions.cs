@@ -1283,7 +1283,8 @@ namespace Funplay.Editor.Tools.Builtins
         internal static Texture2D ReadTextureToTexture2D(Texture sourceTexture, int width, int height, bool flipVertically)
         {
             RenderTexture readableRenderTexture = null;
-            RenderTexture previousActive = null;
+            // Blit binds its destination, so preserve the caller's target before rendering.
+            RenderTexture previousActive = RenderTexture.active;
             Texture2D screenshot = null;
 
             try
@@ -1292,7 +1293,6 @@ namespace Funplay.Editor.Tools.Builtins
                 readableRenderTexture.Create();
                 Graphics.Blit(sourceTexture, readableRenderTexture);
 
-                previousActive = RenderTexture.active;
                 RenderTexture.active = readableRenderTexture;
 
                 screenshot = ReadActiveRenderTextureToTexture2D(width, height, flipVertically);
