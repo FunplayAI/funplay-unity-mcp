@@ -1,6 +1,7 @@
 // Copyright (C) Funplay. Licensed under MIT.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -111,6 +112,48 @@ namespace Funplay.Editor.Tests
         public void ShouldFlipPlayModeViewRenderTexture_DefaultsToTrue()
         {
             Assert.IsTrue(ScreenshotFunctions.ShouldFlipPlayModeViewRenderTexture());
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ReadTextureToTexture2D_RestoresPreviousTargetWithoutReleasingAnActiveTexture(bool bindPrevious)
+        {
+            var originalActive = RenderTexture.active;
+            var previous = new RenderTexture(2, 2, 0, RenderTextureFormat.ARGB32);
+            var source = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            var warnings = new List<string>();
+            Texture2D screenshot = null;
+            Application.LogCallback onLog = (message, stack, type) =>
+            {
+                if (type == LogType.Warning)
+                    warnings.Add(message);
+            };
+
+            try
+            {
+                previous.Create();
+                Fill(source, Color.red);
+                var expected = bindPrevious ? previous : null;
+                RenderTexture.active = expected;
+                Application.logMessageReceived += onLog;
+
+                screenshot = ScreenshotFunctions.ReadTextureToTexture2D(source, 2, 2, flipVertically: false);
+
+                Assert.AreEqual(expected, RenderTexture.active, "Screenshot readback must preserve the caller's active target.");
+                Assert.IsFalse(warnings.Any(message => message.Contains("Releasing render texture")),
+                    "The temporary readback target must be unbound before release.");
+                AssertRed(screenshot.GetPixel(0, 0));
+            }
+            finally
+            {
+                Application.logMessageReceived -= onLog;
+                RenderTexture.active = originalActive;
+                if (screenshot != null)
+                    UnityEngine.Object.DestroyImmediate(screenshot);
+                previous.Release();
+                UnityEngine.Object.DestroyImmediate(previous);
+                UnityEngine.Object.DestroyImmediate(source);
+            }
         }
 
         [Test]

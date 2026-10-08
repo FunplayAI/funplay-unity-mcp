@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Screenshot readback preserves the caller's active render target before `Graphics.Blit` changes it. The temporary readback texture is unbound before release, avoiding `Releasing render texture that is set to be RenderTexture.active!` warnings and leaving the previous target intact.
+
 ## [0.6.10] - 2026-10-04
 
 ### Fixed
