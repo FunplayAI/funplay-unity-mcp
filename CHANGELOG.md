@@ -2,8 +2,28 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-08
+
+### Changed
+
+- Built-in `unity-mcp-workflow` v1.0.6 and `unity-ui-composition` v1.0.8 integrate selected lessons from [Unity's official GitHub plugin 0.1.8-beta](https://github.com/Unity-Technologies/unity-agent-plugin/tree/cf6b2da24e424b0a60d560a57f39f676cb6f79f3). Four independently authored, linked references cover UI framework routing, safe Sprite importer edits, TMP/font/localization verification and asynchronous package readiness. Substantial conditional guidance is loaded on demand instead of inlining the official skill catalog.
+- UI guidance distinguishes uGUI, UI Toolkit and IMGUI per target screen; Sprite edits preserve source coordinates, surviving sprite IDs and supported name/file-ID mappings; TMP guidance checks persisted font/material/atlas assets and project-appropriate font strategies. Requested localization includes authored and code-composed strings, locale-identifier mapping, persistent binding readback, explicit coverage/gap counts and visual checks.
+- Package guidance separates requested, resolved and loaded dependencies, gates APIs against the actual Unity/package version, avoids main-thread UPM busy-waits and uses current Editor readiness before proceeding. Unity 2022.3 support, MCP-first operation, project text conventions, prefab-first authoring, design fidelity and existing safe-area policy are retained. No tools or dependencies are added: Core remains 40, with 180 tools across 42 modules in the full catalog.
+- All six Project Skills targets export the supporting references. Missing or outdated references trigger the existing update notice even if the entrypoint is current. Sync rejects user-owned reference destinations before writing configuration, preserves user notes during updates, and removes only owned generated files when disabling skills.
+
 ### Fixed
+
 - Screenshot readback preserves the caller's active render target before `Graphics.Blit` changes it. The temporary readback texture is unbound before release, avoiding `Releasing render texture that is set to be RenderTexture.active!` warnings and leaving the previous target intact.
+
+### Pull requests and issues
+
+- Includes merged [PR #59](https://github.com/FunplayAI/funplay-unity-mcp/pull/59): screenshot active render target restoration. Thanks [@MoLing14725](https://github.com/MoLing14725).
+- No GitHub issues are closed by this release. Skill integration addresses direct user feedback.
+
+### Validation
+
+- All 730 EditMode cases passed in the graphics-enabled FunplayMcp Unity 2022.3 Editor on macOS (0 failures/skips), including 67 new reference-export, upgrade and ownership-protection cases. The test project uses a saved clean scene and imported TMP Essential Resources; these test resources are not added to the plugin package.
+- All six client targets were exported: ten SKILL.md files passed the skill validator, two Cursor rules retained their built-in/version metadata, and all 24 relative reference links resolved. The .NET 8 v0.7.0 bridge was packed and verified for Content-Length framing, empty HTTP 202 notifications and subsequent request replies against a local HTTP fixture. Windows and other Unity versions are not claimed as live-tested.
 
 ## [0.6.10] - 2026-10-04
 

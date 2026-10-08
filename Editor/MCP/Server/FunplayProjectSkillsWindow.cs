@@ -343,6 +343,7 @@ namespace Funplay.Editor.MCP.Server
                 else
                     selectedPlatforms.Remove(currentPlatformId);
 
+                ProjectSkillsManager.ValidateReferenceDestinations(projectRoot, selectedPlatforms);
                 var conflictPaths = ProjectSkillsManager.GetPlatformConflictPaths(projectRoot, selectedPlatforms);
                 if (conflictPaths.Length > 0)
                 {
@@ -413,6 +414,7 @@ namespace Funplay.Editor.MCP.Server
                     return;
                 }
 
+                ProjectSkillsManager.ValidateReferenceDestinations(projectRoot, manifest.platforms);
                 var conflictPaths = ProjectSkillsManager.GetPlatformConflictPaths(projectRoot, manifest.platforms);
                 if (conflictPaths.Length > 0)
                 {

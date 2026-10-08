@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.6.10"
+    "com.gamebooom.unity.mcp": "0.7.0"
   }
 }
 ```
@@ -108,6 +108,8 @@ Select your target client, click **Configure**, and the package writes the recom
 For Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness, click **Configure + Skills** to also install both built-in project skills.
 
 If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms and install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills. The UI skill covers responsive portrait and landscape uGUI work.
+
+Version 0.7.0 keeps these two built-in skills and adds four task-specific references, informed by the [official Unity plugin 0.1.8-beta](https://github.com/Unity-Technologies/unity-agent-plugin/tree/cf6b2da24e424b0a60d560a57f39f676cb6f79f3): UI framework selection, safe Sprite importer edits, TMP/localization verification, and package readiness. Agents read only the references relevant to their task; no default tools or extra skills are added. MCP-first operation, project conventions, prefab preservation and design fidelity remain authoritative. Update existing installations through **Project Skills**; missing or outdated references also trigger the skills-update notice. User-owned reference files are protected from overwrite.
 
 If you prefer to edit config files manually, use the examples below as fallback references. Replace `<project>` with this project's entry name and `<port>` with its port -- the MCP Server window shows both:
 
@@ -442,7 +444,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Version 0.6.10 includes **180 tool functions** across 42 modules, with 40 high-frequency tools exposed by default.
+Version 0.7.0 includes **180 tool functions** across 42 modules, with 40 high-frequency tools exposed by default.
 
 | Category | Tools |
 |----------|-------|

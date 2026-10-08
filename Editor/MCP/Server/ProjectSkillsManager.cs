@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.5",
+                "1.0.6",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,
@@ -81,11 +81,11 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.7",
+                "1.0.8",
                 "Unity UI Composition",
-                "Build and revise responsive Unity uGUI mobile interfaces, including portrait and landscape layouts, safe areas, prefabs, auto layout, scrolling, text, input, animation, and performance validation.",
+                "Build and revise Unity UI, primarily uGUI mobile page prefabs, with framework-aware routing, Sprite import safety, text effects, localization and visual verification.",
                 true,
-                "Use this built-in skill when creating, assembling, adapting, reviewing, or fixing Canvas-based Unity UI, especially mobile screen or popup prefabs that must work across aspect ratios, notches, tablets, localization, and runtime state changes.",
+                "Use this built-in skill when creating, assembling, adapting, reviewing, or fixing Unity UI, especially Canvas-based mobile screen or popup prefabs. Identify the target framework before applying component guidance.",
                 new[]
                 {
                     "Inspect the existing Canvas, hierarchy, prefab ownership, anchors, serialized references, layout controllers, and target orientation before editing.",
@@ -267,6 +267,7 @@ namespace Funplay.Editor.MCP.Server
             };
 
             var normalized = NormalizeManifest(manifest);
+            ValidateReferenceDestinations(projectRoot, normalized.platforms);
             var syncAntigravity =
                 normalized.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase) ||
                 previousManifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
@@ -366,7 +367,50 @@ namespace Funplay.Editor.MCP.Server
                 }
             }
 
-            return conflicts.ToArray();
+            var manifest = NormalizeManifest(new ProjectSkillsManifest { platforms = platforms.ToList() });
+            foreach (var platform in manifest.platforms)
+            {
+                foreach (var reference in GetExpectedReferenceFiles(projectRoot, manifest, platform))
+                {
+                    var conflict = GetReferenceConflictPath(reference.Path);
+                    if (conflict != null)
+                        conflicts.Add(conflict);
+                }
+            }
+
+            return conflicts.Distinct(StringComparer.Ordinal).ToArray();
+        }
+
+        internal static void ValidateReferenceDestinations(string projectRoot, IEnumerable<string> platforms)
+        {
+            // Also called before UI overwrite prompts: reference conflicts are protected, unlike
+            // legacy Cursor entrypoints which support an explicit overwrite confirmation.
+            var manifest = NormalizeManifest(new ProjectSkillsManifest { platforms = platforms?.ToList() });
+            foreach (var platform in manifest.platforms)
+            {
+                foreach (var reference in GetExpectedReferenceFiles(projectRoot, manifest, platform))
+                {
+                    var conflict = GetReferenceConflictPath(reference.Path);
+                    if (conflict != null)
+                        throw new InvalidOperationException(
+                            $"'{conflict}' blocks a Funplay-managed skill reference. " +
+                            "Move or rename it before applying Project Skills; no skills files were changed.");
+                }
+            }
+        }
+
+        private static string GetReferenceConflictPath(string path)
+        {
+            if (Directory.Exists(path) || (File.Exists(path) && !IsManagedFile(path)))
+                return path;
+            var parent = Path.GetDirectoryName(path);
+            while (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+            {
+                if (File.Exists(parent))
+                    return parent;
+                parent = Path.GetDirectoryName(parent);
+            }
+            return null;
         }
 
         internal static IReadOnlyList<string> GetGeneratedPathsForPlatform(string projectRoot, ProjectSkillsManifest manifest, string platformId)
@@ -568,6 +612,7 @@ namespace Funplay.Editor.MCP.Server
                 var directory = Path.Combine(skillsRoot, $"funplay-{skill.Id}");
                 Directory.CreateDirectory(directory);
                 File.WriteAllText(Path.Combine(directory, "SKILL.md"), BuildSkillDocument(skill, platform));
+                WriteManagedSkillReferences(directory, skill);
             }
         }
 
@@ -579,6 +624,38 @@ namespace Funplay.Editor.MCP.Server
             {
                 var path = Path.Combine(rulesRoot, $"funplay-{skill.Id}.mdc");
                 File.WriteAllText(path, BuildCursorRuleContent(skill));
+                WriteManagedSkillReferences(rulesRoot, skill);
+            }
+        }
+
+        private static void WriteManagedSkillReferences(string root, SkillDefinition skill)
+        {
+            foreach (var reference in ProjectSkillReferences.GetForSkill(skill.Id))
+            {
+                var path = Path.Combine(root, reference.Key);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path,
+                    ManagedMarker + "\n" + BuildSkillVersionMarker(skill) + "\n\n" + reference.Value);
+            }
+        }
+
+        private static void DeleteManagedSkillReferences(string root, SkillDefinition skill)
+        {
+            foreach (var relativePath in ProjectSkillReferences.GetForSkill(skill.Id).Keys)
+            {
+                var path = Path.Combine(root, relativePath);
+                if (IsManagedFile(path))
+                    File.Delete(path);
+
+                // Remove only empty generated parents; leave user notes and other providers alone.
+                var parent = Path.GetDirectoryName(path);
+                while (!string.Equals(parent, root, StringComparison.Ordinal) && Directory.Exists(parent))
+                {
+                    if (Directory.EnumerateFileSystemEntries(parent).Any())
+                        break;
+                    Directory.Delete(parent);
+                    parent = Path.GetDirectoryName(parent);
+                }
             }
         }
 
@@ -591,7 +668,15 @@ namespace Funplay.Editor.MCP.Server
             {
                 var skillPath = Path.Combine(directory, "SKILL.md");
                 if (IsManagedFile(skillPath))
-                    Directory.Delete(directory, true);
+                {
+                    File.Delete(skillPath);
+                    var skill = SkillCatalog.FirstOrDefault(candidate =>
+                        string.Equals(Path.GetFileName(directory), $"funplay-{candidate.Id}", StringComparison.OrdinalIgnoreCase));
+                    if (skill != null)
+                        DeleteManagedSkillReferences(directory, skill);
+                    if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                        Directory.Delete(directory);
+                }
             }
         }
 
@@ -605,6 +690,9 @@ namespace Funplay.Editor.MCP.Server
                 if (IsManagedFile(file))
                     File.Delete(file);
             }
+
+            foreach (var skill in SkillCatalog)
+                DeleteManagedSkillReferences(rulesRoot, skill);
         }
 
         // Write `block` (which begins with ManagedMarker and ends with ManagedEndMarker) into a
@@ -881,6 +969,37 @@ namespace Funplay.Editor.MCP.Server
         }
 
         private static SkillFileVersionStatus InspectVersionedFile(ExpectedSkillVersionFile expected)
+        {
+            var primary = InspectVersionedFileOnly(expected);
+            if (primary.RequiresUpgrade)
+                return primary;
+
+            // One status per skill is retained for existing clients. If its entrypoint is current
+            // but a supporting reference is not, report the failing reference as that skill's path.
+            foreach (var relativePath in ProjectSkillReferences.GetForSkill(expected.SkillId).Keys)
+            {
+                var reference = InspectVersionedFileOnly(new ExpectedSkillVersionFile(
+                    Path.Combine(Path.GetDirectoryName(expected.Path), relativePath),
+                    expected.SkillId, expected.ExpectedVersion, expected.ExpectedMarker));
+                if (reference.RequiresUpgrade)
+                    return reference;
+            }
+            return primary;
+        }
+
+        private static IEnumerable<ExpectedSkillVersionFile> GetExpectedReferenceFiles(
+            string projectRoot, ProjectSkillsManifest manifest, string platformId)
+        {
+            foreach (var entry in GetExpectedVersionedFilesForPlatform(projectRoot, manifest, platformId))
+            {
+                foreach (var relativePath in ProjectSkillReferences.GetForSkill(entry.SkillId).Keys)
+                    yield return new ExpectedSkillVersionFile(
+                        Path.Combine(Path.GetDirectoryName(entry.Path), relativePath),
+                        entry.SkillId, entry.ExpectedVersion, entry.ExpectedMarker);
+            }
+        }
+
+        private static SkillFileVersionStatus InspectVersionedFileOnly(ExpectedSkillVersionFile expected)
         {
             if (!File.Exists(expected.Path))
             {
@@ -1195,6 +1314,7 @@ version: {skill.Version}
 
 {skill.WhenToUse}
 {(isWorkflow ? BuildUiAutomationGuidance() : string.Empty)}
+{(isWorkflow ? BuildProjectCompatibilityRouting() : string.Empty)}
 
 ## Rules
 
@@ -1290,9 +1410,39 @@ description: {skill.Description}
 ";
         }
 
+        private static string BuildProjectCompatibilityRouting()
+        {
+            return
+@"
+## Version And Package Compatibility
+
+For package setup, unresolved types or version-dependent APIs, read [Project compatibility and package readiness](references/unity-mcp-workflow/project-compatibility.md). Distinguish requested, resolved and actually loaded packages before using their APIs. Keep the current MCP session and the project's Unity version; this skill does not require Unity 6 or the Unity CLI.
+
+";
+        }
+
+        private static string BuildUiReferenceRouting()
+        {
+            return
+@"
+## Framework And Task Routing
+
+Identify the target screen's framework before editing. The Canvas component guidance below applies to uGUI, not automatically to UI Toolkit or IMGUI. Preserve the existing framework, text convention and bindings; do not convert or rebuild a screen to fit this skill.
+
+Read only the references needed for the current task:
+
+- For unfamiliar or mixed UI frameworks and Editor windows: [UI framework selection](references/unity-ui-composition/ui-frameworks.md).
+- Before changing Sprite borders, pivots or slicing: [Sprite importer safety](references/unity-ui-composition/sprite-importers.md).
+- For font assets, text effects, missing glyphs or requested localization: [TMP and localization](references/unity-ui-composition/text-localization.md).
+
+These are original Funplay adaptations informed by the pinned Unity official plugin 0.1.8-beta. They supplement, not replace, the MCP-first, prefab-preservation and design-fidelity rules here.
+
+";
+        }
+
         private static string BuildUnityUiCompositionBody()
         {
-            return BuildUiAutomationGuidance() +
+            return BuildUiAutomationGuidance() + BuildUiReferenceRouting() +
 @"
 ## Operating Loop
 
@@ -1776,7 +1926,7 @@ $@"
 - Source repository: `https://github.com/FunplayAI/funplay-unity-mcp`
 ";
 
-            return header + body + BuildReliableUiToolGuidance() + BuildGameViewRecordingGuidance() + footer;
+            return header + BuildProjectCompatibilityRouting() + body + BuildReliableUiToolGuidance() + BuildGameViewRecordingGuidance() + footer;
         }
 
         private static ProjectSkillsManifest CreateDefaultManifest()

@@ -805,6 +805,7 @@ namespace Funplay.Editor.MCP.Server
                 platformId
             };
 
+            ProjectSkillsManager.ValidateReferenceDestinations(projectRoot, selectedPlatforms);
             var conflictPaths = ProjectSkillsManager.GetPlatformConflictPaths(projectRoot, selectedPlatforms);
             if (conflictPaths.Length > 0)
             {
