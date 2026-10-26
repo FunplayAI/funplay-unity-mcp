@@ -2,7 +2,8 @@
     "name": "Funplay.Editor.Tests",
     "rootNamespace": "Funplay.Editor.Tests",
     "references": [
-        "Funplay.Editor"
+        "Funplay.Editor",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [
         "Editor"

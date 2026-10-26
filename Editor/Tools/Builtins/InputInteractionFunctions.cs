@@ -16,6 +16,50 @@ namespace Funplay.Editor.Tools.Builtins
     [ToolProvider("InputSimulation")]
     internal static class InputInteractionFunctions
     {
+        [Description("Drag across real Play Mode frames using an owned New Input System mouse or single touch: press, hold, interpolate, hold at target, then release. Briefly waits; longer gestures return an input task for get_task. Completion is not proof of a successful drop/merge. Cancel through this tool. Requires Dynamic input updates; legacy polling is unsupported. No manual input updates, hardware control, game-code callbacks or silent fallback.")]
+        public static object SimulateMouseDrag(
+            [ToolParam("Start X; required for start, omitted for cancel", Required = false)] float start_x = -1,
+            [ToolParam("Start Y; required for start, omitted for cancel", Required = false)] float start_y = -1,
+            [ToolParam("End X; required for start, omitted for cancel", Required = false)] float end_x = -1,
+            [ToolParam("End Y; required for start, omitted for cancel", Required = false)] float end_y = -1,
+            [ToolParam("Actual movement duration in unscaled wall-clock seconds, 0.05..10", Required = false)] float duration = 0.5f,
+            [ToolParam("left, right or middle; touch requires left", Required = false)] string button = "left",
+            [ToolParam("render_pixels, image_pixels or normalized", Required = false)] string coordinate_space = "render_pixels",
+            [ToolParam("bottom_left or top_left", Required = false)] string origin = "bottom_left",
+            [ToolParam("Fresh Game View capture ID; required for image_pixels", Required = false)] string capture_id = null,
+            [ToolParam("new_input_system only; legacy_polling returns an explicit unsupported error", Required = false)] string input_route = "new_input_system",
+            [ToolParam("mouse or touch (single finger), matched to the game's actual input bindings", Required = false)] string pointer_device = "mouse",
+            [ToolParam("Hold at start before movement, seconds 0..5", Required = false)] float press_hold = 0.1f,
+            [ToolParam("Hold at destination before release, seconds 0..5", Required = false)] float end_hold = 0.1f,
+            [ToolParam("Optional active verification scope to own cleanup", Required = false)] string verification_id = null,
+            [ToolParam("Optional idempotency key, <=128 characters; recover a lost response with get_task(kind=input, request_key=...). Reusing with different arguments fails.", Required = false)] string request_key = null,
+            [ToolParam("start or cancel; status is read-only through get_task", Required = false)] string action = "start",
+            [ToolParam("For cancel: this tool's input:<id> task or raw job ID. Coordinates are ignored.", Required = false)] string task_id = null,
+            [ToolParam("MCP bounded wait 0..30 seconds; zero returns the initial receipt", Required = false)] int wait_seconds = 2)
+        {
+            var waitError = State.TaskStatusService.ValidateWait(wait_seconds); if (waitError != null) return waitError;
+            action = (action ?? "start").Trim().ToLowerInvariant();
+            if (action == "cancel")
+            {
+                var id = task_id != null && task_id.StartsWith("input:", StringComparison.Ordinal) ? task_id.Substring(6) : task_id;
+                if (!Guid.TryParseExact(id, "N", out _)) return Response.Error("INVALID_INPUT_TASK_ID");
+                return State.TaskStatusService.Attach("input", State.InputFrameJob.Cancel(id, "simulate_mouse_drag"));
+            }
+            if (action != "start") return Response.Error("INVALID_INPUT_ACTION");
+            input_route = (input_route ?? "new_input_system").Trim().ToLowerInvariant();
+            if (input_route == "legacy_polling") return Response.Error("LEGACY_POLLING_INJECTION_UNSUPPORTED", new {
+                dispatched = false, hint = "Synthetic New Input System devices do not inject UnityEngine.Input mouse/touch polling. No fallback or game-code patch was attempted." });
+            if (input_route != "new_input_system") return Response.Error("INVALID_INPUT_ROUTE");
+            button = (button ?? "left").Trim().ToLowerInvariant(); pointer_device = (pointer_device ?? "mouse").Trim().ToLowerInvariant();
+            var error = State.InputFrameJob.ValidateDrag(duration, button, pointer_device, press_hold, end_hold);
+            if (error != null) return Response.Error(error);
+            if (!EditorApplication.isPlaying || EditorApplication.isPaused) return Response.Error("UNPAUSED_PLAY_MODE_REQUIRED");
+            if (!VisualCoordinates.TryResolve(start_x, start_y, coordinate_space, origin, capture_id, out var start, out var geometry, out error) ||
+                !VisualCoordinates.TryResolve(end_x, end_y, coordinate_space, origin, capture_id, out var end, out _, out error)) return Response.Error(error);
+            return State.TaskStatusService.Attach("input", State.InputFrameJob.StartDrag(start, end, duration, button, geometry,
+                pointer_device, press_hold, end_hold, verification_id, request_key));
+        }
+
         [Description("Dispatch one UI scroll event at a validated screen/image point in Play Mode. Uses the top raycast hit's IScrollHandler (no click-through). Deltas are uGUI wheel units, not pixels; ScrollRect sensitivity belongs to the project. Records a timeline marker when recording is active.")]
         public static object SimulateUiScroll(
             [ToolParam("X coordinate")] float x,

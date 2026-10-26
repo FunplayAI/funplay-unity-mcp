@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.1"
+    "com.gamebooom.unity.mcp": "0.7.2"
   }
 }
 ```
@@ -346,7 +346,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Structured Returns + `instanceId` Chaining** — Tools return `{success, message, data}` JSON with stable `instanceId` fields so agents can chain `by_id` calls reliably instead of re-resolving by name
 - **`IFunplayCommand` for `execute_code`** — New snippet template with auto-Undo (`ctx.RegisterObjectCreation/Modification/DestroyObject`), structured logs (`ctx.Log/LogWarning/LogError`), and a tracked changelog returned to the agent
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
-- **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures
+- **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures. v0.7.2 adds real-frame continuous mouse/single-touch dragging, bounded waiting and owned cleanup; see [timing and backend limits](Documentation~/execution-trust.md#continuous-dragging-and-single-touch-gestures).
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
 - **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, Antigravity, and similar clients directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
@@ -447,7 +447,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Version 0.7.1 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for identity migration, strict input, owned cleanup, reference preservation and evidence reuse.
+Version 0.7.2 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for identity migration, strict input, continuous dragging, owned cleanup, reference preservation and evidence reuse.
 
 | Category | Tools |
 |----------|-------|

@@ -234,6 +234,9 @@ namespace Funplay.Editor.Tests
             yield return new EnterPlayMode();
             var availability = JObject.FromObject(InputFrameJob.Availability());
             if (availability.Value<bool?>("available") != true) { yield return new ExitPlayMode(); Assert.Ignore("Dynamic new Input System backend required for frame-edge check."); }
+#if ENABLE_INPUT_SYSTEM
+            var inputSettings = new ContinuousDragTests.OwnedInputSettings();
+#endif
             bool background = Application.runInBackground;
             var lease = JObject.FromObject(VerificationScope.Start(15, true, "owned-frame-check"));
             Assert.IsTrue((bool)lease["success"], lease.ToString()); string id = (string)lease["data"]["job_id"];
@@ -256,7 +259,13 @@ namespace Funplay.Editor.Tests
                 var read = JObject.FromObject(VerificationScope.Read(id)); Assert.IsTrue(Application.runInBackground, "Read must not restore owned settings.");
                 Assert.IsTrue((bool)read["data"]["scene_unchanged"]);
             }
-            finally { VerificationScope.End(id); }
+            finally
+            {
+                VerificationScope.End(id);
+#if ENABLE_INPUT_SYSTEM
+                inputSettings.Dispose();
+#endif
+            }
             Assert.AreEqual(background, Application.runInBackground); Assert.AreEqual(scene, UnityEngine.SceneManagement.SceneManager.GetActiveScene().path);
             yield return new ExitPlayMode();
         }

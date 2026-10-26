@@ -312,6 +312,13 @@ behavior. Up to 256 markers are kept; `dropped_markers` makes overflow explicit.
 `simulate_ui_scroll` dispatches to the top raycast hit's scroll handler, with no click-through;
 deltas are uGUI wheel units, not pixels (the project's ScrollRect sensitivity applies).
 
+`simulate_mouse_drag` is an asynchronous, continuous New Input System mouse/single-touch
+gesture across actual game frames. Its `duration` is real movement time, with optional
+`press_hold` / `end_hold`. Query its returned `input:<id>` through `get_task`; cancel through
+the original tool. Do not mistake the start acknowledgment, successful input task or recording
+marker for a successful UI drop or gameplay merge. Read back the target state and inspect
+fresh evidence. See [timing, backend limits, cancellation and examples](execution-trust.md#continuous-dragging-and-single-touch-gestures).
+
 After `record_game_view` reports `ready=true`:
 
 ```json

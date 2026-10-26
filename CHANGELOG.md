@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.2] - 2026-10-26
+
+### Fixed
+
+- `simulate_mouse_drag` now presses, moves, holds at the destination and explicitly releases across actual Dynamic PlayerLoop frames. `duration` is real unscaled movement time instead of synchronous interpolation count. The existing tool supports an owned mouse or single-touch New Input System device, with no hardware mutation, manual input updates, business callbacks or silent legacy-input fallback.
+- Drag receipts use the existing `get_task` input status path, retain bounded position/frame/clock evidence and keep application acceptance unknown. Idempotent request keys recover lost starts without replay; the original drag tool cancels its own tasks. Cancellation, timeout, pause, changed geometry/update mode, Play exit and reload release owned resources; failed cleanup remains explicit. Custom tool exposure is checked against each input task's originating tool.
+
+### Compatibility
+
+- Existing drag coordinates, screenshot mapping and button arguments remain available. `duration` now controls real movement time (0.05..10 seconds); invalid values fail instead of being silently clamped. Short MCP calls briefly wait for completion, while longer gestures return an `input:<id>` task rather than claiming that a completed drag was already dispatched. The tool definition, server instructions and workflow documentation describe status, cancellation and pointer-device selection. No tool was added: Core remains 40 and Full remains 185 across 43 modules.
+- New Input System Dynamic updates and an unpaused, advancing PlayerLoop are required. Mouse and single touch are explicit synthetic devices, not hardware or legacy `UnityEngine.Input` injection. Project focus/background input policies are preserved; a disabled device is reported instead of silently changing settings. The pictured game's actual merge result still requires verification in that project.
+
+### Pull requests and issues
+
+- Addresses the user's report that a merge-style continuous drag could not be completed through MCP. No numbered GitHub issue or PR is closed or merged by this release.
+
+### Validation
+
+- All **818 EditMode cases passed** in the owned, graphics-enabled FunplayMcp Unity 2022.3.62f3c1 / Input System 1.14 test session, including 27 new drag cases. Actual Update consumers observed mouse left/right/middle and single-touch start/intermediate/target/release states, including `timeScale=0`; an isolated uGUI fixture received BeginDrag, Drag, Drop and EndDrag. Owned temporary InputSettings isolate tests from other foreground Editors without modifying project input assets; the production tool never changes those policies.
+- Real project-scoped HTTP MCP checks retained 40 Core tools, completed short mouse/touch drags in the initiating response, recovered task IDs by request key, cancelled without coordinates, and interrupted/cleaned a gesture during an actual script reload. The fixture/settings were restored, no owned synthetic devices remained, and the Editor returned to Edit Mode. This verifies input delivery, not the pictured game's board logic, legacy polling, physical-device provenance or other Unity/package versions.
+
 ## [0.7.1] - 2026-10-26
 
 ### Added

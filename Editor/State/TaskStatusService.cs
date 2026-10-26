@@ -36,7 +36,7 @@ namespace Funplay.Editor.State
                 case "recording": return new[] { "record_game_view" };
                 case "recording_frames": return new[] { "extract_recording_frames", "get_recording_frame" };
                 case "tests": return new[] { "run_tests", "get_test_job" };
-                case "input": return new[] { "simulate_mouse_click" };
+                case "input": return new[] { "simulate_mouse_click", "simulate_mouse_drag" };
                 case "verification": return new[] { "verification_scope" };
                 default: return Array.Empty<string>();
             }
@@ -70,7 +70,9 @@ namespace Funplay.Editor.State
                 case "recording": receipt = VideoRecordingFunctions.RecordGameView("status", recording_id: taskId); break;
                 case "recording_frames": receipt = RecordingEvidenceService.Control(taskId, "status"); break;
                 case "tests": receipt = TestRunnerFunctions.GetTestJob(taskId); break;
-                case "input": receipt = InputFrameJob.Read(taskId); break;
+                case "input":
+                    if (!InputFrameJob.CanRead(taskId, key, Allowed)) return JObject.FromObject(Response.Error("TASK_KIND_NOT_EXPOSED"));
+                    receipt = InputFrameJob.Read(taskId, key); break;
                 case "verification": receipt = VerificationScope.Read(taskId, key); break;
                 default: return JObject.FromObject(Response.Error("INVALID_TASK_KIND"));
             }
@@ -89,8 +91,8 @@ namespace Funplay.Editor.State
             if (!Kinds.Contains(kind)) return Response.Error("INVALID_TASK_KIND", new { accepted = Kinds });
             if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(key)) return Response.Error("TASK_ID_OR_REQUEST_KEY_REQUIRED");
             if (id != null && !Guid.TryParse(id, out _)) return Response.Error("INVALID_TASK_ID");
-            if (key != null && (key.Length > 128 || string.IsNullOrWhiteSpace(key) || kind != "editor" && kind != "ui_preview" && kind != "verification"))
-                return Response.Error("INVALID_TASK_REQUEST_KEY", new { hint = "request_key lookup is supported only for editor, ui_preview and verification." });
+            if (key != null && (key.Length > 128 || string.IsNullOrWhiteSpace(key) || kind != "editor" && kind != "ui_preview" && kind != "verification" && kind != "input"))
+                return Response.Error("INVALID_TASK_REQUEST_KEY", new { hint = "request_key lookup is supported only for editor, ui_preview, verification and input." });
             return null;
         }
 

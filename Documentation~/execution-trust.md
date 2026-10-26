@@ -89,6 +89,70 @@ modified or removed. The result is a synthetic-device test, not hardware provena
 that a project `PlayerInput` paired to another device accepted it. Read status through the
 returned `input:<id>` task. Cleanup failures remain explicit, not successful completion.
 
+### Continuous dragging and single-touch gestures
+
+`simulate_mouse_drag` now uses the same owned input task service. Its existing coordinates,
+button and screenshot mapping remain supported, but `duration` means **actual movement time**
+(0.05..10 wall-clock seconds), not the number of events synchronously dispatched. The sequence
+is Down → start hold → interpolated movement over actual PlayerLoop frames → target hold → Up.
+`press_hold` and `end_hold` are 0..5 seconds each, defaulting to 0.1. At least separate Down,
+Held and Up frames are required even when a hold is zero. Timing is unscaled, including when
+`timeScale=0`; paused/stalled PlayerLoops cannot be replaced by repeated manual input updates.
+
+The default `input_route=new_input_system` is strict. `pointer_device=mouse` uses the selected
+left/right/middle button; `pointer_device=touch` injects one owned New Input System touch with
+a non-zero touch ID (`button=left` only). Choose the device from the project's actual bindings:
+a mouse is not a touch, and New Input System events do not inject legacy `UnityEngine.Input`
+polling. `legacy_polling` returns `LEGACY_POLLING_INJECTION_UNSUPPORTED`; other routes are not
+silently substituted. No EventSystem callback, business merge method or system mouse is called
+as a fallback. `PlayerInput` pairing, custom touch libraries and legacy input may need their
+own explicitly supported integration; task completion cannot establish that those accepted it.
+
+Example using coordinates measured on a fresh Game View screenshot:
+
+```json
+{
+  "start_x": 150, "start_y": 300, "end_x": 450, "end_y": 300,
+  "coordinate_space": "image_pixels", "origin": "top_left", "capture_id": "<fresh-capture-id>",
+  "duration": 0.6, "press_hold": 0.15, "end_hold": 0.1,
+  "pointer_device": "mouse", "request_key": "merge-drag-001"
+}
+```
+
+MCP briefly waits up to `wait_seconds` (default 2, valid 0..30), so short gestures normally
+return their final receipt in one call; zero returns immediately. A running start result is
+an acknowledgment, **not** a successful drop/merge. Read
+`get_task(task_id="input:<id>")`, or recover a lost start response using
+`get_task(kind="input", request_key="merge-drag-001")`; bounded waits and revision/backoff
+work as for other tasks. A repeated key with identical arguments returns the retained receipt,
+never replays the gesture; changed arguments return `INPUT_REQUEST_KEY_CONFLICT`. The most
+recent 16 input receipts are retained for this Editor session; keys are not durable business
+transactions or valid across Editor restarts. Read/cancel access follows the originating
+click/drag tool, respecting custom exposure lists.
+
+Cancel with `simulate_mouse_drag(action="cancel", task_id="input:<id>")` (coordinates can be
+omitted), or enroll the gesture in `verification_scope` and end that scope. Normal completion
+requires an observed target and a real release frame, followed by one more frame before device
+removal so UI/touch and LateUpdate consumers can finish their release path. Cancel, pause, timeout, changed input
+update mode, geometry change, Play exit, reload and quit clean up only the owned device.
+The hard wall-clock deadline is the movement plus both holds plus five seconds. A failed or
+cancelled gesture resets/removes its owned device to cancel its input actions and explicitly
+does **not** claim an observed release frame. Cleanup failures block new input tasks until
+explicitly retried; a status read never performs cleanup.
+
+Game View focus and background input policies are not changed by the tool. If those disable
+the device, the task fails with `INPUT_DEVICE_DISABLED_CHECK_GAME_VIEW_FOCUS_AND_BACKGROUND_POLICY`.
+Receipts identify the original focus/background policies; inspect those and the player's actual
+frame progress before retrying. `Application.runInBackground` alone does not override the
+Input System's focus policy. Tests using an isolated temporary InputSettings clone do not
+establish that a differently configured game's input backend will accept the gesture.
+
+Receipts retain device identity, requested timing, phase timestamps, actual Down/Held/Up and
+position samples with frame/wall/unscaled/game clocks. Samples are capped at 256 while keeping
+phase milestones; `observed_frames` and `edge_samples_truncated` disclose longer runs. Compare
+the resulting board/object state and fresh visual evidence separately. `application_accepted`
+remains unknown: an injected gesture is not proof that two pieces really merged.
+
 ## Bounded verification scopes
 
 Full exposes `verification_scope(action=start, timeout_seconds=60, allow_background=false)`
