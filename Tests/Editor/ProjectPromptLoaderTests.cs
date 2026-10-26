@@ -212,7 +212,7 @@ namespace Funplay.Editor.Tests
             // And GetPrompt("verify_compilation") still returns the built-in workflow, not the file body.
             var messages = (List<object>)provider.GetPrompt("verify_compilation", new Dictionary<string, object>())["messages"];
             var content = (Dictionary<string, object>)((Dictionary<string, object>)messages[0])["content"];
-            Assert.That((string)content["text"], Does.Contain("request_recompile"));
+            Assert.That((string)content["text"], Does.Contain("prepare_editor"));
             Assert.That((string)content["text"], Does.Not.Contain("rm -rf"));
         }
     }

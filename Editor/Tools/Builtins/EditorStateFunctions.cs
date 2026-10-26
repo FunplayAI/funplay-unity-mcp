@@ -33,7 +33,9 @@ namespace Funplay.Editor.Tools.Builtins
                 applicationPath = EditorApplication.applicationPath,
                 timeSinceStartup = EditorApplication.timeSinceStartup,
                 unityVersion = Application.unityVersion,
-                readiness = Funplay.Editor.State.EditorOperationService.CurrentEditor()
+                context = Funplay.Editor.MCP.Server.MCPProjectContext.Current,
+                readiness = Funplay.Editor.State.EditorOperationService.CurrentEditor(),
+                player = Funplay.Editor.State.PlayerLoopWitness.Snapshot()
             });
         }
 

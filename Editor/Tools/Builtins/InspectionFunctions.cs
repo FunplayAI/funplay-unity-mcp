@@ -120,6 +120,8 @@ namespace Funplay.Editor.Tools.Builtins
                     name, implemented = true, enabled = ToolRegistry.IsEnabled(name),
                     exposed = ToolRegistry.IsEnabled(name) && MCPToolExportPolicy.IsToolAllowed(name, profile, settings?.MCPCoreToolsConfigured ?? false, settings?.MCPCoreTools, settings?.MCPFullToolsConfigured ?? false, settings?.MCPFullTools),
                     read_only = ToolRegistry.GetMethod(name) != null && ToolRegistry.IsReadOnly(ToolRegistry.GetMethod(name)),
+                    runtime = name == "extract_recording_frames" ? RecordingEvidenceService.DecoderAvailability() :
+                        name == "simulate_mouse_click" ? State.InputFrameJob.Availability() : null,
                     role = name == "execute_code" ? "fallback" : "structured"
                 }).ToArray(),
                 hint = "If implemented but unexposed, adjust MCP Server tool exposure deliberately; do not assume the plugin lacks the capability."

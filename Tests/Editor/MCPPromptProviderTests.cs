@@ -51,12 +51,12 @@ namespace Funplay.Editor.Tests
         }
 
         [Test]
-        public void GetPrompt_VerifyCompilation_HasPlayModeAndRecompileSequence()
+        public void GetPrompt_VerifyCompilation_UsesRecoverablePreparationRatherThanLegacyReloadPolling()
         {
             var text = MessageText(NewProvider().GetPrompt("verify_compilation", new Dictionary<string, object>()));
-            Assert.That(text, Does.Contain("exit_play_mode"));
-            Assert.That(text, Does.Contain("request_recompile"));
-            Assert.That(text, Does.Contain("wait_for_compilation"));
+            Assert.That(text, Does.Contain("prepare_editor(target=edit"));
+            Assert.That(text, Does.Contain("request_key"));
+            Assert.That(text, Does.Contain("get_task"));
             Assert.That(text, Does.Contain("get_compilation_errors"));
         }
 
@@ -65,8 +65,8 @@ namespace Funplay.Editor.Tests
         {
             // With no validation_goal, the body must not contain a dangling "<validation_goal>" placeholder.
             var text = MessageText(NewProvider().GetPrompt("enter_play_and_recover", new Dictionary<string, object>()));
-            Assert.That(text, Does.Contain("enter_play_mode"));
-            Assert.That(text, Does.Contain("get_reload_recovery_status"));
+            Assert.That(text, Does.Contain("prepare_editor"));
+            Assert.That(text, Does.Contain("get_task"));
             Assert.That(text, Does.Not.Contain("<validation_goal>"));
         }
 
@@ -144,7 +144,7 @@ namespace Funplay.Editor.Tests
             Assert.That(text, Does.Contain("request_recompile"));
             Assert.That(text, Does.Contain("wait_for_compilation"));
             Assert.That(text, Does.Contain("enter_play_mode"));
-            Assert.That(text, Does.Contain("get_reload_recovery_status"));
+            Assert.That(text, Does.Contain("get_task"));
             Assert.That(text, Does.Contain("exit_play_mode"));
             Assert.That(text, Does.Not.Contain("enter_play_and_recover"));
         }

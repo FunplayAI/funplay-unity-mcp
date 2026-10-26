@@ -43,7 +43,8 @@ namespace Funplay.Editor.MCP.Server
         public async Task<string> ExecuteToolAsync(
             string toolName,
             Dictionary<string, object> arguments,
-            CancellationToken ct)
+            CancellationToken ct,
+            string routeProjectId = null)
         {
             bool tracksPending = !string.Equals(toolName, "get_task", StringComparison.OrdinalIgnoreCase);
             var queryClock = System.Diagnostics.Stopwatch.StartNew();
@@ -59,7 +60,10 @@ namespace Funplay.Editor.MCP.Server
                     };
 
                     foreach (var kvp in arguments)
+                    {
+                        if (kvp.Key == MCPProjectContext.ExpectedArgument) continue;
                         functionCall.Parameters[kvp.Key] = ConvertArgumentToString(kvp.Value);
+                    }
 
                     ToolRegistry.ManualTools.TryGetValue(toolName, out var manualTool);
                     var method = ToolRegistry.GetMethod(toolName);
@@ -90,6 +94,14 @@ namespace Funplay.Editor.MCP.Server
 
                     functionCall.IsReadOnly = method != null &&
                         method.GetCustomAttribute<ReadOnlyToolAttribute>() != null;
+                    arguments.TryGetValue(MCPProjectContext.ExpectedArgument, out var expectedContext);
+                    if (expectedContext != null && !(expectedContext is string))
+                        return ToolResultFormatter.Error("INVALID_EXPECTED_CONTEXT");
+                    var contextError = MCPProjectContext.Validate(MCPProjectContext.Current, routeProjectId,
+                        expectedContext as string, !functionCall.IsReadOnly);
+                    if (contextError != null)
+                        return ToolResultFormatter.Error(contextError, new { context = MCPProjectContext.Current,
+                            hint = "Verify the intended project independently. Reconfigure its project-scoped URL, or pass expected_context from that verified Editor. No tool was executed." });
 
                     if (tracksPending)
                     {
@@ -137,6 +149,7 @@ namespace Funplay.Editor.MCP.Server
             // The mutating invocation is already complete. Waiting only re-reads its receipt;
             // it must not occupy the pending-function slot or block Editor update processing.
             var finalResult = await MCPTaskWaiter.CompleteAsync(toolName, arguments, initialResult, _threadHelper, ct, remainingWaitSeconds).ConfigureAwait(false);
+            finalResult = MCPProjectContext.Stamp(finalResult);
             // Logging must not re-block an already timed-out status response on the same busy
             // Editor queue. It remains one final activity entry, delivered when the UI can run.
             var logging = _threadHelper.ExecuteOnEditorThreadAsync(() => _interactionLog?.Add(toolName,

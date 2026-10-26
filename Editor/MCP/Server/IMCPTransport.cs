@@ -40,6 +40,8 @@ namespace Funplay.Editor.MCP.Server
         public string Method { get; set; }
         public Dictionary<string, object> Params { get; set; }
         public bool IsBrokerRedelivery { get; set; }
+        // Set from the client-facing endpoint, not from a JSON body field.
+        public string TransportProjectId { get; set; }
     }
 
     internal class MCPResponse

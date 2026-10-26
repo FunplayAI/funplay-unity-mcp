@@ -131,7 +131,7 @@ namespace Funplay.Editor.Tests
             Assert.NotNull(button);
             Assert.AreEqual(DisplayStyle.Flex, container.style.display.value);
             StringAssert.Contains("not installed for Codex", label.text);
-            Assert.AreEqual("Open Project Skills", button.text);
+            Assert.AreEqual("Reconfigure MCP + Skills", button.text);
 
             panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.None);
 
@@ -159,7 +159,120 @@ namespace Funplay.Editor.Tests
             StringAssert.Contains("need updating for Claude Code", label.text);
             StringAssert.Contains("3 managed files need attention", label.text);
             StringAssert.Contains("2 missing", label.text);
-            Assert.AreEqual("Review Skills", button.text);
+            Assert.AreEqual("Reconfigure MCP + Skills", button.text);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ConnectionAndSkillsShareOneCardAndOneCombinedAction(bool skillsNeedUpdate)
+        {
+            var root = new VisualElement();
+            var panel = new FunplayMCPProjectSkillsNoticePanel(null, () => { });
+            panel.AddTo(root);
+            panel.ApplyState(skillsNeedUpdate
+                ? FunplayMCPProjectSkillsNoticePanel.NoticeState.NeedsUpdate("Codex", "codex", 2, 1, 0)
+                : FunplayMCPProjectSkillsNoticePanel.NoticeState.NotInstalled("Codex", "codex"));
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "Codex");
+
+            Assert.AreEqual(1, root.childCount);
+            Assert.AreEqual(0, root.Query<HelpBox>().ToList().Count);
+            var message = root.Q<Label>("project-skills-notice-text").text;
+            StringAssert.Contains("MCP connection needs updating for Codex", message);
+            StringAssert.Contains(skillsNeedUpdate ? "Project Skills need updating" : "Project Skills are not installed", message);
+            Assert.AreEqual(1, root.Query<Button>().ToList().Count);
+            var action = root.Q<Button>("project-skills-notice-button");
+            Assert.AreEqual("Reconfigure MCP + Skills", action.text);
+            Assert.IsTrue(action.enabledSelf);
+        }
+
+        [Test]
+        public void ResolvingConnectionRetainsTheUnresolvedSkillsNotice()
+        {
+            var root = new VisualElement();
+            var panel = new FunplayMCPProjectSkillsNoticePanel(null);
+            panel.AddTo(root);
+            panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.NotInstalled("Codex", "codex"));
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "Codex");
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.None, "Codex");
+
+            Assert.AreEqual(DisplayStyle.Flex, root.Q<VisualElement>("project-skills-notice").style.display.value);
+            var message = root.Q<Label>("project-skills-notice-text").text;
+            StringAssert.Contains("Project Skills are not installed", message);
+            StringAssert.DoesNotContain("MCP connection needs", message);
+            Assert.AreEqual(1, root.Query<Button>().ToList().Count);
+            Assert.AreEqual("Reconfigure MCP + Skills", root.Q<Button>("project-skills-notice-button").text);
+
+            panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.None);
+            Assert.AreEqual(DisplayStyle.None, root.Q<VisualElement>("project-skills-notice").style.display.value);
+        }
+
+        [Test]
+        public void ResolvingSkillsKeepsTheConnectionNoticeEvenForAnUnsupportedSkillsTarget()
+        {
+            var root = new VisualElement();
+            var panel = new FunplayMCPProjectSkillsNoticePanel(null, () => { });
+            panel.AddTo(root);
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "Kimi");
+            panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.None);
+
+            Assert.AreEqual(DisplayStyle.Flex, root.Q<VisualElement>("project-skills-notice").style.display.value);
+            StringAssert.Contains("needs updating for Kimi", root.Q<Label>("project-skills-notice-text").text);
+            Assert.AreEqual(1, root.Query<Button>().ToList().Count);
+            var action = root.Q<Button>("project-skills-notice-button");
+            Assert.AreEqual("Reconfigure MCP", action.text);
+            StringAssert.Contains("does not support generated Project Skills", action.tooltip);
+        }
+
+        [Test]
+        public void UnreadableConfigurationKeepsSkillsAndDoesNotOfferAnUnverifiedRewrite()
+        {
+            var root = new VisualElement();
+            var panel = new FunplayMCPProjectSkillsNoticePanel(null, () => Assert.Fail("Rendering must not reconfigure."));
+            panel.AddTo(root);
+            panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.NotInstalled("Codex", "codex"));
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.Unreadable, "Codex");
+
+            var message = root.Q<Label>("project-skills-notice-text").text;
+            StringAssert.Contains("No configuration was changed", message);
+            StringAssert.Contains("Project Skills are not installed", message);
+            Assert.AreEqual(1, root.Query<Button>().ToList().Count);
+            Assert.IsFalse(root.Q<Button>("project-skills-notice-button").enabledSelf);
+            panel.ConfigureMcpAndSkills();
+        }
+
+        [Test]
+        public void RenderingAndClearingConnectionStateNeverInvokesTheReconfigureAction()
+        {
+            int calls = 0;
+            var panel = new FunplayMCPProjectSkillsNoticePanel(null, () => calls++);
+            panel.AddTo(new VisualElement());
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "Codex");
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.None, "Codex");
+            Assert.AreEqual(0, calls);
+        }
+
+        [Test]
+        public void CombinedActionInvokesOneCallbackAndCannotRunForUnreadableOrResolvedState()
+        {
+            int calls = 0;
+            var panel = new FunplayMCPProjectSkillsNoticePanel(null, () => calls++);
+            panel.AddTo(new VisualElement());
+            panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.NotInstalled("Codex", "codex"));
+            panel.ConfigureMcpAndSkills();
+            Assert.AreEqual(1, calls);
+
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.Unreadable, "Codex");
+            panel.ConfigureMcpAndSkills();
+            Assert.AreEqual(1, calls);
+
+            panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.None);
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.None, "Codex");
+            panel.ConfigureMcpAndSkills();
+            Assert.AreEqual(1, calls);
+
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "Codex");
+            panel.ConfigureMcpAndSkills();
+            Assert.AreEqual(2, calls);
         }
 
         private static string CreateTempProjectPath()

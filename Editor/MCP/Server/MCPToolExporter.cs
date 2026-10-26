@@ -54,6 +54,17 @@ namespace Funplay.Editor.MCP.Server
                     ["description"] = MCPToolExportPolicy.BuildDescriptionPrefix(tool.function.name, profile) + tool.function.description,
                     ["inputSchema"] = ConvertParametersToJsonSchema(tool.function.parameters)
                 };
+                var method = ToolRegistry.GetMethod(tool.function.name);
+                if (method == null || !ToolRegistry.IsReadOnly(method))
+                {
+                    var schema = (Dictionary<string, object>)mcpTool["inputSchema"];
+                    var properties = (Dictionary<string, object>)schema["properties"];
+                    properties[MCPProjectContext.ExpectedArgument] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "Verified project:Editor identity guard; required for writes through legacy unscoped URLs. Read context from the intended Editor first."
+                    };
+                }
                 mcpTools.Add(mcpTool);
             }
 

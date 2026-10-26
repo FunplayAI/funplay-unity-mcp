@@ -107,7 +107,7 @@ namespace Funplay.Editor.Tools.Builtins
                 ExternalSyncRecoveryTracker.TryCompletePendingRecovery();
                 return "External changes imported. Unity started importing or recompiling and may reload the domain. " +
                        $"Refresh strategy: {refreshResult.BuildStrategySummary()}. " +
-                       "If this request is interrupted, call get_reload_recovery_status for the final outcome.";
+                       Funplay.Editor.MCP.Server.MCPRecoveryGuidance.Describe();
             }
 
             var compilationService = GetCompilationService();
@@ -124,7 +124,7 @@ namespace Funplay.Editor.Tools.Builtins
             {
                 ExternalSyncRecoveryTracker.TryCompletePendingRecovery();
                 return "External changes imported. Unity is still compiling in the background. " +
-                       "Call get_reload_recovery_status or get_compilation_errors after it finishes.";
+                       Funplay.Editor.MCP.Server.MCPRecoveryGuidance.Describe();
             }
 
             var issues = compilationService.GetCompilationErrors(includeWarnings: true);

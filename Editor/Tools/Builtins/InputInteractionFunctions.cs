@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.ComponentModel;
 using System.Reflection;
 using Funplay.Editor.Tools.Helpers;
@@ -48,13 +49,24 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Mouse button: left, right, or middle", Required = false)] string button = "left",
             [ToolParam("render_pixels (legacy default), image_pixels, or normalized", Required = false)] string coordinate_space = "render_pixels",
             [ToolParam("bottom_left (legacy default) or top_left", Required = false)] string origin = "bottom_left",
-            [ToolParam("Screenshot capture ID; required for image_pixels. Rejects changed geometry/mode or captures older than 30 seconds.", Required = false)] string capture_id = null)
+            [ToolParam("Screenshot capture ID; required for image_pixels. Rejects changed geometry/mode or captures older than 30 seconds.", Required = false)] string capture_id = null,
+            [ToolParam("auto (UI then physics), ui_eventsystem, direct_button, physics, new_input_system or legacy_polling. Explicit routes never silently fall back.", Required = false)] string input_route = "auto",
+            [ToolParam("Allow auto route's direct-button/physics fallbacks; explicit routes remain strict", Required = false)] bool allow_fallback = true,
+            [ToolParam("Actual PlayerLoop hold frames for new_input_system, 2..30", Required = false)] int hold_frames = 2,
+            [ToolParam("Optional active verification scope to own the input job", Required = false)] string verification_id = null)
         {
             if (!EditorApplication.isPlaying)
                 return Response.Error("PLAY_MODE_REQUIRED", new { message = "SimulateMouseClick only works in Play Mode." });
 
             try
             {
+                input_route = (input_route ?? "auto").Trim().ToLowerInvariant();
+                if (!new[] { "auto", "ui_eventsystem", "direct_button", "physics", "new_input_system", "legacy_polling" }.Contains(input_route))
+                    return Response.Error("INVALID_INPUT_ROUTE");
+                var ownershipError = State.VerificationScope.ValidateOwner(verification_id);
+                if (ownershipError != null) return Response.Error(ownershipError);
+                if (input_route == "legacy_polling") return Response.Error("LEGACY_POLLING_INJECTION_UNSUPPORTED", new {
+                    input_route, dispatched = false, hint = "UI handlers and physics messages do not create UnityEngine.Input Down/Held/Up. No fallback, focus change or game-code patch was attempted." });
                 if (!TryParseButton(button, out var inputButton))
                 {
                     return Response.Error("INVALID_MOUSE_BUTTON", new
@@ -71,17 +83,20 @@ namespace Funplay.Editor.Tools.Builtins
                 var viewportMessage = "Normalized full-render coordinates; camera rect is applied by physics dispatch.";
 
                 var attempts = new List<ClickOutcome>();
+                if (input_route == "new_input_system")
+                    return State.TaskStatusService.Attach("input", State.InputFrameJob.Start(uiPosition, inputButton.ToString().ToLowerInvariant(), geometry, hold_frames, verification_id));
                 VideoRecordingFunctions.RecordMarker("click", button + " click dispatched", uiPosition, geometry: geometry);
-                var uiOutcome = PerformUiClick(
+                var uiOutcome = input_route == "physics" ? ClickOutcome.Miss("ui-eventsystem", "not requested") :
+                    input_route == "direct_button" ? PerformDirectButtonFallback(uiPosition, inputButton, attempts) : PerformUiClick(
                     Mathf.RoundToInt(uiPosition.x),
                     Mathf.RoundToInt(uiPosition.y),
                     inputButton,
-                    attempts);
+                    attempts, input_route == "auto" && allow_fallback);
                 ClickOutcome winner = uiOutcome.Hit ? uiOutcome : null;
 
                 // Match normal input precedence: UI gets first refusal. A raycast blocker
                 // prevents click-through even when it has no click handler.
-                if (winner == null && !uiOutcome.BlocksFurtherDispatch)
+                if (winner == null && !uiOutcome.BlocksFurtherDispatch && (input_route == "physics" || input_route == "auto" && allow_fallback))
                 {
                     var physicsOutcome = PerformPhysicsClick(viewportPosition, attempts);
                     if (physicsOutcome.Hit)
@@ -117,6 +132,7 @@ namespace Funplay.Editor.Tools.Builtins
                 var data = new
                 {
                     hit,
+                    input_route, dispatched = hit, natural_legacy_input = false, application_accepted = (bool?)null,
                     geometry,
                     strategy = hit ? winner.Strategy : null,
                     target = BuildTargetPayload(hit ? winner.Target : null),
@@ -222,7 +238,7 @@ namespace Funplay.Editor.Tools.Builtins
             return viewport;
         }
 
-        private static ClickOutcome PerformUiClick(int x, int y, PointerEventData.InputButton inputButton, List<ClickOutcome> attempts)
+        private static ClickOutcome PerformUiClick(int x, int y, PointerEventData.InputButton inputButton, List<ClickOutcome> attempts, bool fallback = true)
         {
             Canvas.ForceUpdateCanvases();
 
@@ -230,14 +246,14 @@ namespace Funplay.Editor.Tools.Builtins
             if (eventSystem == null)
             {
                 attempts.Add(ClickOutcome.Miss("ui-eventsystem", "no EventSystem found"));
-                return PerformDirectButtonFallback(new Vector2(x, y), inputButton, attempts);
+                return fallback ? PerformDirectButtonFallback(new Vector2(x, y), inputButton, attempts) : ClickOutcome.Miss("ui-eventsystem", "no EventSystem; strict route stopped");
             }
 
             var pointerData = CreatePointerData(eventSystem, new Vector2(x, y), inputButton);
             if (!TryGetTopUiTarget(eventSystem, pointerData, out var target, out var raycast))
             {
                 attempts.Add(ClickOutcome.Miss("ui-eventsystem", "no UI element at position"));
-                return PerformDirectButtonFallback(new Vector2(x, y), inputButton, attempts);
+                return fallback ? PerformDirectButtonFallback(new Vector2(x, y), inputButton, attempts) : ClickOutcome.Miss("ui-eventsystem", "no target; strict route stopped");
             }
 
             return DispatchUiClick(target, raycast, pointerData, attempts);

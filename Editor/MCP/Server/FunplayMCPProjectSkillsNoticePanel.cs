@@ -1,6 +1,7 @@
 // Copyright (C) Funplay. Licensed under MIT.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Funplay.Editor.Settings;
@@ -14,13 +15,18 @@ namespace Funplay.Editor.MCP.Server
         private const string DefaultConfigTarget = "Claude Code";
 
         private readonly ISettingsController _settings;
+        private readonly Action _configureMcpAndSkills;
         private VisualElement _container;
         private Label _statusLabel;
         private Button _manageButton;
+        private NoticeState _skillsState = NoticeState.None;
+        private FunplayMCPClientConfigPanel.ConnectionNoticeKind _connectionKind;
+        private string _connectionTarget;
 
-        public FunplayMCPProjectSkillsNoticePanel(ISettingsController settings)
+        public FunplayMCPProjectSkillsNoticePanel(ISettingsController settings, Action configureMcpAndSkills = null)
         {
             _settings = settings;
+            _configureMcpAndSkills = configureMcpAndSkills;
         }
 
         public void AddTo(VisualElement parent)
@@ -53,14 +59,14 @@ namespace Funplay.Editor.MCP.Server
             _statusLabel.style.flexShrink = 1;
             row.Add(_statusLabel);
 
-            _manageButton = new Button(FunplayProjectSkillsWindow.ShowWindow)
+            _manageButton = new Button(ConfigureMcpAndSkills)
             {
                 name = "project-skills-notice-button",
-                text = "Open Project Skills",
-                tooltip = "Review, install, or update the generated Project Skills files."
+                text = "Reconfigure MCP + Skills"
             };
             _manageButton.style.height = 24;
-            _manageButton.style.minWidth = 116;
+            _manageButton.style.minWidth = 166;
+            _manageButton.style.flexShrink = 0;
             _manageButton.style.marginLeft = 8;
             _manageButton.style.backgroundColor = new Color(0.24f, 0.48f, 0.72f);
             _manageButton.style.color = Color.white;
@@ -85,20 +91,60 @@ namespace Funplay.Editor.MCP.Server
 
         internal void ApplyState(NoticeState state)
         {
+            _skillsState = state ?? NoticeState.None;
+            RefreshContent();
+        }
+
+        internal void ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind kind, string targetName)
+        {
+            _connectionKind = kind;
+            _connectionTarget = targetName;
+            RefreshContent();
+        }
+
+        internal void ConfigureMcpAndSkills()
+        {
+            if (_connectionKind == FunplayMCPClientConfigPanel.ConnectionNoticeKind.Unreadable ||
+                (_connectionKind == FunplayMCPClientConfigPanel.ConnectionNoticeKind.None && _skillsState.Kind == NoticeKind.None))
+                return;
+
+            _configureMcpAndSkills?.Invoke();
+        }
+
+        private void RefreshContent()
+        {
             if (_container == null || _statusLabel == null || _manageButton == null)
                 return;
 
-            state ??= NoticeState.None;
-            _container.style.display = state.Kind == NoticeKind.None
-                ? DisplayStyle.None
-                : DisplayStyle.Flex;
-            if (state.Kind == NoticeKind.None)
-                return;
+            var hasSkills = _skillsState.Kind != NoticeKind.None;
+            var hasConnection = _connectionKind != FunplayMCPClientConfigPanel.ConnectionNoticeKind.None;
+            var canReconfigure = _connectionKind == FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint;
+            _container.style.display = hasSkills || hasConnection ? DisplayStyle.Flex : DisplayStyle.None;
+            var targetName = hasConnection ? _connectionTarget : _skillsState.TargetDisplayName;
+            var skillsSupported = !string.IsNullOrEmpty(ProjectSkillsManager.GetPlatformIdForConfigTarget(targetName));
+            var unreadable = _connectionKind == FunplayMCPClientConfigPanel.ConnectionNoticeKind.Unreadable;
+            _manageButton.text = skillsSupported ? "Reconfigure MCP + Skills" : "Reconfigure MCP";
+            _manageButton.tooltip = unreadable
+                ? "Review the unreadable configuration file before reconfiguring. No files have been changed."
+                : skillsSupported
+                    ? $"Update the MCP address and install/update the managed Project Skills for {targetName}, then reconnect or restart the client. Existing user-content protections still apply."
+                    : $"Update the MCP address for {targetName}. This client does not support generated Project Skills; only MCP can be configured.";
+            _manageButton.SetEnabled(_configureMcpAndSkills != null && !unreadable && (hasSkills || hasConnection));
 
-            _statusLabel.text = BuildMessage(state);
-            _manageButton.text = state.Kind == NoticeKind.NotInstalled
-                ? "Open Project Skills"
-                : "Review Skills";
+            var messages = new List<string>();
+            if (hasConnection)
+                messages.Add(canReconfigure
+                    ? $"MCP connection needs updating for {_connectionTarget} (legacy address). " +
+                      $"Reconfigure to bind this Unity project, then reconnect or restart {_connectionTarget}."
+                    : $"Could not check the saved MCP configuration for {_connectionTarget}. " +
+                      "No configuration was changed. Review the file before reconfiguring.");
+            if (hasSkills)
+                messages.Add(BuildMessage(_skillsState));
+            _statusLabel.text = string.Join("\n\n", messages);
+            _statusLabel.tooltip = hasConnection
+                ? "This checks saved configuration, not the client's live connection. " +
+                  "Legacy unbound addresses require a verified expected_context for writes."
+                : string.Empty;
         }
 
         internal static NoticeState Evaluate(string projectRoot, string targetName)

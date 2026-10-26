@@ -16,7 +16,6 @@ namespace Funplay.Editor.Tools.Builtins
     internal static class InputSimulationFunctions
     {
         [Description("Simulate keyboard input in Play Mode. Queues key events that the Unity Input System will process. Supports key names like W, A, S, D, Space, LeftShift, E, Q, and number keys.")]
-        [ReadOnlyTool]
         public static string SimulateKeyPress(
             [ToolParam("Key name, for example W, Space, LeftShift, E, or 1")] string key,
             [ToolParam("Duration in seconds to hold the key. Use 0 for a tap.", Required = false)] float duration = 0f,
@@ -54,7 +53,6 @@ namespace Funplay.Editor.Tools.Builtins
         }
 
         [Description("Simulate multiple keys held simultaneously in Play Mode, for example W plus LeftShift.")]
-        [ReadOnlyTool]
         public static string SimulateKeyCombo(
             [ToolParam("Comma-separated key names, for example 'W,LeftShift' or 'A,Space'")] string keys,
             [ToolParam("Duration in seconds to hold the combo", Required = false)] float duration = 0.5f)

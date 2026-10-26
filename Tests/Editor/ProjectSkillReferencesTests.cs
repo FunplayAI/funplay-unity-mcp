@@ -56,7 +56,7 @@ namespace Funplay.Editor.Tests
                     referenceCount++;
                 }
             }
-            Assert.AreEqual(4, referenceCount);
+            Assert.AreEqual(5, referenceCount);
             Assert.IsFalse(Current(platform).HasUpdates);
         }
 
@@ -69,7 +69,7 @@ namespace Funplay.Editor.Tests
             var paths = Directory.GetFiles(projectRoot, "*.md", SearchOption.AllDirectories)
                 .Where(path => path.Contains(Path.DirectorySeparatorChar + "references" + Path.DirectorySeparatorChar))
                 .ToArray();
-            Assert.AreEqual(24, paths.Length);
+            Assert.AreEqual(30, paths.Length);
         }
 
         [Test, Combinatorial]
@@ -165,8 +165,8 @@ namespace Funplay.Editor.Tests
             foreach (var file in Current(platform).Files)
             {
                 File.WriteAllText(file.Path, File.ReadAllText(file.Path)
-                    .Replace("unity-mcp-workflow@1.0.6", "unity-mcp-workflow@1.0.5")
-                    .Replace("unity-ui-composition@1.0.8", "unity-ui-composition@1.0.7"));
+                    .Replace("unity-mcp-workflow@1.0.7", "unity-mcp-workflow@1.0.5")
+                    .Replace("unity-ui-composition@1.0.9", "unity-ui-composition@1.0.7"));
                 foreach (var relative in ProjectSkillReferences.GetForSkill(file.SkillId).Keys)
                     File.Delete(Path.Combine(Path.GetDirectoryName(file.Path), relative));
             }

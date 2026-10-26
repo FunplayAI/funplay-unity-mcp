@@ -18,6 +18,7 @@ namespace Funplay.Editor.MCP.Server
         private readonly ISettingsController _settings;
         private readonly MCPServerService _server;
         private readonly Action _rebuildWindow;
+        private readonly Action<ConnectionNoticeKind, string> _connectionNoticeChanged;
         private MCPConfigTarget[] _targets;
         private int _selectedTargetIndex;
         private Label _configStatusLabel;
@@ -28,11 +29,13 @@ namespace Funplay.Editor.MCP.Server
         public FunplayMCPClientConfigPanel(
             ISettingsController settings,
             MCPServerService server,
-            Action rebuildWindow)
+            Action rebuildWindow,
+            Action<ConnectionNoticeKind, string> connectionNoticeChanged = null)
         {
             _settings = settings;
             _server = server;
             _rebuildWindow = rebuildWindow;
+            _connectionNoticeChanged = connectionNoticeChanged;
         }
 
         public void AddTo(VisualElement parent)
@@ -74,11 +77,7 @@ namespace Funplay.Editor.MCP.Server
             });
             row.Add(dropdown);
 
-            var configureButton = new Button(() =>
-            {
-                ConfigureMCPForTarget(_targets[_selectedTargetIndex]);
-                RefreshStatus();
-            });
+            var configureButton = new Button(ReconfigureSelectedTarget);
             configureButton.text = "Configure";
             configureButton.style.height = 26;
             configureButton.style.width = 80;
@@ -90,11 +89,7 @@ namespace Funplay.Editor.MCP.Server
             var selectedTarget = _targets[_selectedTargetIndex];
             var skillsSupported = !string.IsNullOrEmpty(
                 ProjectSkillsManager.GetPlatformIdForConfigTarget(selectedTarget.Name));
-            var configureSkillsButton = new Button(() =>
-            {
-                ConfigureMCPAndSkillsForTarget(_targets[_selectedTargetIndex]);
-                RefreshStatus();
-            });
+            var configureSkillsButton = new Button(ReconfigureSelectedTargetAndSkills);
             configureSkillsButton.text = "Configure + Skills";
             configureSkillsButton.style.height = 26;
             configureSkillsButton.style.width = 130;
@@ -140,11 +135,14 @@ namespace Funplay.Editor.MCP.Server
 
             if (IsConfigurationBlockedByFallback())
             {
+                ApplyConnectionMigrationNotice(ConnectionNoticeKind.None, target.Name);
                 _configStatusLabel.text = "Status: Resolve the port conflict before configuring";
                 _configStatusLabel.style.color = new Color(1f, 0.45f, 0.35f);
                 _configPathLabel.text = BuildFallbackConfigurationBlockedMessage();
                 return;
             }
+
+            var connectionNotice = RefreshConnectionMigrationNotice(target);
 
             if (target.IsLMStudio)
             {
@@ -161,6 +159,7 @@ namespace Funplay.Editor.MCP.Server
                 _configPathLabel.text = hasExistingConfig
                     ? "Existing config: " + string.Join(" | ", existingPaths)
                     : "LM Studio config path varies by version. Configure uses lmstudio://add_mcp and does not create guessed paths.";
+                ApplyConnectionNoticeStatus(connectionNotice);
                 return;
             }
 
@@ -183,6 +182,7 @@ namespace Funplay.Editor.MCP.Server
                     _configPathLabel.text = ex.Message;
                 }
 
+                ApplyConnectionNoticeStatus(connectionNotice);
                 return;
             }
 
@@ -236,6 +236,83 @@ namespace Funplay.Editor.MCP.Server
             }
 
             _configPathLabel.text = details;
+            ApplyConnectionNoticeStatus(connectionNotice);
+        }
+
+        // No configuration is changed by inspection. Check only the selected client and the
+        // current project's recorded/resolved entry (or the historical shared entry).
+        private ConnectionNoticeKind RefreshConnectionMigrationNotice(MCPConfigTarget target)
+        {
+            try
+            {
+                var homePath = GetUserHomePath();
+                var paths = target.IsLMStudio
+                    ? GetExistingLMStudioConfigPaths(homePath)
+                    : target.IsDeepSeekHarness
+                        ? FunplayDeepSeekHarnessPatch.GetProfilePatchPaths(homePath)
+                        : new List<string> { target.ConfigPath };
+                var currentKey = target.IsDeepSeekHarness
+                    ? ResolveDeepSeekHarnessServerKey(paths)
+                    : ResolveServerKeyForTarget(target);
+                var recordedKey = _settings.GetLastClientConfigKey(target.Name);
+                foreach (var path in paths)
+                {
+                    if (!File.Exists(path) || !MCPClientConnectionMigration.NeedsReconfiguration(
+                            File.ReadAllText(path), target, GetProjectScopeKeyPath(), currentKey, recordedKey))
+                        continue;
+
+                    ApplyConnectionMigrationNotice(ConnectionNoticeKind.LegacyEndpoint, target.Name);
+                    return ConnectionNoticeKind.LegacyEndpoint;
+                }
+            }
+            catch (Exception)
+            {
+                // A corrupt/unreadable client config must not prevent Recent Activity or the
+                // rest of the window from being built. The write path retains its strict checks.
+                ApplyConnectionMigrationNotice(ConnectionNoticeKind.Unreadable, target.Name);
+                return ConnectionNoticeKind.Unreadable;
+            }
+
+            ApplyConnectionMigrationNotice(ConnectionNoticeKind.None, target.Name);
+            return ConnectionNoticeKind.None;
+        }
+
+        internal enum ConnectionNoticeKind { None, LegacyEndpoint, Unreadable }
+
+        internal void ReconfigureSelectedTarget()
+        {
+            if (_targets == null || _targets.Length == 0)
+                return;
+
+            var target = _targets[Mathf.Clamp(_selectedTargetIndex, 0, _targets.Length - 1)];
+            ConfigureMCPForTarget(target);
+            RefreshStatus();
+        }
+
+        internal void ReconfigureSelectedTargetAndSkills()
+        {
+            if (_targets == null || _targets.Length == 0)
+                return;
+
+            var target = _targets[Mathf.Clamp(_selectedTargetIndex, 0, _targets.Length - 1)];
+            ConfigureMCPAndSkillsForTarget(target);
+            RefreshStatus();
+        }
+
+        internal void ApplyConnectionMigrationNotice(ConnectionNoticeKind kind, string targetName)
+        {
+            _connectionNoticeChanged?.Invoke(kind, targetName);
+        }
+
+        private void ApplyConnectionNoticeStatus(ConnectionNoticeKind kind)
+        {
+            if (kind == ConnectionNoticeKind.None)
+                return;
+
+            _configStatusLabel.text = kind == ConnectionNoticeKind.LegacyEndpoint
+                ? "Status: Reconfigure required (legacy address)"
+                : "Status: Configuration needs review";
+            _configStatusLabel.style.color = new Color(1f, 0.75f, 0.4f);
         }
 
         // Same (path, mtime) cache shape as _entryNamesCache below, kept separate rather than shared:
@@ -1701,7 +1778,7 @@ namespace Funplay.Editor.MCP.Server
             // ISettingsController.MCPServerPort is only the stored override and is meaningless when
             // nothing was pinned.
             var port = _server != null ? _server.ResolvedPort : _settings.MCPServerPort;
-            return $"http://127.0.0.1:{port}/";
+            return MCPProjectContext.Endpoint(port, FunplayProjectIdentity.FromProjectPath(GetProjectRootPath()));
         }
 
         /// <summary>

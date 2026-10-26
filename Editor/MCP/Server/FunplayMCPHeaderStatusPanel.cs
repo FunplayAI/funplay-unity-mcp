@@ -70,12 +70,12 @@ namespace Funplay.Editor.MCP.Server
             {
                 if (_server.IsAttachedToExistingTransport)
                 {
-                    _statusLabel.text = $"Attached to existing server on http://127.0.0.1:{_server.Port}/ ({_settings.MCPToolExportProfile ?? "core"})";
+                    _statusLabel.text = $"Attached to existing server on {MCPProjectContext.Endpoint(_server.Port, MCPProjectContext.Current.project_id)} ({_settings.MCPToolExportProfile ?? "core"})";
                     _statusLabel.style.color = new Color(1f, 0.8f, 0.35f);
                 }
                 else
                 {
-                    _statusLabel.text = $"Running on http://127.0.0.1:{_server.Port}/ ({_settings.MCPToolExportProfile ?? "core"})";
+                    _statusLabel.text = $"Running on {MCPProjectContext.Endpoint(_server.Port, MCPProjectContext.Current.project_id)} ({_settings.MCPToolExportProfile ?? "core"})";
                     _statusLabel.style.color = new Color(0.4f, 1f, 0.4f);
                 }
             }

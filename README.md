@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.0"
+    "com.gamebooom.unity.mcp": "0.7.1"
   }
 }
 ```
@@ -87,9 +87,9 @@ If you installed from a Git URL before, remove the Git dependency first, then in
 
 **Menu: Funplay → MCP Server** to start the server.
 
-A new project gets its own port, derived from the project path, so two editors opened on different projects never fight over one port. The MCP Server window shows the exact URL (`http://127.0.0.1:<port>/`); the one-click configuration writes that URL for you. Type a port in **Server Port** to pin a fixed one (CI, a firewall rule) and **Use Per-Project Port** to derive one instead.
+A new project gets its own port, derived from the project path, so two editors opened on different projects never fight over one port. The MCP Server window shows the exact URL (`http://127.0.0.1:<port>/mcp/project/<project-id>/`); the one-click configuration writes that URL for you. Type a port in **Server Port** to pin a fixed one (CI, a firewall rule) and **Use Per-Project Port** to derive one instead.
 
-Upgrading from an earlier version changes nothing: the project keeps the port it was already using, recorded as a pin, so existing client configs keep working. Click **Use Per-Project Port** when you want that project to run beside another editor. See [Running Several Unity Projects at Once](Documentation~/multi-project-setup.md) for the full setup guide.
+Upgrading preserves the existing pinned port, but v0.7.1 binds generated URLs to the project. Old root URLs remain readable; writes require a verified `expected_context`. Re-run **Reconfigure MCP + Skills** in the existing blue Skills notice card and reconnect your client, or explicitly pass the guard from an independently verified intended Editor. Click **Use Per-Project Port** when you want that project to run beside another editor. See [Running Several Unity Projects at Once](Documentation~/multi-project-setup.md) for the full setup guide.
 
 If the window reports a fallback port, do not use a client entry that still targets the occupied stable port; it could reach the process that owns that port. One-click configuration stays blocked until you click **Use Per-Project Port** or **Pin Current Port** and the server finishes restarting.
 
@@ -111,7 +111,9 @@ If you want project-specific AI guidance for the current Unity project, open **F
 
 Version 0.7.0 keeps these two built-in skills and adds four task-specific references, informed by the [official Unity plugin 0.1.8-beta](https://github.com/Unity-Technologies/unity-agent-plugin/tree/cf6b2da24e424b0a60d560a57f39f676cb6f79f3): UI framework selection, safe Sprite importer edits, TMP/localization verification, and package readiness. Agents read only the references relevant to their task; no default tools or extra skills are added. MCP-first operation, project conventions, prefab preservation and design fidelity remain authoritative. Update existing installations through **Project Skills**; missing or outdated references also trigger the skills-update notice. User-owned reference files are protected from overwrite.
 
-If you prefer to edit config files manually, use the examples below as fallback references. Replace `<project>` with this project's entry name and `<port>` with its port -- the MCP Server window shows both:
+Version 0.7.1 adds execution-trust guidance to both built-ins, including project identity, actual frame progress, strict input routes, owned verification cleanup and conditional handling of blocking native Unity dialogs. The shared blue setup card reports MCP and Skills issues with one **Reconfigure MCP + Skills** action; resolving one issue preserves the other. See [execution trust and migration](Documentation~/execution-trust.md).
+
+If you prefer to edit config files manually, use the examples below as fallback references. Replace `<project>` with this project's entry name, `<port>` with its port and `<project-id>` with the ID in its full bound URL -- copy these from the MCP Server window, not from a different Editor:
 
 <details>
 <summary>Claude Code / Claude Desktop</summary>
@@ -121,7 +123,7 @@ If you prefer to edit config files manually, use the examples below as fallback 
   "mcpServers": {
     "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -136,7 +138,7 @@ If you prefer to edit config files manually, use the examples below as fallback 
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -153,7 +155,7 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -169,7 +171,7 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
   "servers": {
     "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -184,7 +186,7 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -200,7 +202,7 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
   "mcpServers": {
     "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -217,7 +219,7 @@ Current Kimi Code releases load project-level MCP servers from `.kimi-code/mcp.j
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -230,7 +232,7 @@ Current Kimi Code releases load project-level MCP servers from `.kimi-code/mcp.j
 
 ```toml
 [mcp_servers.funplay-<project>]
-url = "http://127.0.0.1:<port>/"
+url = "http://127.0.0.1:<port>/mcp/project/<project-id>/"
 ```
 
 </details>
@@ -245,7 +247,7 @@ Written to the repository's own `.opencode/opencode.json` (not the global config
   "mcp": {
     "funplay-<project>": {
       "type": "remote",
-      "url": "http://127.0.0.1:<port>/",
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/",
       "enabled": true
     }
   }
@@ -268,7 +270,7 @@ Written as a delimited managed block into every DeepSeek Harness profile's `~/.d
       config:
         serverName: funplay-<project>
         transport: streamable-http
-        url: http://127.0.0.1:<port>/
+        url: http://127.0.0.1:<port>/mcp/project/<project-id>/
 # <<< funplay-mcp:funplay-<project> end
 ```
 
@@ -287,7 +289,7 @@ Existing Funplay entries in `~/.gemini/config/mcp_config.json` or the older `~/.
 {
   "mcpServers": {
     "funplay-<project>": {
-      "serverUrl": "http://127.0.0.1:<port>/"
+      "serverUrl": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -319,9 +321,10 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 ## Before You Start
 
 - This package is **Editor-only**. It does not add runtime components to your built game.
-- The MCP server port is derived per project (range 20000-29999) for new projects, or pinned — projects upgraded from an earlier version keep their existing port as a pin, and any port you type is a pin. The MCP Server window shows where the port came from and the active URL. A project's client-config entry is named after the project directory (for example `funplay-love-town`), so configuring several projects no longer overwrites one shared `funplay` entry. Two projects that share a product name would resolve to the same entry name; the second one configured appends a project hash automatically, so nothing is overwritten and no setting has to be turned on.
+- The MCP server port is derived per project (range 20000-29999) for new projects, or pinned — projects upgraded from an earlier version keep their existing port as a pin, and any port you type is a pin. The MCP Server window shows where the port came from and the active URL. A project's client-config entry is named after the project directory (for example `funplay-love-town`), so configuring several projects no longer overwrites one shared `funplay` entry. Two projects that share a directory name would resolve to the same entry name; the second one configured appends a project hash automatically, so nothing is overwritten and no setting has to be turned on.
 - Local MCP server settings are stored in `UserSettings/FunplayMcpSettings.json`.
-- The package defaults to `core`: 40 focused tools for structured inspection/editing, UI audits and authoring, recoverable Editor preparation, shared task status, visual evidence, input and logs. Short MCP tasks can complete in one response; `get_task` supports bounded waits and state-change revisions. `execute_code` remains a project-specific fallback. `full` retains all 180 tools, including legacy status/compile/Play APIs, configuration, preview management and specialized diagnostics. Custom exposure lists are preserved; `get_tool_capabilities` distinguishes implementation from exposure.
+- The package defaults to `core`: 40 focused tools for structured inspection/editing, UI audits and authoring, recoverable Editor preparation, shared task status, visual evidence, input and logs. Short MCP tasks can complete in one response; `get_task` supports bounded waits and state-change revisions. `execute_code` remains a project-specific fallback. `full` retains all 185 tools, including legacy status/compile/Play APIs, verification management, reference transactions and specialized diagnostics. Custom exposure lists are preserved; `get_tool_capabilities` distinguishes implementation, exposure and relevant runtime backend availability.
+- Generated client URLs are project-scoped. Independently verify the initialize response's project identity before writes. Old root URLs remain readable but mutations require verified `expected_context`; mismatch performs no tool execution. See [execution trust and migration](Documentation~/execution-trust.md).
 - `execute_code` safety checks and the stricter filesystem guard are enabled by default from **Funplay > MCP Settings**. The guard blocks obvious destructive snippets, broad `System.IO` writes, raw file streams, and absolute/user/system/traversal paths, but it is not a complete sandbox. Clients may still override the default per call with the optional `safety_checks` argument.
 - Plugin debug logging is off by default and can also be enabled from **Funplay > MCP Settings**. Warnings and errors are always written to the Unity Console.
 - All exposed MCP tools run directly. There is no extra approval toggle.
@@ -329,17 +332,17 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 
 ## Why This Project
 
-- **`execute_code` First** — Optimized around one in-memory C# execution tool for rich editor/runtime orchestration. See [`execute_code`: In-Memory C# Execution](#execute_code-in-memory-c-execution) below for details.
+- **Structured Tools First** — Use specialized tools for common inspection/editing; retain in-memory `execute_code` for guarded project-specific gaps. See [`execute_code`: In-Memory C# Execution](#execute_code-in-memory-c-execution).
 - **Default Safety Checks** — `execute_code` now has persistent default-on safety toggles, including a stricter filesystem guard for clients that do not expose per-call arguments clearly
 - **Play Mode Automation** — Enter play mode, simulate keyboard/mouse input, capture screenshots, inspect logs, and validate behavior from the same MCP session
 - **Project Context Built In** — Exposes live resources for project state, active scene, selection, compilation, console output, and MCP interaction history
-- **Focused by Default, Full When Needed** — `core` exposes 40 focused tools; `full` exposes all 180 built-in tools
+- **Focused by Default, Full When Needed** — `core` exposes 40 focused tools; `full` exposes all 185 built-in tools
 - **Single Unity Package** — No extra approval UI, no external daemon to click through, and no Python requirement for the Unity-side plugin itself
 - **Extensible** — Add custom tools with attribute-based discovery, or connect Unity to external MCP services when needed
 
 ## Highlights
 
-- **180 Built-in Tools** — Scene editing, assets, scripts, play mode control, screenshots, performance analysis, prompts, resources, structured object location, SerializedObject-based component editing, editor-state inspection, menu-item fallback, and editor automation across 42 modules
+- **185 Built-in Tools** — Scene editing, assets, scripts, Play Mode control, visual evidence, structured inspection, guarded reference edits and bounded verification across 43 modules
 - **Structured Returns + `instanceId` Chaining** — Tools return `{success, message, data}` JSON with stable `instanceId` fields so agents can chain `by_id` calls reliably instead of re-resolving by name
 - **`IFunplayCommand` for `execute_code`** — New snippet template with auto-Undo (`ctx.RegisterObjectCreation/Modification/DestroyObject`), structured logs (`ctx.Log/LogWarning/LogError`), and a tracked changelog returned to the agent
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
@@ -409,7 +412,7 @@ The table below compares this repository with Unity Technologies' official `com.
 | License | MIT, open source | Unity Terms of Service, proprietary |
 | Deployment | Local HTTP MCP server in Editor, no cloud | Editor + native Relay subprocess + Unity Cloud backend |
 | Billing | Free, user brings their own AI client | Credits-based (Unity Dashboard) |
-| Tool exposure | 180 tools across 42 modules, `core` (40) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
+| Tool exposure | 185 tools across 43 modules, `core` (40) / `full` profiles | ~15 MCP tools (mostly `Manage*` families) |
 | Generic escape hatch | `execute_code` — Roslyn-first in-memory compile, `IFunplayCommand` + Undo, no sandbox (client-side approval) | `RunCommand` — namespace blacklist sandbox |
 | Play mode validation | Full loop: enter / simulate input / capture / read logs / exit | Enter/Exit only; no input simulation |
 | Asset generators | Not built-in (compose external APIs via `execute_code`) | Native Image / Mesh / PBR / Sound / Animation generators |
@@ -422,7 +425,7 @@ For a long-form comparison of the two approaches see [Funplay Unity MCP vs Unity
 
 The current open-source package exposes four high-value capability layers:
 
-- **Tools** — 180 total tools in `full`, 40 focused tools in `core`
+- **Tools** — 185 total tools in `full`, 40 focused tools in `core`
 - **Primary execution** — `execute_code` for rich editor/runtime orchestration
 - **Prompts** — parameterized workflow prompts: `edit_prefab_safely`, `verify_compilation`, `enter_play_and_recover`, `wire_serialized_references`, `create_playable_prototype`. Projects can add their own through `mcp-prompts/*.md` files in the project root.
 - **Resources** — project context, scene summaries, selection state, compile errors, console errors, MCP interaction history, plus resource templates for scene objects, components, and asset paths
@@ -444,7 +447,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Version 0.7.0 includes **180 tool functions** across 42 modules, with 40 high-frequency tools exposed by default.
+Version 0.7.1 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for identity migration, strict input, owned cleanup, reference preservation and evidence reuse.
 
 | Category | Tools |
 |----------|-------|
@@ -455,7 +458,7 @@ Version 0.7.0 includes **180 tool functions** across 42 modules, with 40 high-fr
 | **Scripts** | `create_script`, `edit_script`, `patch_script` |
 | **Assets** | `create_material`, `assign_material`, `find_assets`, `delete_asset`, `rename_asset`, `copy_asset` |
 | **Asset Import** | `get_asset_import_settings`, `set_asset_import_settings` |
-| **References** | `find_references`, `find_broken_references` |
+| **References** | `find_references`, `find_broken_references`, `patch_serialized_reference` |
 | **Mesh** | `get_mesh_info` |
 | **Materials** | `get_material_properties`, `set_material_property` |
 | **Files** | `read_file`, `write_file`, `search_files`, `list_directory`, `exists` |
@@ -469,7 +472,8 @@ Version 0.7.0 includes **180 tool functions** across 42 modules, with 40 high-fr
 | **UI** | `create_canvas`, `create_button`, `create_text`, `create_image`, `raycast_at_point`, `get_ui_defaults`, `configure_ui_defaults`, `create_project_ui` |
 | **UI Audit** | `audit_ui`, `get_ui_audit`, `cancel_ui_audit` |
 | **UI Preview** | `start_ui_preview_session`, `get_ui_preview_session`, `end_ui_preview_session` |
-| **Inspection** | `find_project_types`, `inspect_ui_sprites`, `get_tool_capabilities` |
+| **Inspection** | `find_project_types`, `inspect_ui_sprites`, `get_tool_capabilities`, `inspect_render_bindings` |
+| **Verification** | `verification_scope`, `save_verification_evidence`, `read_verification_evidence` (Full; status through `get_task`) |
 | **Visual Inspection** | `get_visual_coordinates`, `get_object_screen_bounds` |
 | **Animation** | `create_animation_clip`, `create_animator_controller`, `assign_animator`, `get_animator_state`, `set_animator_parameter`, `play_animator_state` |
 | **Camera** | `get_camera_properties`, `set_camera_projection`, `set_camera_settings`, `set_camera_culling_mask` |
@@ -539,7 +543,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (protocol handling)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (reflection-based invocation)
-                └─ Tool Functions (180 built-in tools across 42 modules)
+                └─ Tool Functions (185 built-in tools across 43 modules)
 ```
 
 ```

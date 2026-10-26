@@ -19,7 +19,7 @@ namespace Funplay.UnityMcp.Broker
     {
         // v4 acknowledges empty backend pushes with HTTP 202 and no body. Older brokers
         // are replaced on package upgrade. Keep in sync with MCPBrokerProtocol.Version.
-        private const int ProtocolVersion = 4;
+        private const int ProtocolVersion = 5;
         private const int PullTimeoutMs = 25000;
         private const long HoldDeadlineMs = 300000;
         private const int MaxHeaderBytes = 64 * 1024;
@@ -34,6 +34,7 @@ namespace Funplay.UnityMcp.Broker
         private const string BrokerHeader = "X-Funplay-Broker";
         private const string AcceptSseHeader = "X-Funplay-Broker-Accept-SSE";
         private const string ContentTypeHeader = "X-Funplay-Broker-Content-Type";
+        private const string ProjectHeader = "X-Funplay-Expected-Project";
         private const string AttachPath = "/_funplay/broker/attach";
         private const string DetachPath = "/_funplay/broker/detach";
 
@@ -67,6 +68,7 @@ namespace Funplay.UnityMcp.Broker
             public string ActiveSession;
             public bool Redelivered;
             public bool AcceptsSse;
+            public string ExpectedProject;
         }
 
         private sealed class Waiter
@@ -307,7 +309,27 @@ namespace Funplay.UnityMcp.Broker
             headers.TryGetValue("accept", out acceptHeader);
             var acceptsSse = !string.IsNullOrEmpty(acceptHeader) &&
                              acceptHeader.IndexOf("text/event-stream", StringComparison.OrdinalIgnoreCase) >= 0;
-            HandleClientRequest(client, stream, body, acceptsSse);
+            string expectedProject;
+            if (!TryProjectRoute(path, out expectedProject))
+            {
+                WriteResponse(stream, 400, "Bad Request", "application/json", null, "{\"error\":\"INVALID_MCP_ENDPOINT\"}");
+                SafeClose(client);
+                return;
+            }
+            HandleClientRequest(client, stream, body, acceptsSse, expectedProject);
+        }
+
+        private static bool TryProjectRoute(string target, out string project)
+        {
+            project = null;
+            var path = (target ?? "").Split('?')[0];
+            if (path == "/" || path == "/mcp" || path == "/mcp/") return true;
+            const string prefix = "/mcp/project/";
+            if (!path.StartsWith(prefix, StringComparison.Ordinal)) return false;
+            var id = path.Substring(prefix.Length).TrimEnd('/');
+            if (id.Length != 64) return false;
+            foreach (var c in id) if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return false;
+            project = id; return true;
         }
 
         private static void HandlePull(TcpClient client, NetworkStream stream, string session)
@@ -442,7 +464,7 @@ namespace Funplay.UnityMcp.Broker
             }
         }
 
-        private static void HandleClientRequest(TcpClient client, NetworkStream stream, string body, bool acceptsSse)
+        private static void HandleClientRequest(TcpClient client, NetworkStream stream, string body, bool acceptsSse, string expectedProject)
         {
             lock (Gate)
             {
@@ -460,7 +482,8 @@ namespace Funplay.UnityMcp.Broker
                     Stream = stream,
                     Body = body ?? string.Empty,
                     EnqueuedAt = NowMs(),
-                    AcceptsSse = acceptsSse
+                    AcceptsSse = acceptsSse,
+                    ExpectedProject = expectedProject
                 };
                 Queue.Add(reqId);
                 TryDispatch();
@@ -523,6 +546,7 @@ namespace Funplay.UnityMcp.Broker
                               ReqIdHeader + ": " + reqId + "\r\n" +
                               RedeliveryHeader + ": " + (pending.Redelivered ? "1" : "0") + "\r\n" +
                               AcceptSseHeader + ": " + (pending.AcceptsSse ? "1" : "0") + "\r\n";
+                if (pending.ExpectedProject != null) headers += ProjectHeader + ": " + pending.ExpectedProject + "\r\n";
                 try
                 {
                     WriteResponse(waiter.Stream, 200, "OK", "application/json; charset=utf-8", headers, pending.Body);

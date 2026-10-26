@@ -11,7 +11,7 @@ namespace Funplay.Editor.Tools.Builtins
         [ReadOnlyTool]
         public static object GetTask(
             [ToolParam("Namespaced task ID returned in data.task.task_id", Required = false)] string task_id = null,
-            [ToolParam("For request-key lookup: editor or ui_preview. Bare IDs additionally support ui_audit, recording, recording_frames, tests.", Required = false)] string kind = null,
+            [ToolParam("For request-key lookup: editor, ui_preview or verification. Bare IDs additionally support ui_audit, recording, recording_frames, tests, input.", Required = false)] string kind = null,
             [ToolParam("Original preparation/preview request key", Required = false)] string request_key = null,
             [ToolParam("Last data.task.revision; waits for a meaningful state change, not each progress counter", Required = false)] string after_revision = null,
             [ToolParam("MCP bounded wait, 0..30 seconds; zero returns immediately", Required = false)] int wait_seconds = 20,

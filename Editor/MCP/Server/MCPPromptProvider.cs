@@ -284,13 +284,13 @@ Guidance:
                     body =
 $@"Goal: confirm scripts compile cleanly{(paths != null ? $" after editing: {paths}" : " after external edits")}.
 
-1. If in Play Mode, exit_play_mode first; request_recompile is rejected in Play Mode.
-2. request_recompile
-3. wait_for_compilation
+1. Use an exposed prepare_editor(target=edit, refresh_assets=true, request_key=<unique key>).
+2. Retain data.task.task_id. If preparation is not terminal, use get_task with bounded waiting, honoring poll_after_ms.
+3. Require operation.status=ready and current_editor.ready=true (Editor readiness only).
 4. get_compilation_errors; if errors remain, patch the smallest safe regions and repeat from step 2.
 5. get_console_logs(group_duplicates=true) to catch load-time/initialization errors the compile check does not surface.
 
-Guidance: a domain reload can interrupt the request. If a call is interrupted, poll get_reload_recovery_status for the real outcome before assuming failure.";
+Guidance: a domain reload can interrupt the request. Recover the existing task by ID or kind=editor and request_key; do not assume an interrupted mutation failed.";
                     break;
                 }
 
@@ -301,12 +301,12 @@ Guidance: a domain reload can interrupt the request. If a call is interrupted, p
                     body =
 $@"Goal: reach a stable Play Mode to validate{(goal != null ? $": {goal}" : " a runtime change")}.
 
-1. If already playing, exit_play_mode first for a clean start.
-2. enter_play_mode
-3. The HTTP server briefly drops during the domain reload. Poll get_reload_recovery_status until it reports ready BEFORE issuing the next tool call.
+1. Inspect current mode and identify the actual authored scene. Do not restart a running session unless required and authorized.
+2. prepare_editor(target=play, request_key=<unique key>) when exposed.
+3. Recover the same task through get_task across reload. Require operation.status=ready, then inspect actual PlayerLoop progression separately from Editor readiness.
 4. Run the validation (inspect objects, read get_console_logs(group_duplicates=true)), then exit_play_mode when done.
 
-Guidance: treat any result between enter_play_mode and a confirmed recovery as unknown. Confirm via get_reload_recovery_status plus a readback; do not assume the interrupted tool failed or succeeded.";
+Guidance: treat an interrupted mutation as unknown until exact readback. Frame progression, dispatch success and business acceptance are different evidence layers.";
                     break;
                 }
 
@@ -339,7 +339,7 @@ $@"Goal: build a minimal playable prototype from: {idea}.
 2. Add input + control: create_script for behaviour, then request_recompile, wait_for_compilation, and get_compilation_errors before using the new types.
 3. Add minimal helper UI if needed (create_canvas / create_text / create_button).
 4. enter_play_mode.
-5. Poll get_reload_recovery_status until the server is ready, then inspect runtime objects and get_console_logs(group_duplicates=true).
+5. Recover the preparation task through exposed get_task, then inspect runtime objects, PlayerLoop progress and get_console_logs(group_duplicates=true).
 6. Capture a Game View image when visual verification matters, then exit_play_mode.
 
 Guidance: keep the scene minimal; save only the assets you intentionally create and read them back to confirm.";
@@ -354,6 +354,10 @@ Guidance: keep the scene minimal; save only the assets you intentionally create 
                 }
             }
 
+            if ((name == "verify_compilation" || name == "enter_play_and_recover") &&
+                (!MCPRecoveryGuidance.Allowed("prepare_editor") || !MCPRecoveryGuidance.Allowed("get_task")))
+                body = "The recoverable preparation workflow is not fully exposed by the current configuration. Inspect tools/list and available exact-state readers; do not widen custom exposure, guess hidden tools or replay an interrupted mutation. Report the missing preparation/status capability before changing Editor mode.";
+            body += "\n\n" + MCPRecoveryGuidance.Describe();
             var header = $"Unity project: {_projectName} ({_projectPath}).\n\n";
 
             var messages = new List<object>

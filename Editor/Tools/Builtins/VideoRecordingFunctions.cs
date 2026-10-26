@@ -59,8 +59,18 @@ namespace Funplay.Editor.Tools.Builtins
             [ToolParam("Target capture rate, 1-60 frames per second. Slow frames retain their real timestamps.", Required = false)] int fps = 15,
             [ToolParam("Maximum output width or height, 128-1920. Preserves aspect ratio without upscaling.", Required = false)] int max_dimension = 1280,
             [ToolParam("Recording ID returned by start. Recommended for status/stop to avoid controlling a newer recording.", Required = false)] string recording_id = null,
-            [ToolParam("MCP wait for stop/status, 0..30 seconds; start always returns immediately", Required = false)] int wait_seconds = 2)
-            => TaskStatusService.ValidateWait(wait_seconds) ?? TaskStatusService.Attach("recording", RecordCore(action, duration_seconds, fps, max_dimension, recording_id));
+            [ToolParam("MCP wait for stop/status, 0..30 seconds; start always returns immediately", Required = false)] int wait_seconds = 2,
+            [ToolParam("Optional active verification scope to own this recording", Required = false)] string verification_id = null)
+        {
+            var problem = TaskStatusService.ValidateWait(wait_seconds);
+            if (problem != null) return problem;
+            var ownerError = VerificationScope.ValidateOwner(verification_id);
+            if (ownerError != null) return Response.Error(ownerError);
+            var receipt = RecordCore(action, duration_seconds, fps, max_dimension, recording_id);
+            if (action == "start" && verification_id != null && Newtonsoft.Json.Linq.JObject.FromObject(receipt).Value<bool?>("success") == true)
+                VerificationScope.Enroll(verification_id, "recording", _last.recording_id);
+            return TaskStatusService.Attach("recording", receipt);
+        }
 
         private static object RecordCore(string action, int duration_seconds, int fps, int max_dimension, string recording_id)
         {
@@ -282,6 +292,8 @@ namespace Funplay.Editor.Tools.Builtins
             public int fps;
             public int duration_seconds;
             public int frame_count;
+            public Funplay.Editor.State.PlayerClockSample first_player_frame, last_player_frame;
+            public string execution_note = "Encoded video frames are not PlayerLoop frames; compare first/last_player_frame before accepting temporal behavior.";
             public double elapsed_seconds;
             public double last_frame_seconds;
             public bool has_audio;
@@ -354,6 +366,9 @@ namespace Funplay.Editor.Tools.Builtins
                     // positive. Anchor only the first frame at zero; subsequent gaps stay real.
                     var timestamp = _state.frame_count == 0 ? 0 : elapsed;
                     _sink.Capture(timestamp);
+                    var witness = Funplay.Editor.State.PlayerLoopWitness.Latest;
+                    if (_state.first_player_frame == null) _state.first_player_frame = witness;
+                    _state.last_player_frame = witness;
                     _state.frame_count++;
                     _state.last_frame_seconds = timestamp;
                     _nextFrame = elapsed + 1d / _state.fps;

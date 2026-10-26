@@ -2,8 +2,8 @@
 
 *[English](multi-project-setup.md)*
 
-打开两个不同工程的 Unity 编辑器，可以同时对外提供 MCP 服务。每个工程有自己的端口和自己在 AI
-客户端配置里的条目，因此一次工具调用只可能落到它本该去的那个编辑器上。
+打开两个不同工程的 Unity 编辑器，可以同时对外提供 MCP 服务。每个工程有自己的端口、工程绑定地址和 AI
+客户端配置条目。调用前仍须核对目标工程；地址中的工程身份能防止端口误路由，但不是身份认证。
 
 本文说明默认行为、MCP Server 窗口里的各项控件，以及哪些情况需要你做一次决定。
 
@@ -17,17 +17,17 @@
 2. 各点一次 **Configure**（先在下拉里选好客户端）。
 3. 重启 AI 客户端。
 
-此时客户端配置里每个工程各一条：
+此时客户端配置里每个工程各一条。以下 `<alpha-project-id>` / `<beta-project-id>` 必须替换为对应窗口显示的完整工程 ID，优先直接复制完整绑定地址：
 
 ```json
-"funplay-game-alpha": { "url": "http://127.0.0.1:24312/" },
-"funplay-game-beta":  { "url": "http://127.0.0.1:21874/" }
+"funplay-game-alpha": { "url": "http://127.0.0.1:24312/mcp/project/<alpha-project-id>/" },
+"funplay-game-beta":  { "url": "http://127.0.0.1:21874/mcp/project/<beta-project-id>/" }
 ```
 
 在按 server 给工具加命名空间的客户端里，工具名会变成 `mcp__funplay-game-alpha__execute_code` 和
-`mcp__funplay-game-beta__execute_code` —— 发错编辑器这件事从"需要小心"变成"结构上不可能"。
+`mcp__funplay-game-beta__execute_code`。命名空间有助于区分工程，但仍应先核对目标工程，再选择对应工具。
 
-> **从旧版本升级？** 端口不会动：工程会保留原本在用的端口，已配置好的客户端照旧可用。见
+> **从旧版本升级？** 固定端口会保留，但 v0.7.1 应重新配置工程绑定地址并重连；旧根地址的修改调用需要已核实的 `expected_context`。见
 > [从旧版本升级](#从旧版本升级)。
 
 ---
@@ -80,8 +80,8 @@
 （它没有写过这条的记录），于是**自动追加一小段工程哈希**：
 
 ```json
-"funplay-client":        { "url": "http://127.0.0.1:24312/" }
-"funplay-client-a3f9c1": { "url": "http://127.0.0.1:21874/" }
+"funplay-client":        { "url": "http://127.0.0.1:24312/mcp/project/<alpha-project-id>/" }
+"funplay-client-a3f9c1": { "url": "http://127.0.0.1:21874/mcp/project/<beta-project-id>/" }
 ```
 
 谁都不会被覆盖，也没有需要你去打开的开关。客户端配置面板会说明它加了哈希，那段后缀不会莫名
@@ -98,7 +98,7 @@
 | **Use Per-Project Port** | 释放 pin，回到派生端口。仅在已 pin 时显示。 |
 | 输入框下面那行小字 | 说明端口的来源：pin 的、派生的，还是因为解析出的端口被占而落在回退端口上。 |
 
-客户端配置面板会显示它将写入的条目（`Entry: funplay-game-alpha -> http://127.0.0.1:24312/`），
+客户端配置面板会显示它将写入的条目（`Entry: funplay-game-alpha -> http://127.0.0.1:24312/mcp/project/<alpha-project-id>/`），
 并说明自动追加的工程哈希。处于回退绑定时，预览会替换为安全阻止原因与两种恢复方式。
 
 ---
@@ -122,7 +122,7 @@ broker 内部是单租户的（单队列、单个等待中的后端），但这�
 ## 从旧版本升级
 
 已经有 `UserSettings/FunplayMcpSettings.json` 的工程，说明它本来就在某个端口上服务、客户端也已
-按它配好，因此升级会**把那个端口记为 pin，什么都不动**：不用重跑配置，条目名不变，工具名不变。
+按它配好，因此升级会保留那个固定端口。v0.7.1 另外引入工程绑定地址：请在原有蓝色 Skills 卡片中点击 **Reconfigure MCP + Skills**，然后重连客户端。旧根地址仍支持读取；修改则需要独立核对目标工程后提供 `expected_context`。
 
 也就是说，按工程派生只是**新工程**的默认值。要让一个老工程也用上，做三步：
 
@@ -172,7 +172,7 @@ lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(2[0-9]{4}|8765)'
 **直接探活某个端口：**
 
 ```bash
-curl -s -m 5 -X POST http://127.0.0.1:24312/mcp -H 'Content-Type: application/json' \
+curl -s -m 5 -X POST 'http://127.0.0.1:24312/mcp/project/<alpha-project-id>/' -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 

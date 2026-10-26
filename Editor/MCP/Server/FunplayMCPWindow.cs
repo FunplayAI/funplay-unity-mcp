@@ -16,6 +16,7 @@ namespace Funplay.Editor.MCP.Server
         private FunplayMCPUpdatePanel _updatePanel;
         private FunplayMCPProjectSkillsNoticePanel _projectSkillsNoticePanel;
         private FunplayMCPRecentActivityPanel _activityPanel;
+        private FunplayMCPClientConfigPanel _clientConfigPanel;
 
         [MenuItem("Funplay/MCP Server")]
         public static void ShowWindow()
@@ -79,7 +80,8 @@ namespace Funplay.Editor.MCP.Server
             _updatePanel = new FunplayMCPUpdatePanel();
             _updatePanel.AddTo(mainContainer);
 
-            _projectSkillsNoticePanel = new FunplayMCPProjectSkillsNoticePanel(_settingsController);
+            _projectSkillsNoticePanel = new FunplayMCPProjectSkillsNoticePanel(
+                _settingsController, () => _clientConfigPanel?.ReconfigureSelectedTargetAndSkills());
             _projectSkillsNoticePanel.AddTo(mainContainer);
 
             new FunplayMCPServerControlsPanel(
@@ -93,11 +95,12 @@ namespace Funplay.Editor.MCP.Server
                     () => _headerStatusPanel?.RefreshStatus())
                 .AddTo(mainContainer);
 
-            new FunplayMCPClientConfigPanel(
+            _clientConfigPanel = new FunplayMCPClientConfigPanel(
                     _settingsController,
                     _mcpServer,
-                    BuildUI)
-                .AddTo(mainContainer);
+                    BuildUI,
+                    _projectSkillsNoticePanel.ApplyConnectionState);
+            _clientConfigPanel.AddTo(mainContainer);
 
             _activityPanel = new FunplayMCPRecentActivityPanel(_mcpServer, _settingsController);
             _activityPanel.AddTo(mainContainer);
@@ -108,11 +111,13 @@ namespace Funplay.Editor.MCP.Server
             _activityPanel?.Dispose();
             _activityPanel = null;
             _projectSkillsNoticePanel = null;
+            _clientConfigPanel = null;
         }
 
         private void OnFocus()
         {
             _projectSkillsNoticePanel?.Refresh();
+            _clientConfigPanel?.RefreshStatus();
         }
 
         private void OnUpdateStateChanged()

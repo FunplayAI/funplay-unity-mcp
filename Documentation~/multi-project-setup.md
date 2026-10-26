@@ -3,8 +3,8 @@
 *[中文版](multi-project-setup.zh-CN.md)*
 
 Two Unity editors opened on different projects can both serve MCP at the same time. Each project
-gets its own port and its own entry in your AI client's config, so a tool call can only ever reach
-the editor it was meant for.
+gets its own port, project-bound URL and entry in your AI client's config. Verify the intended
+project before writes; the URL guard prevents accidental port misrouting, not authentication.
 
 This guide covers what happens by default, what the MCP Server window offers, and what to do in the
 cases that need a decision.
@@ -19,19 +19,20 @@ For **new projects** there is nothing to configure:
 2. Click **Configure** in each (pick your client in the dropdown first).
 3. Restart your AI client.
 
-Your client config now holds one entry per project:
+Your client config now holds one entry per project. Replace `<alpha-project-id>` / `<beta-project-id>`
+with each window's full project ID, or preferably copy its complete bound URL:
 
 ```json
-"funplay-game-alpha": { "url": "http://127.0.0.1:24312/" },
-"funplay-game-beta":  { "url": "http://127.0.0.1:21874/" }
+"funplay-game-alpha": { "url": "http://127.0.0.1:24312/mcp/project/<alpha-project-id>/" },
+"funplay-game-beta":  { "url": "http://127.0.0.1:21874/mcp/project/<beta-project-id>/" }
 ```
 
 In clients that namespace tools by server, the tools become `mcp__funplay-game-alpha__execute_code`
-and `mcp__funplay-game-beta__execute_code` — mixing the two up is structurally impossible rather
-than something you have to be careful about.
+and `mcp__funplay-game-beta__execute_code`. Names help distinguish projects; still independently
+verify the intended project before selecting its tools.
 
-> **Upgrading an existing project?** Nothing moves: your project keeps the port it was already
-> using, so existing client configs keep working. See [Upgrading](#upgrading-from-an-earlier-version).
+> **Upgrading an existing project?** The pinned port stays, but v0.7.1 should be reconfigured to its
+> bound URL and reconnected. Legacy root writes require verified `expected_context`. See [Upgrading](#upgrading-from-an-earlier-version).
 
 ---
 
@@ -90,8 +91,8 @@ is already taken by a project that is not itself — it has no record of writing
 short project hash automatically:
 
 ```json
-"funplay-client":        { "url": "http://127.0.0.1:24312/" }
-"funplay-client-a3f9c1": { "url": "http://127.0.0.1:21874/" }
+"funplay-client":        { "url": "http://127.0.0.1:24312/mcp/project/<alpha-project-id>/" }
+"funplay-client-a3f9c1": { "url": "http://127.0.0.1:21874/mcp/project/<beta-project-id>/" }
 ```
 
 Nothing is overwritten and there is no setting to turn on. The client config panel says when it
@@ -109,7 +110,7 @@ added a hash so the suffix is not a mystery.
 | The line under the field | Says where the port came from: pinned, derived, or serving on a fallback because the resolved port was in use. |
 
 The client config panel shows the entry it will write (`Entry: funplay-game-alpha ->
-http://127.0.0.1:24312/`) and notes an auto-added project hash. During a fallback bind it replaces
+http://127.0.0.1:24312/mcp/project/<alpha-project-id>/`) and notes an auto-added project hash. During a fallback bind it replaces
 that preview with the blocking safety explanation and the two recovery choices.
 
 ---
@@ -134,8 +135,10 @@ here: each project runs **its own** broker process on its own port.
 ## Upgrading from an earlier version
 
 A project that already has `UserSettings/FunplayMcpSettings.json` was already serving on a port your
-clients are configured against, so upgrading **records that port as a pin and changes nothing**. No
-re-configuration, no entry rename, no tool rename.
+clients are configured against, so upgrading preserves that pinned port. In v0.7.1, click
+**Reconfigure MCP + Skills** in the existing blue Skills card, then reconnect to load the project-bound
+URL. Legacy root URLs remain readable; writes require `expected_context` from an independently verified
+intended Editor. Keeping the port does not remove this URL migration requirement.
 
 Per-project derived ports are therefore the default for new projects only. To opt an existing
 project in:
@@ -189,7 +192,7 @@ lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(2[0-9]{4}|8765)'
 **Probe a port directly:**
 
 ```bash
-curl -s -m 5 -X POST http://127.0.0.1:24312/mcp -H 'Content-Type: application/json' \
+curl -s -m 5 -X POST 'http://127.0.0.1:24312/mcp/project/<alpha-project-id>/' -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 

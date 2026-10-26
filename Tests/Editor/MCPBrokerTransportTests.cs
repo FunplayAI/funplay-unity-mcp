@@ -746,10 +746,32 @@ namespace Funplay.Editor
 
         private const string SessionStaleEnvVar = "FUNPLAY_BROKER_SESSION_STALE_MS";
 
-        private static async Task<(HttpStatusCode Status, string Body, string ContentType)> SendRpcAsync(int port, string body, bool acceptsSse)
+        [UnityTest]
+        public IEnumerator ScopedProjectRouteSurvivesBrokerWithoutTrustingJsonBody()
+        {
+            var root = CreateTempRoot(); var paths = CreateBrokerPaths(root); int port = GetFreeTcpPort();
+            MCPBrokerClientTransport transport = null;
+            try
+            {
+                Assert.IsTrue(MCPBrokerProcessManager.EnsureRunning(port, string.Empty, paths), MCPBrokerProcessManager.LastError);
+                Assert.IsTrue(MCPBrokerProcessManager.TryGetConnectionInfo(paths, port, out var connection));
+                string observed = null;
+                transport = new MCPBrokerClientTransport(port, connection.Token);
+                transport.OnRequestReceived += (request, send) => { observed = request.TransportProjectId; send(CreateToolTextResponse(request.Id, "route captured")); };
+                var start = transport.StartAsync(); yield return WaitForTask(start); Assert.IsTrue(start.Result);
+                string project = new string('a', 64);
+                var call = SendRpcAsync(port, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"probe\",\"TransportProjectId\":\"spoofed\"}", false, "/mcp/project/" + project + "/");
+                yield return WaitForTask(call); Assert.AreEqual(HttpStatusCode.OK, call.Result.Status); Assert.AreEqual(project, observed);
+                var invalid = SendRpcAsync(port, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"probe\"}", false, "/mcp/project/not-a-project/");
+                yield return WaitForTask(invalid); Assert.AreEqual(HttpStatusCode.BadRequest, invalid.Result.Status);
+            }
+            finally { transport?.Dispose(); MCPBrokerProcessManager.Stop(paths); DeleteTempRoot(root); }
+        }
+
+        private static async Task<(HttpStatusCode Status, string Body, string ContentType)> SendRpcAsync(int port, string body, bool acceptsSse, string path = "/")
         {
             using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) })
-            using (var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/"))
+            using (var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + path))
             {
                 request.Headers.TryAddWithoutValidation("Accept", acceptsSse ? "application/json, text/event-stream" : "application/json");
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");

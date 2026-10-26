@@ -19,7 +19,8 @@ Funplay MCP for Unity is an open-source MCP server for the Unity Editor.
 
 ## Highlights
 
-- 180 built-in tool functions across 42 modules, with 40 high-frequency tools in default Core (v0.6.9)
+- 185 built-in tool functions across 43 modules, with 40 high-frequency tools in default Core (current development)
+- [Execution trust and verification](execution-trust.md): scoped project identity, actual frame/input evidence, owned cleanup, reference protection and checkpoint reuse
 - Asynchronous `record_game_view` video recording in the default `core` tool set: start, query status, or stop a silent Game View MP4, with automatic duration limits and domain-reload finalization (macOS/Windows Editor, Play Mode required)
 - Structured `{success, message, data}` JSON returns with stable `instanceId` fields so agents can chain `by_id` lookups
 - `IFunplayCommand` template for `execute_code` with auto-Undo, structured logs, and a returned changelog of created/modified/destroyed objects

@@ -19,7 +19,7 @@ namespace Funplay.Editor.MCP.Server
     internal static class MCPTaskWaiter
     {
         private static readonly string[] Waitable = { "get_task", "prepare_editor", "audit_ui", "start_ui_preview_session",
-            "end_ui_preview_session", "extract_recording_frames", "record_game_view", "run_tests" };
+            "end_ui_preview_session", "extract_recording_frames", "record_game_view", "run_tests", "simulate_mouse_click" };
 
         internal static int QueryBudget(Dictionary<string, object> arguments)
             => arguments.TryGetValue("wait_seconds", out var value) && int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out var seconds)

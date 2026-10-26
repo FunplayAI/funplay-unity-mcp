@@ -23,6 +23,7 @@ namespace Funplay.Editor.MCP.Server
         private readonly string _serverName;
         private readonly string _serverVersion;
         private readonly string _projectIdentity;
+        private readonly Dictionary<string, object> _contextMetadata;
 
         public MCPRequestHandler(
             MCPToolExporter toolExporter,
@@ -40,6 +41,9 @@ namespace Funplay.Editor.MCP.Server
             _serverName = string.IsNullOrWhiteSpace(serverName) ? "Funplay MCP Server" : serverName;
             _serverVersion = string.IsNullOrWhiteSpace(serverVersion) ? "0.0.0" : serverVersion;
             _projectIdentity = projectIdentity ?? string.Empty;
+            // Constructed with the Unity resource providers before the transport is opened.
+            // Initialize/cache identity on that Editor thread, not on an early pooled get_task.
+            _contextMetadata = MCPProjectContext.Metadata;
         }
 
         public async Task<MCPResponse> HandleRequestAsync(MCPRequest request, CancellationToken ct)
@@ -51,6 +55,10 @@ namespace Funplay.Editor.MCP.Server
 
                 if (request.JsonRpc != "2.0")
                     return CreateErrorResponse(request.Id, -32600, "Invalid Request: jsonrpc must be '2.0'");
+
+                if (!string.IsNullOrEmpty(request.TransportProjectId) && request.TransportProjectId != _projectIdentity)
+                    return request.Id == null ? null : CreateErrorResponse(request.Id, -32602,
+                        "PROJECT_CONTEXT_MISMATCH", _contextMetadata);
 
                 if (ShouldLogRequest(request.Method) && !MCPServerService.IsBoundedStatusRequest(request))
                     PluginDebugLogger.Log($"[Funplay MCP Server] Handling request: {request.Method}");
@@ -93,7 +101,8 @@ namespace Funplay.Editor.MCP.Server
                 ["funplay"] = new Dictionary<string, object>
                 {
                     ["projectIdentity"] = _projectIdentity,
-                    ["projectIdentityVersion"] = FunplayProjectIdentity.IdentityVersion
+                    ["projectIdentityVersion"] = FunplayProjectIdentity.IdentityVersion,
+                    ["context"] = _contextMetadata
                 },
                 ["capabilities"] = new Dictionary<string, object>
                 {
@@ -129,21 +138,26 @@ namespace Funplay.Editor.MCP.Server
                     return CreateErrorResponse(request.Id, -32602, "Invalid params: 'name' is required");
 
                 var arguments = request.Params.ContainsKey("arguments") && request.Params["arguments"] is Dictionary<string, object> args
-                    ? args
+                    ? new Dictionary<string, object>(args)
                     : new Dictionary<string, object>();
+                if (request.Params.TryGetValue("_meta", out var metadata) && metadata is Dictionary<string, object> meta &&
+                    meta.TryGetValue(MCPProjectContext.ExpectedArgument, out var expected) && !arguments.ContainsKey(MCPProjectContext.ExpectedArgument))
+                    arguments[MCPProjectContext.ExpectedArgument] = expected;
 
                 // The bounded status path starts on a pool thread. Avoid settings/Unity access
                 // in logging here; the bridge logs after marshalling the actual read.
                 if (!MCPServerService.IsBoundedStatusRequest(request))
                     PluginDebugLogger.Log($"[Funplay MCP Server] Calling tool: {toolName}");
-                var result = await _executionBridge.ExecuteToolAsync(toolName, arguments, ct).ConfigureAwait(false);
+                var result = await _executionBridge.ExecuteToolAsync(toolName, arguments, ct, request.TransportProjectId).ConfigureAwait(false);
 
                 return new MCPResponse
                 {
                     Id = request.Id,
                     Result = new Dictionary<string, object>
                     {
-                        ["content"] = BuildContentFromResult(result)
+                        ["content"] = BuildContentFromResult(result),
+                        ["_meta"] = new Dictionary<string, object> { ["context"] = _contextMetadata },
+                        ["isError"] = ToolResultFormatter.IsError(result)
                     }
                 };
             }

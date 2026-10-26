@@ -93,8 +93,12 @@ namespace Funplay.Editor.Tests
             RecordingEvidenceService.Control(jobId, "cleanup");
             Assert.IsTrue(File.Exists(recording.path));
         }
-        [UnityTest] public IEnumerator NativeDecoderReturnsActualTimesAndImagePixels()
+        [UnityTest] public IEnumerator NativeDecoderReturnsActualTimesAndImagePixels() => DecodeFrames(false);
+        [UnityTest] public IEnumerator InstalledDecoderReturnsActualTimesAndImagePixels() => DecodeFrames(true);
+        private IEnumerator DecodeFrames(bool external)
         {
+            if (external && InstalledVideoDecoder.Resolve() == null) Assert.Ignore("Already-installed ffmpeg required; tests never install it.");
+            if (!external && !RecordingEvidenceService.NativeDecoderAvailable) Assert.Ignore("Native decoder unavailable; explicit unsupported-path test covers this Editor.");
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null ||
                 Application.platform != RuntimePlatform.OSXEditor && Application.platform != RuntimePlatform.WindowsEditor)
                 Assert.Ignore("Needs the graphics-enabled macOS/Windows native encoder.");
@@ -115,7 +119,7 @@ namespace Funplay.Editor.Tests
                 }
             }
             finally { UnityEngine.Object.DestroyImmediate(frame); }
-            recording.bytes = new FileInfo(recording.path).Length; SaveReceipt(); Start("[0,0.1,0.8]");
+            recording.bytes = new FileInfo(recording.path).Length; SaveReceipt(); Start("[0,0.1,0.8]", external);
             var timeout = EditorApplication.timeSinceStartup + 30;
             while (RecordingEvidenceService.Find(jobId).status == "queued" || RecordingEvidenceService.Find(jobId).status == "decoding")
             {
@@ -124,6 +128,8 @@ namespace Funplay.Editor.Tests
             }
             var job = RecordingEvidenceService.Find(jobId);
             Assert.IsTrue(job.complete, job.error); Assert.AreEqual(3, job.frames.Count);
+            Assert.AreEqual(external ? "ffmpeg" : "unity", job.backend); Assert.AreEqual(64, job.source_sha256.Length);
+            if (external) { Assert.AreEqual(64, job.decoder_sha256.Length); Assert.That(job.decoder_version, Does.StartWith("ffmpeg version")); }
             var expected = new[] { 0, .2, .9 };
             for (int i = 0; i < 3; i++)
             {
@@ -153,9 +159,9 @@ namespace Funplay.Editor.Tests
             File.WriteAllBytes(recording.path, new byte[] { 0 }); recording.bytes = 1; SaveReceipt();
         }
         private void SaveReceipt() => File.WriteAllText(Path.Combine(RecordingDirectory, recording.recording_id + ".json"), JsonUtility.ToJson(recording));
-        private void Start(string times)
+        private void Start(string times, bool external = false)
         {
-            var result = JObject.FromObject(RecordingEvidenceService.Start(recording.recording_id, times));
+            var result = JObject.FromObject(RecordingEvidenceService.Start(recording.recording_id, times, external ? "ffmpeg" : "unity", external));
             Assert.IsTrue((bool)result["success"], result.ToString()); jobId = (string)result["data"]["job_id"];
         }
         private sealed class Sink : IVideoSink { public void Capture(double time) {} public long Complete() => 1; public void Dispose() {} }

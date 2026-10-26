@@ -355,6 +355,12 @@ namespace Funplay.Editor.MCP.Server
                         return;
                     }
 
+                    if (!MCPProjectContext.TryRoute(httpRequest.Target, out var routeProject))
+                    {
+                        await SendErrorResponseAsync(stream, request.Id, -32600, "INVALID_MCP_ENDPOINT", ct);
+                        return;
+                    }
+                    request.TransportProjectId = routeProject;
                     var requestReceived = OnRequestReceived;
                     if (requestReceived == null)
                     {
@@ -482,6 +488,7 @@ namespace Funplay.Editor.MCP.Server
             return new HttpRequestData
             {
                 Method = requestLineParts[0],
+                Target = requestLineParts.Length > 1 ? requestLineParts[1] : null,
                 AcceptsEventStream = acceptsEventStream,
                 Body = Encoding.UTF8.GetString(bodyBytes, 0, copied)
             };
@@ -708,6 +715,7 @@ namespace Funplay.Editor.MCP.Server
 
         private sealed class HttpRequestData
         {
+            public string Target;
             public string Method { get; set; }
             public bool AcceptsEventStream { get; set; }
             public string Body { get; set; }

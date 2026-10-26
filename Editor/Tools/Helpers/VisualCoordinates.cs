@@ -14,6 +14,7 @@ namespace Funplay.Editor.Tools.Helpers
     [Serializable] internal sealed class VisualGeometry
     {
         public int schema_version = 1;
+        public Funplay.Editor.MCP.Server.ProjectExecutionContext context;
         public string capture_id, captured_at, surface, view_id, editor_epoch, scene_signature, camera_signature;
         public string units = "pixels", image_origin = "top_left", render_origin = "bottom_left";
         public int render_width, render_height, output_width, output_height;
@@ -34,6 +35,7 @@ namespace Funplay.Editor.Tools.Helpers
             return new VisualGeometry
             {
                 capture_id = Guid.NewGuid().ToString("N"), captured_at = DateTime.UtcNow.ToString("O"), surface = surface,
+                context = Funplay.Editor.MCP.Server.MCPProjectContext.Current,
                 render_width = renderWidth, render_height = renderHeight, output_width = outputWidth, output_height = outputHeight,
                 viewport = new VisualRect { width = outputWidth, height = outputHeight },
                 output_to_render_x = (float)renderWidth / outputWidth, output_to_render_y = (float)renderHeight / outputHeight,

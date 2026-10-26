@@ -53,7 +53,18 @@ namespace Funplay.Editor.State
                     .Select(x => $"{x.file}({x.line},{x.column}): {x.message}"), Now);
         }
 
-        internal static object CurrentEditor() => Snapshot();
+        internal static object CurrentEditor()
+        {
+            var state = Snapshot();
+            return new {
+            is_compiling = state.is_compiling, is_updating = state.is_updating,
+            is_playing = state.is_playing, is_changing_play_mode = state.is_changing_play_mode,
+            compilation_failed = state.compilation_failed, refresh_pending = state.refresh_pending,
+            refresh_error = state.refresh_error, ready = state.ready,
+            readiness_scope = "editor_import_compile_mode_only", player = PlayerLoopWitness.Snapshot(),
+            context = Funplay.Editor.MCP.Server.MCPProjectContext.Current
+            };
+        }
         internal static EditorOperationSnapshot Snapshot() => new EditorOperationSnapshot
         {
             is_compiling = EditorApplication.isCompiling, is_updating = EditorApplication.isUpdating,

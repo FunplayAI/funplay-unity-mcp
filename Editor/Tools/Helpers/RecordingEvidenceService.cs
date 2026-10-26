@@ -19,11 +19,13 @@ namespace Funplay.Editor.Tools.Helpers
         public double requested_seconds, actual_seconds, delta_seconds;
         public string path;
         public int width, height;
+        public string sha256;
         public VisualGeometry geometry;
     }
     [Serializable] internal sealed class RecordingFramesJob
     {
         public string job_id, recording_id, status = "queued", error, started_at;
+        public string backend, source_sha256, decoder_path, decoder_sha256, decoder_version;
         public double[] timestamps;
         public List<RecordingFrame> frames = new List<RecordingFrame>();
         public int decoded_frames;
@@ -42,6 +44,7 @@ namespace Funplay.Editor.Tools.Helpers
         private static VideoRecordingFunctions.RecordingState source;
         private static double deadline, lastTimestamp;
         private static int nextRequest;
+        private static InstalledVideoDecoder external;
         static RecordingEvidenceService()
         {
             try { jobs = JsonConvert.DeserializeObject<List<RecordingFramesJob>>(SessionState.GetString(StateKey, "[]")) ?? new List<RecordingFramesJob>(); }
@@ -65,11 +68,18 @@ namespace Funplay.Editor.Tools.Helpers
                 throw new ArgumentException("Timestamps must be finite and within 0..last_frame_seconds. Markers after the final frame have no recorded visual evidence.");
             return times.Distinct().OrderBy(x => x).ToArray();
         }
-        internal static object Start(string recordingId, string timestamps)
+        internal static bool NativeDecoderAvailable => typeof(EditorWindow).Assembly.GetType("UnityEditorInternal.Media.MediaDecoder")?
+            .GetMethod("GetNextFrame", new[] { typeof(Texture2D), typeof(MediaTime).MakeByRefType() }) != null;
+        internal static object DecoderAvailability() => new { unity_decoder = NativeDecoderAvailable,
+            installed_ffmpeg = InstalledVideoDecoder.Resolve(), external_requires_explicit_opt_in = true,
+            note = "Read-only discovery, not an executed decoder test; no installation, Play transition or exposure change." };
+        internal static object Start(string recordingId, string timestamps, string backend = "auto", bool allowExternal = false, string decoderPath = null, string verificationId = null)
         {
             if (active != null) return Response.Error("FRAME_EXTRACTION_ACTIVE", active);
             try
             {
+                var ownerError = State.VerificationScope.ValidateOwner(verificationId); if (ownerError != null) return Response.Error(ownerError);
+                if (!new[] { "auto", "unity", "ffmpeg" }.Contains(backend)) return Response.Error("INVALID_DECODER_BACKEND");
                 var recording = VideoRecordingFunctions.FindRecording(recordingId);
                 if (recording == null) return Response.Error("RECORDING_NOT_FOUND");
                 if (!recording.ready) return Response.Error("RECORDING_NOT_READY", recording);
@@ -82,14 +92,24 @@ namespace Funplay.Editor.Tools.Helpers
                 // decoder interface; unsupported editor versions fail explicitly, with no shell tools.
                 var type = typeof(EditorWindow).Assembly.GetType("UnityEditorInternal.Media.MediaDecoder");
                 nextFrame = type?.GetMethod("GetNextFrame", new[] { typeof(Texture2D), typeof(MediaTime).MakeByRefType() });
-                if (nextFrame == null) return Response.Error("VIDEO_DECODER_UNAVAILABLE", new { hint = "This Unity Editor does not expose the supported MediaDecoder interface." });
-                active = new RecordingFramesJob { job_id = Guid.NewGuid().ToString("N"), recording_id = recordingId, timestamps = times, started_at = DateTime.UtcNow.ToString("O") };
+                bool useExternal = backend == "ffmpeg" || backend == "auto" && nextFrame == null;
+                if (!useExternal && nextFrame == null || useExternal && !allowExternal) return Response.Error("VIDEO_DECODER_UNAVAILABLE", new {
+                    availability = DecoderAvailability(), hint = "Use an already-installed ffmpeg only with allow_external_decoder=true, or review the original clip. No dependency is installed automatically." });
+                if (useExternal) external = new InstalledVideoDecoder(decoderPath);
+                active = new RecordingFramesJob { job_id = Guid.NewGuid().ToString("N"), recording_id = recordingId, timestamps = times, started_at = DateTime.UtcNow.ToString("O"),
+                    backend = useExternal ? "ffmpeg" : "unity", source_sha256 = SerializedReferenceTransaction.HashFile(recording.path),
+                    decoder_path = external?.Executable, decoder_sha256 = external?.ExecutableHash };
                 source = recording; jobs.Add(active); while (jobs.Count > 8) jobs.RemoveAt(0);
                 nextRequest = 0; lastTimestamp = -1; deadline = EditorApplication.timeSinceStartup + 120;
                 Save(); EditorApplication.update += Tick;
+                State.VerificationScope.Enroll(verificationId, "recording_frames", active.job_id);
                 return Response.Success("Frame extraction queued; poll until complete. No scene/Play Mode changes.", active);
             }
-            catch (Exception ex) { return Response.Error("INVALID_FRAME_EXTRACTION", new { detail = ex.GetBaseException().Message }); }
+            catch (Exception ex) {
+                if (active != null) Finish("failed", ex.GetBaseException().Message);
+                else { external?.Dispose(); external = null; }
+                return Response.Error("INVALID_FRAME_EXTRACTION", new { detail = ex.GetBaseException().Message });
+            }
         }
         internal static object Control(string id, string action)
         {
@@ -99,8 +119,8 @@ namespace Funplay.Editor.Tools.Helpers
             {
                 if (active == job) return Response.Error("FRAME_JOB_ACTIVE");
                 // Exact recorded files only. Never delete the source recording or an arbitrary directory.
-                foreach (var frame in job.frames)
-                    if (frame.path == FramePath(job, frame.index) && File.Exists(frame.path)) File.Delete(frame.path);
+                for (int i = 0; i < job.timestamps.Length; i++)
+                    if (File.Exists(FramePath(job, i))) File.Delete(FramePath(job, i));
                 job.status = "cleaned"; job.complete = false; Save();
             }
             else if (action != "status" && action != "cancel") return Response.Error("INVALID_FRAME_ACTION");
@@ -110,6 +130,7 @@ namespace Funplay.Editor.Tools.Helpers
         {
             var job = Find(id); var frame = job?.frames.FirstOrDefault(x => x.index == index);
             if (frame == null || frame.path != FramePath(job, index) || !File.Exists(frame.path)) return Response.Error("FRAME_NOT_AVAILABLE");
+            if (frame.sha256 != null && SerializedReferenceTransaction.Hash(File.ReadAllBytes(frame.path)) != frame.sha256) return Response.Error("FRAME_FILE_CHANGED");
             bool inlineFallback = inline && new FileInfo(frame.path).Length > ScreenshotFunctions.MaxInlineScreenshotBytes;
             var bytes = inline && !inlineFallback ? File.ReadAllBytes(frame.path) : null;
             return Response.Success("Recorded frame; historical evidence, not current clickable geometry.", new
@@ -124,10 +145,12 @@ namespace Funplay.Editor.Tools.Helpers
         private static void Tick()
         {
             if (active == null) return;
+            if (active.status == "cleanup_pending") return;
             try
             {
                 if (EditorApplication.timeSinceStartup > deadline) { Finish("failed", "FRAME_EXTRACTION_TIMEOUT"); return; }
                 if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+                if (external != null) { TickExternal(); return; }
                 if (decoder == null)
                 {
                     decoder = (IDisposable)Activator.CreateInstance(nextFrame.DeclaringType, new object[] { source.path });
@@ -157,7 +180,7 @@ namespace Funplay.Editor.Tools.Helpers
                         frame.geometry.capture_id = active.job_id + ":" + nextRequest;
                         frame.geometry.note = "Historical recording geometry. Captured_at refers to recording start; use frame.actual_seconds for the presentation timestamp. Never use this ID for live clicks.";
                         Directory.CreateDirectory(Path.GetDirectoryName(frame.path));
-                        File.WriteAllBytes(frame.path, texture.EncodeToPNG()); active.frames.Add(frame); nextRequest++;
+                        var png = texture.EncodeToPNG(); File.WriteAllBytes(frame.path, png); frame.sha256 = SerializedReferenceTransaction.Hash(png); active.frames.Add(frame); nextRequest++;
                         Save();
                     }
                     if (nextRequest == active.timestamps.Length) { Finish("completed", null); return; }
@@ -165,15 +188,48 @@ namespace Funplay.Editor.Tools.Helpers
             }
             catch (Exception ex) { Finish("failed", ex.GetBaseException().Message); }
         }
+        private static bool externalFrameStarted;
+        private static void TickExternal()
+        {
+            active.status = "decoding";
+            if (!externalFrameStarted)
+            {
+                external.StartFrame(source.path, active.timestamps[nextRequest], FramePath(active, nextRequest));
+                externalFrameStarted = true; Save(); return;
+            }
+            if (!external.TryComplete(out var actual)) return;
+            externalFrameStarted = false; active.decoder_version = external.Version;
+            if (actual + .000001 < active.timestamps[nextRequest] || double.IsNaN(actual) || double.IsInfinity(actual)) throw new InvalidDataException("INVALID_DECODED_TIMESTAMP");
+            string path = FramePath(active, nextRequest);
+            var png = File.ReadAllBytes(path);
+            var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            try
+            {
+                if (!decoded.LoadImage(png) || decoded.width != source.width || decoded.height != source.height) throw new InvalidDataException("DECODED_GEOMETRY_MISMATCH");
+                var geometry = source.geometry != null ? JsonUtility.FromJson<VisualGeometry>(JsonUtility.ToJson(source.geometry)) :
+                    VisualCoordinates.Create("recording_frame", source.width, source.height, decoded.width, decoded.height, false);
+                geometry.interactive = false; geometry.surface = "recording_frame"; geometry.capture_id = active.job_id + ":" + nextRequest;
+                active.frames.Add(new RecordingFrame { index = nextRequest, path = path, requested_seconds = active.timestamps[nextRequest], actual_seconds = actual,
+                    delta_seconds = actual - active.timestamps[nextRequest], width = decoded.width, height = decoded.height, geometry = geometry, sha256 = SerializedReferenceTransaction.Hash(png) });
+                active.decoded_frames++; nextRequest++; Save();
+                if (nextRequest == active.timestamps.Length) Finish("completed", null);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(decoded); }
+        }
         private static void Finish(string status, string error)
         {
             if (active == null) return;
             active.status = status; active.complete = status == "completed"; active.error = error;
-            try { decoder?.Dispose(); }
+            try { decoder?.Dispose(); external?.Dispose(); }
+            catch (Exception ex) { active.status = "cleanup_pending"; active.error = ex.Message; active.complete = false; Save(); return; }
+            try {
+                if (status == "completed" && (source == null || !File.Exists(source.path) || SerializedReferenceTransaction.HashFile(source.path) != active.source_sha256))
+                    throw new InvalidDataException("SOURCE_VIDEO_CHANGED_DURING_DECODE");
+            }
             catch (Exception ex) { active.error = active.error ?? ex.Message; active.status = "failed"; active.complete = false; }
             finally
             {
-                decoder = null;
+                decoder = null; external = null; externalFrameStarted = false;
                 if (texture != null) UnityEngine.Object.DestroyImmediate(texture);
                 texture = null; source = null; active = null;
                 EditorApplication.update -= Tick; Save();

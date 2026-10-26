@@ -26,7 +26,7 @@ receipts immediately. Unity updates continue while the MCP response is pending.
 
 Every start preserves its original ID/payload and adds `data.task`, including the namespaced
 `task_id`, `status`, `phase`, `revision`, `wait_complete`, `snapshot_at` and `poll_after_ms`.
-Use `get_task` for `editor`, `ui_audit`, `ui_preview`, `recording`, `recording_frames` or `tests`:
+Use `get_task` for `editor`, `ui_audit`, `ui_preview`, `recording`, `recording_frames`, `tests`, `input` or `verification`:
 
 ```json
 {"tool":"get_task","arguments":{"task_id":"ui_audit:<returned-id>","after_revision":"<last revision>","wait_seconds":20,"offset":0,"limit":100}}

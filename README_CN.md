@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.0"
+    "com.gamebooom.unity.mcp": "0.7.1"
   }
 }
 ```
@@ -87,9 +87,9 @@ openupm add com.gamebooom.unity.mcp
 
 **菜单：Funplay → MCP Server** 启动服务。
 
-新工程使用**按工程路径派生的独立端口**，因此同时打开两个工程的编辑器不会互相抢端口。MCP Server 窗口会显示实际地址（`http://127.0.0.1:<端口>/`），一键配置会把该地址写进客户端配置。需要固定端口（CI / 防火墙规则）时在 **Server Port** 里填一个即可 pin 住，点 **Use Per-Project Port** 改为按工程派生。
+新工程使用**按工程路径派生的独立端口**，因此同时打开两个工程的编辑器不会互相抢端口。MCP Server 窗口会显示实际地址（`http://127.0.0.1:<端口>/mcp/project/<工程ID>/`），一键配置会把该地址写进客户端配置。需要固定端口（CI / 防火墙规则）时在 **Server Port** 里填一个即可 pin 住，点 **Use Per-Project Port** 改为按工程派生。
 
-从旧版本升级不会有任何变化：工程会保留原来在用的端口（记为 pin），已配置的客户端照旧可用。等到需要让该工程与另一个编辑器同时服务时，再点一次 **Use Per-Project Port** 即可。完整配置指南见 [同时开多个 Unity 工程](Documentation~/multi-project-setup.zh-CN.md)。
+升级会保留原来使用的固定端口，但 v0.7.1 生成的地址会绑定工程身份。旧根地址仍可读取状态，修改操作则需要独立核对目标工程后传入 `expected_context`。建议在原有蓝色 Skills 提示卡片中点击 **Reconfigure MCP + Skills**，然后重连客户端。需要让该工程与另一个编辑器同时服务时，可再点 **Use Per-Project Port**。完整配置指南见 [同时开多个 Unity 工程](Documentation~/multi-project-setup.zh-CN.md)。
 
 如果窗口显示当前使用回退端口，不要继续使用仍指向被占稳定端口的客户端条目；它可能连到占着该端口的另一个进程。一键配置会保持阻止，直到你点 **Use Per-Project Port** 或 **Pin Current Port**，并等服务器完成重启。
 
@@ -111,7 +111,9 @@ openupm add com.gamebooom.unity.mcp
 
 v0.7.0 保留这两个内置 skills，参考 [Unity 官方插件 0.1.8-beta](https://github.com/Unity-Technologies/unity-agent-plugin/tree/cf6b2da24e424b0a60d560a57f39f676cb6f79f3) 融合四份按需说明：UI 框架识别、Sprite 导入安全、TMP/本地化验证、包安装就绪判定。AI 只需读取当前任务相关的说明，不增加默认工具或技能数量；MCP 优先、沿用项目习惯、保护预制体及设计图还原规则保持有效。已有安装请通过 **Project Skills** 更新；参考文件缺失或过旧也会触发更新提示，用户自有的参考文件不会被覆盖。
 
-如果你更想手动编辑配置文件，再参考下面这些示例（把 `<project>` 换成本工程的条目名、`<port>` 换成本工程端口——MCP Server 窗口里两者都有显示）：
+v0.7.1 为两个内置技能补充执行可信度指引，包括工程身份、实际帧推进、严格输入路径、验证环境清理和 Unity 原生阻塞弹窗的有限处理。连接与 Skills 问题统一显示在原有蓝色卡片中，右侧只有一个 **Reconfigure MCP + Skills** 操作；只解决其中一项不会掩盖另一项。详见[执行可信度与迁移](Documentation~/execution-trust.md)。
+
+如果需要手动配置，把 `<project>` 替换为工程条目名、`<port>` 替换为工程端口、`<project-id>` 替换为完整绑定地址中的工程 ID；请从目标工程的 MCP Server 窗口复制，不要使用其他编辑器的地址：
 
 <details>
 <summary>Claude Code / Claude Desktop</summary>
@@ -121,7 +123,7 @@ v0.7.0 保留这两个内置 skills，参考 [Unity 官方插件 0.1.8-beta](htt
   "mcpServers": {
     "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -136,7 +138,7 @@ v0.7.0 保留这两个内置 skills，参考 [Unity 官方插件 0.1.8-beta](htt
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -153,7 +155,7 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -169,7 +171,7 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
   "servers": {
     "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -184,7 +186,7 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -200,7 +202,7 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
   "mcpServers": {
     "funplay-<project>": {
       "type": "http",
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -217,7 +219,7 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 {
   "mcpServers": {
     "funplay-<project>": {
-      "url": "http://127.0.0.1:<port>/"
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -230,7 +232,7 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 
 ```toml
 [mcp_servers.funplay-<project>]
-url = "http://127.0.0.1:<port>/"
+url = "http://127.0.0.1:<port>/mcp/project/<project-id>/"
 ```
 
 </details>
@@ -245,7 +247,7 @@ url = "http://127.0.0.1:<port>/"
   "mcp": {
     "funplay-<project>": {
       "type": "remote",
-      "url": "http://127.0.0.1:<port>/",
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/",
       "enabled": true
     }
   }
@@ -268,7 +270,7 @@ url = "http://127.0.0.1:<port>/"
       config:
         serverName: funplay-<project>
         transport: streamable-http
-        url: http://127.0.0.1:<port>/
+        url: http://127.0.0.1:<port>/mcp/project/<project-id>/
 # <<< funplay-mcp:funplay-<project> end
 ```
 
@@ -287,7 +289,7 @@ url = "http://127.0.0.1:<port>/"
 {
   "mcpServers": {
     "funplay-<project>": {
-      "serverUrl": "http://127.0.0.1:<port>/"
+      "serverUrl": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
     }
   }
 }
@@ -321,9 +323,9 @@ url = "http://127.0.0.1:<port>/"
 ## 开始前说明
 
 - 这是一个 **仅限 Editor** 的包，不会向最终构建产物添加运行时代码。
-- MCP Server 端口对**新工程**按工程派生（20000-29999 区间）；从旧版本升级的工程会保留原端口并记为 pin，手填的端口同样是 pin。MCP Server 窗口会显示端口来源与当前实际地址。客户端配置里的条目名按**工程目录名**命名（例如 `funplay-love-town`，只保留 ASCII 字母数字），多个工程不再互相覆盖同一个 `funplay` 条目。两个工程产品名相同时会解析出同一个条目名，此时后配置的那个会**自动追加工程哈希**，既不会覆盖对方，也不需要用户去开任何开关。
+- MCP Server 端口对**新工程**按工程派生（20000-29999 区间）；从旧版本升级的工程会保留原端口并记为 pin，手填的端口同样是 pin。MCP Server 窗口会显示端口来源与当前实际地址。客户端配置里的条目名按**工程目录名**命名（例如 `funplay-love-town`，只保留 ASCII 字母数字），多个工程不再互相覆盖同一个 `funplay` 条目。两个工程目录名相同时会解析出同一个条目名，此时后配置的那个会**自动追加工程哈希**，既不会覆盖对方，也不需要用户去开任何开关。
 - 本地 MCP Server 配置保存在 `UserSettings/FunplayMcpSettings.json`。
-- v0.7.0 默认 `core` 精选 40 个工具，覆盖结构化检查与修改、UI 巡检和创建、可恢复的编译准备、统一任务查询、视觉证据、输入和日志。短任务可一次返回结果，`get_task` 支持有限等待、状态变化后返回和退避提示；`execute_code` 保留为项目特定逻辑的兜底。`full` 保留全部 180 个工具，包括原有状态、编译与 Play 接口，以及配置、预览管理和专项诊断。已有自定义暴露列表不会被覆盖，可用 `get_tool_capabilities` 区分“已实现”和“已暴露”。升级后请通过 Project Skills 更新已安装的内置技能。
+- v0.7.1 默认 `core` 精选 40 个工具，覆盖结构化检查与修改、UI 巡检和创建、可恢复的编译准备、统一任务查询、视觉证据、输入和日志。短任务可一次返回结果，`get_task` 支持有限等待、状态变化后返回和退避提示；`execute_code` 保留为项目特定逻辑的兜底。`full` 保留全部 185 个工具，包括原有状态、编译与 Play 接口，以及配置、预览管理和专项诊断。已有自定义暴露列表不会被覆盖，可用 `get_tool_capabilities` 区分“已实现”和“已暴露”。升级后请通过 Project Skills 更新已安装的内置技能。
 - `execute_code` safety checks 和更严格的文件系统 guard 现在可在 **Funplay > MCP Settings** 设置默认值，默认开启；它会阻止明显破坏性片段、宽泛的 `System.IO` 写入、原始文件流、绝对路径、用户/系统目录路径和 `../` 穿越路径，但它不是完整沙箱。客户端仍可在单次调用中用可选 `safety_checks` 参数显式覆盖。
 - 插件 debug 日志默认关闭，也可在 **Funplay > MCP Settings** 中开启；Warning 和 Error 始终会输出到 Unity Console。
 - 所有已暴露的 MCP 工具都会直接执行，不再提供额外的 approval 开关。
@@ -331,17 +333,17 @@ url = "http://127.0.0.1:<port>/"
 
 ## 能力概览
 
-- **`execute_code` 主工具优先** — 核心体验围绕一个内存 C# 执行工具构建，适合复杂编辑器/运行态编排。详见下方 [`execute_code`：内存 C# 执行](#execute_code内存-c-执行)。
+- **结构化工具优先** — 常规检查和修改优先使用已有工具，`execute_code` 用作项目特定逻辑的内存 C# 兜底。详见下方 [`execute_code`：内存 C# 执行](#execute_code内存-c-执行)。
 - **默认安全检查** — `execute_code` 现在有持久化、默认开启的 safety toggle，并包含更严格的文件系统 guard，适合 LM Studio 这类不明显暴露单次参数的客户端
 - **Play Mode 自动化闭环** — 进入运行模式、模拟键鼠输入、截图、查看日志、验证行为都能在同一 MCP 会话里完成
 - **内建项目上下文** — 直接提供项目状态、当前场景、选择对象、编译错误、控制台输出和 MCP 交互记录资源
-- **默认聚焦，必要时全量** — 默认 `core` 工具集更利于 AI 选工具，需要时可切到 `full` 暴露开发版的全部 180 个工具
+- **默认聚焦，必要时全量** — 默认 `core` 工具集更利于 AI 选工具，需要时可切到 `full` 暴露全部 185 个工具
 - **单 Unity 包落地** — 不需要额外 approval 开关，Unity 侧也不依赖单独 Python 守护进程
 - **可扩展** — 支持 Attribute 发现自定义工具，也支持连接外部 MCP 服务
 
 ## 核心特性
 
-- **180 个内置工具** — 覆盖场景编辑、脚本、资产、运行态控制、截图、性能分析、Prompts、Resources、结构化对象定位、SerializedObject 组件编辑、编辑器状态读写、菜单项兜底以及编辑器自动化，共 42 个模块
+- **185 个内置工具** — 覆盖场景编辑、脚本、资产、运行态控制、截图、性能分析、Prompts、Resources、结构化对象定位、SerializedObject 组件编辑、编辑器状态读写、菜单项兜底以及编辑器自动化，共 43 个模块
 - **结构化返回 + `instanceId` 链式调用** — 工具返回 `{success, message, data}` JSON 并附带稳定的 `instanceId`，agent 后续直接 `by_id` 调用，不再受重名困扰
 - **`execute_code` 的 `IFunplayCommand` 模板** — 新模板自动 Undo（`ctx.RegisterObjectCreation/Modification/DestroyObject`）、结构化日志（`ctx.Log/LogWarning/LogError`），并把改动列表回传给 agent
 - **Resources 与 Prompts** — 暴露实时项目上下文、场景/选择/错误资源、资源模板，以及常见 Unity 工作流的可复用 MCP Prompt
@@ -411,7 +413,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 | 协议 / License | MIT 开源 | Unity Terms of Service，私有 |
 | 部署 | Editor 内嵌 HTTP MCP server，纯本地 | Editor + 原生 Relay 子进程 + Unity Cloud 后端 |
 | 计费 | 免费，用户自带 AI 客户端 | Credits 点数制（Unity Dashboard）|
-| 工具暴露 | 开发版 180 工具 / 42 模块，`core` (40) / `full` profile | ~15 个 MCP 工具（多数为 `Manage*` 大粒度族）|
+| 工具暴露 | 185 工具 / 43 模块，`core` (40) / `full` profile | ~15 个 MCP 工具（多数为 `Manage*` 大粒度族）|
 | 通用逃生口 | `execute_code` — Roslyn 优先内存编译、`IFunplayCommand` + Undo、无沙箱（客户端层审批）| `RunCommand` — 命名空间黑名单沙箱 |
 | Play Mode 验证 | 完整闭环：进入 / 模拟输入 / 截图 / 读日志 / 退出 | 仅进入/退出，无输入模拟 |
 | 资产生成器 | 不内建（通过 `execute_code` 组合外部 API）| 内建 Image / Mesh / PBR / Sound / Animation 五类生成器 |
@@ -424,7 +426,7 @@ Coplay 信息来源：[CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-m
 
 当前开源包有四层高价值能力：
 
-- **Tools** — 开发版 `full` 下共 180 个工具，`core` 下 40 个高频工具
+- **Tools** — `full` 下共 185 个工具，`core` 下 40 个高频工具
 - **Primary execution** — `execute_code` 用于复杂编辑器/运行态编排
 - **Prompts** — 参数化工作流 Prompt：`edit_prefab_safely`、`verify_compilation`、`enter_play_and_recover`、`wire_serialized_references`、`create_playable_prototype`。项目可通过根目录下的 `mcp-prompts/*.md` 注册专属 Prompt。
 - **Resources** — 项目上下文、场景摘要、选择状态、编译错误、控制台错误、MCP 交互记录，以及按对象/组件/资源路径展开的模板资源
@@ -446,7 +448,7 @@ Prompt 名称和参数名必须匹配 `[a-z][a-z0-9_-]{0,63}`。`prompts/get` �
 
 ## 内置工具
 
-v0.7.0 提供 **180 个工具函数**，覆盖 42 个模块，默认暴露其中 40 个高频工具。
+v0.7.1 提供 **185 个工具函数**，覆盖 43 个模块，默认暴露其中 40 个高频工具。
 
 新增 UI 工作流包括：`prepare_editor` 持久任务、`audit_ui` 只读巡检、组件属性查询和 Sprite 关联检查、统一截图/输入坐标、项目级 TMP/字体材质/预制体/输入模块默认值、录屏动作标记与关键帧提取，以及可恢复的预览会话。详见 [完整工作流指南](Documentation~/ui-workflows.md) 和 [实现与验证清单](Documentation~/ui-workflow-upgrade-plan.md)。两项内置 skills 也已同步这些规则，仍为 built-in；已有安装可通过 Project Skills 更新。
 
@@ -541,7 +543,7 @@ MCP Server (HTTP JSON-RPC 2.0)
     └─ MCPRequestHandler (协议处理)
         └─ MCPExecutionBridge
             └─ FunctionInvokerController (反射式调用)
-                └─ Tool Functions (180 个内置工具，42 个模块)
+                └─ Tool Functions (185 个内置工具，43 个模块)
 ```
 
 ```

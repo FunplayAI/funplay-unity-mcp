@@ -652,6 +652,10 @@ namespace Funplay.Editor.MCP.Server
                 return null;
             }
 
+            // A redelivery must not borrow a recovery receipt from a different project.
+            if (!string.IsNullOrEmpty(request.TransportProjectId) && request.TransportProjectId != MCPProjectContext.Current.project_id)
+                return new MCPResponse { Id = request.Id, Error = new MCPError { Code = -32602, Message = "PROJECT_CONTEXT_MISMATCH" } };
+
             var toolName = GetToolName(request);
             if (string.Equals(toolName, "get_reload_recovery_status", StringComparison.OrdinalIgnoreCase) || IsBoundedStatusRequest(request))
                 return null;
@@ -679,7 +683,7 @@ namespace Funplay.Editor.MCP.Server
                     "' was interrupted by Unity domain reload. Broker mode kept the HTTP request alive, " +
                     "but the original Unity AppDomain was unloaded before it could send a response. " +
                     "The tool was not re-run automatically to avoid duplicate side effects. " +
-                    "Call get_reload_recovery_status, then retry only if more work is needed.";
+                    MCPRecoveryGuidance.Describe();
                 isError = true;
             }
 

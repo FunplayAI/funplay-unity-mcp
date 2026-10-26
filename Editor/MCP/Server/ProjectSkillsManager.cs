@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.6",
+                "1.0.7",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,
@@ -48,6 +48,7 @@ namespace Funplay.Editor.MCP.Server
                 {
                     "Use Unity MCP as the source of truth for Editor state, scene hierarchy, prefab references, runtime objects, compilation status, and Play Mode behavior.",
                     "Locate the real Unity project root and active scene before editing.",
+                    "Independently match the connected initialize context's project_path/project_id to the intended project before writes. Prefer project-scoped endpoints; use verified expected_context on legacy URLs. Preserve project/session/reload identity on evidence, and treat a mismatch as a stop condition, not a reason to fall back to another interaction method.",
                     "Inspect hierarchy, prefab paths, selected objects, and relevant component references through MCP before changing user-named objects. Treat user-provided object names as hints, not paths.",
                     "Tool returns are structured JSON: `{success, message, data}` for success and `{success: false, code, error, data}` for errors. Parse `data` and check `code` (UPPERCASE_SNAKE_CASE) for branching — do not pattern-match free-form text.",
                     "Prefer `instanceId` returned by tools for follow-up calls and pass it back with explicit `find_method=by_id`. This is more reliable than re-resolving by `name` when scenes contain duplicates.",
@@ -68,6 +69,7 @@ namespace Funplay.Editor.MCP.Server
                     "`execute_code` refreshes by default. Use skip_refresh only after independently verifying that the intended assemblies are ready, for example when initiating a test that must not be interrupted by another refresh.",
                     "After source/resource edits use `prepare_editor` with the intended edit/play target and a unique request_key; retain data.task.task_id and use `get_task` with bounded waiting and the last revision. Require operation.status=ready, current_editor.ready=true and the expected current mode before validation.",
                     "Check compiler errors, console exceptions and project initialization separately from Editor preparation.",
+                    "Separate Editor readiness, actual PlayerLoop frame/clock progression, input fidelity, rendered correctness and application acceptance. Encoded video frames and dispatched UI/physics events do not prove gameplay advanced or legacy Input Down/Held/Up occurred. For scoped verification, risky references or continuation evidence, read the execution-trust reference.",
                     "After a dropped connection, retry the operation status read using the same ID/key. Historical reload recovery and HTTP reachability alone do not establish current readiness.",
                     "`request_recompile` is rejected while Unity is in Play Mode — Unity does not process script compilation or domain reloads while playing. Call `exit_play_mode` first, then retry `request_recompile`.",
                     "If an arbitrary edit is interrupted, its result remains unknown until exact object/asset readback establishes what executed; preparation IDs do not make arbitrary scripts replay-safe.",
@@ -81,7 +83,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.8",
+                "1.0.9",
                 "Unity UI Composition",
                 "Build and revise Unity UI, primarily uGUI mobile page prefabs, with framework-aware routing, Sprite import safety, text effects, localization and visual verification.",
                 true,
@@ -110,6 +112,7 @@ namespace Funplay.Editor.MCP.Server
                     "Prefer serialized component references and stable semantic names over Transform.Find paths or default duplicate names.",
                     "Validate hierarchy and exact RectTransform values through Unity, then test screenshots, interaction, safe areas, localization, and reopen behavior in Device Simulator and representative real-device builds.",
                     "Use screenshots for static layout and short `record_game_view` clips for transitions, scrolling, caret blinking, animation interruption, or close and reopen behavior; start before the relevant interaction, wait for `data.ready=true`, and review the actual clip before reporting temporal behavior as verified.",
+                    "Verify the actual authored scene and camera with advancing PlayerLoop frames. UI handler dispatch, synthetic input edges, encoded frames and correct-looking fixture overlays are separate evidence layers; none alone proves the requested in-game behavior. For material defects trace actual shared render slots, prefab overrides, particle trails, textures, masks and camera context without instantiating materials during inspection.",
                     "Profile before optimizing; split static and frequently changing UI into a small number of purposeful canvases, atlas compatible sprites, reduce overdraw, and avoid unnecessary layout rebuilds."
                 }),
         };
@@ -1417,6 +1420,8 @@ description: {skill.Description}
 ## Version And Package Compatibility
 
 For package setup, unresolved types or version-dependent APIs, read [Project compatibility and package readiness](references/unity-mcp-workflow/project-compatibility.md). Distinguish requested, resolved and actually loaded packages before using their APIs. Keep the current MCP session and the project's Unity version; this skill does not require Unity 6 or the Unity CLI.
+
+For identity guards, strict input, PlayerLoop stalls, owned verification cleanup, serialized-reference protection and hash-validated continuation, read [Execution trust and faithful verification](references/unity-mcp-workflow/execution-trust.md). Keep compile, resource, input, render and application acceptance separate.
 
 ";
         }
