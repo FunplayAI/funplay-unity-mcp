@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `execute_code` works more than once per code reload on CoreCLR editors (Unity 7). Every snippet compiled to the same `Snippet` assembly name; Mono accepts duplicate names from `Assembly.Load(byte[])`, but Unity's collectible load context rejects them, so every call after the first failed with `COMPILATION_BACKEND_UNAVAILABLE`. Output assemblies now get a unique name.
+- The dotnet-hosted Roslyn path no longer waits ~20 s per compile. `/shared:false` is not a toggle: csc reads it as the pipe name of a compiler server called `false`, waits for it, then falls back to compiling in-process. csc compiles in-process by default, so the flag is dropped (24.5 s -> 0.55 s in a Unity 7 Editor).
+- The dotnet compiler host is also found in Unity 7's `DotNetSdk` layout (`DotNetSdk/dotnet` + `DotNetSdk/sdk/<version>/Roslyn/bincore/csc.dll`), and a missing Mono reference profile no longer fails the toolchain: it only backfilled references the editor had not loaded itself. Mono stays the preferred host, so existing editors resolve the same toolchain as before.
+- The keepalive broker no longer keeps editor sockets alive. On macOS/Linux, CoreCLR editors start children without closing the editor's descriptors, so the broker held e.g. the asset-import worker IPC listener after Unity exited; the broker now closes inherited sockets before opening its own. On Windows, both Mono and CoreCLR create children with `bInheritHandles: TRUE`; the broker is now started through ShellExecute (hidden window), which does not inherit handles. An already-running broker is reused as before, so the change applies the next time the broker is started.
+- `package.json` declares the `com.unity.ugui` dependency the editor code already uses (`UnityEngine.UI` / `EventSystems`). Projects without uGUI previously failed to compile the package.
+
+### Validation
+
+- macOS, same source referenced by two projects: Unity 6000.3.13f1 and Unity 7000.0.0a12. Full `Funplay.Editor.Tests` EditMode runs against unmodified v0.7.3 on the same machine: Unity 6 788 passed / 2 failed -> 790 / 2 (the two new tests pass; both remaining failures also fail on v0.7.3); Unity 7 772 / 26 -> 782 / 16 (the ten fixed failures are all `execute_code`; the remaining 16 also fail on v0.7.3 and are outside this change). Live checks on both editors: repeated `execute_code`, dotnet-hosted compile, and broker survival across domain reloads with zero failed requests.
+- The Windows ShellExecute change is based on the .NET 10 / Mono / Wine sources and has **not** been run on Windows.
+
 ## [0.7.3] - 2026-10-28
 
 ### Changed
