@@ -208,6 +208,15 @@ namespace Funplay.Editor.MCP.Server
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };
+                    if (Application.platform == RuntimePlatform.WindowsEditor)
+                    {
+                        // Both Mono and CoreCLR call CreateProcess(bInheritHandles: TRUE), so the
+                        // long-lived broker would inherit every inheritable editor handle (sockets
+                        // included). ShellExecuteEx creates the process without inheritance; the
+                        // broker needs no redirected streams, so nothing is lost.
+                        startInfo.UseShellExecute = true;
+                        startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                    }
                     process = Process.Start(startInfo);
                     if (process == null)
                     {
