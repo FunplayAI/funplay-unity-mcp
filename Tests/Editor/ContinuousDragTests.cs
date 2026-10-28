@@ -98,6 +98,8 @@ namespace Funplay.Editor.Tests
                 // Isolate the test from the user's other foreground Editors. No project
                 // asset is modified and the production tool never changes these settings.
                 temporary = UnityEngine.Object.Instantiate(original);
+                // Match Input System's own temporary settings lifetime across Play exit.
+                temporary.hideFlags = HideFlags.HideAndDontSave;
                 temporary.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
                 temporary.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
                 InputSystem.settings = temporary;
@@ -216,52 +218,55 @@ namespace Funplay.Editor.Tests
         [UnityTest] public IEnumerator OwnedSessionCancelTimeoutPauseAndPlayExitCleanOnlyOwnedInput()
         {
             PrepareOwnedScene(); yield return new EnterPlayMode(); yield return WaitForOwnedFrame();
-            var inputSettings = new OwnedInputSettings();
-            string scope = Id(VerificationScope.Start(30, true, Guid.NewGuid().ToString("N")));
-            var guard = InputSystem.AddDevice<Mouse>("UnrelatedDragGuard"); int guardId = guard.deviceId;
-            try
+            // Keep the temporary focus policy until Play-exit cleanup has actually run.
+            using (var inputSettings = new OwnedInputSettings())
             {
-                foreach (string mode in new[] { "cancel", "timeout", "pause", "update_mode" })
+                string scope = Id(VerificationScope.Start(30, true, Guid.NewGuid().ToString("N")));
+                var guard = InputSystem.AddDevice<Mouse>("UnrelatedDragGuard"); int guardId = guard.deviceId;
+                try
                 {
-                    string id = Id(InputFrameJob.StartDrag(new Vector2(10, 10), new Vector2(100, 100), 2, "left", null, "mouse", 0, 0, scope, null));
-                    var owned = InputSystem.GetDeviceById((int)Read(id)["data"]["device_id"]); bool actionCancelled = false;
-                    using (var action = new InputAction(type: InputActionType.Button, binding: "/" + owned.name + "/leftButton"))
+                    foreach (string mode in new[] { "cancel", "timeout", "pause", "update_mode" })
                     {
-                        action.canceled += _ => actionCancelled = true; action.Enable();
-                        double deadline = EditorApplication.timeSinceStartup + 5;
-                        while (!(bool)Read(id)["data"]["down_observed"]) { Assert.Less(EditorApplication.timeSinceStartup, deadline); yield return null; }
-                        Assert.IsTrue(action.IsPressed());
-                        if (mode == "cancel")
+                        string id = Id(InputFrameJob.StartDrag(new Vector2(10, 10), new Vector2(100, 100), 2, "left", null, "mouse", 0, 0, scope, null));
+                        var owned = InputSystem.GetDeviceById((int)Read(id)["data"]["device_id"]); bool actionCancelled = false;
+                        using (var action = new InputAction(type: InputActionType.Button, binding: "/" + owned.name + "/leftButton"))
                         {
-                            var result = JObject.FromObject(InputInteractionFunctions.SimulateMouseDrag(action: "cancel", task_id: "input:" + id));
-                            Assert.AreEqual("cancelled", (string)result["data"]["status"], result.ToString());
+                            action.canceled += _ => actionCancelled = true; action.Enable();
+                            double deadline = EditorApplication.timeSinceStartup + 5;
+                            while (!(bool)Read(id)["data"]["down_observed"]) { Assert.Less(EditorApplication.timeSinceStartup, deadline); yield return null; }
+                            Assert.IsTrue(action.IsPressed());
+                            if (mode == "cancel")
+                            {
+                                var result = JObject.FromObject(InputInteractionFunctions.SimulateMouseDrag(action: "cancel", task_id: "input:" + id));
+                                Assert.AreEqual("cancelled", (string)result["data"]["status"], result.ToString());
+                            }
+                            else if (mode == "timeout") InputFrameJob.TickAt((double)Read(id)["data"]["deadline_wall_seconds"] + 1);
+                            else if (mode == "pause") { EditorApplication.isPaused = true; InputFrameJob.TickAt(PlayerLoopWitness.Wall); EditorApplication.isPaused = false; }
+                            else
+                            {
+                                var before = InputSystem.settings.updateMode;
+                                try { InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsInFixedUpdate; yield return null; }
+                                finally { InputSystem.settings.updateMode = before; }
+                            }
+                            if ((string)Read(id)["data"]["status"] == "running") yield return Wait(id);
+                            Assert.IsTrue(actionCancelled, "Owned reset/removal must cancel held actions.");
+                            var data = Read(id)["data"]; Assert.IsFalse((bool)data["complete"]); Assert.IsTrue((bool)data["cleanup_verified"]);
+                            Assert.IsNull(InputSystem.GetDeviceById((int)data["device_id"])); Assert.IsTrue(guard.added); Assert.AreEqual(guardId, guard.deviceId);
+                            Assert.AreNotEqual("running", (string)data["status"]);
                         }
-                        else if (mode == "timeout") InputFrameJob.TickAt((double)Read(id)["data"]["deadline_wall_seconds"] + 1);
-                        else if (mode == "pause") { EditorApplication.isPaused = true; InputFrameJob.TickAt(PlayerLoopWitness.Wall); EditorApplication.isPaused = false; }
-                        else
-                        {
-                            var before = InputSystem.settings.updateMode;
-                            try { InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsInFixedUpdate; yield return null; }
-                            finally { InputSystem.settings.updateMode = before; }
-                        }
-                        if ((string)Read(id)["data"]["status"] == "running") yield return Wait(id);
-                        Assert.IsTrue(actionCancelled, "Owned reset/removal must cancel held actions.");
-                        var data = Read(id)["data"]; Assert.IsFalse((bool)data["complete"]); Assert.IsTrue((bool)data["cleanup_verified"]);
-                        Assert.IsNull(InputSystem.GetDeviceById((int)data["device_id"])); Assert.IsTrue(guard.added); Assert.AreEqual(guardId, guard.deviceId);
-                        Assert.AreNotEqual("running", (string)data["status"]);
                     }
+                    string exitId = Id(InputFrameJob.StartDrag(new Vector2(10, 10), new Vector2(100, 100), 2, "left", null, "touch", 0, 0, scope, null));
+                    SessionState.SetString("Funplay.DragTest.ExitId", exitId);
                 }
-                string exitId = Id(InputFrameJob.StartDrag(new Vector2(10, 10), new Vector2(100, 100), 2, "left", null, "touch", 0, 0, scope, null));
-                SessionState.SetString("Funplay.DragTest.ExitId", exitId);
+                finally { if (guard.added) InputSystem.RemoveDevice(guard); VerificationScope.End(scope); }
+                // A separate unscoped job proves the input service also owns Play-exit cleanup.
+                string playExit = Id(InputFrameJob.StartDrag(new Vector2(10, 10), new Vector2(100, 100), 2, "left", null, "touch", 0, 0, null, null));
+                SessionState.SetString("Funplay.DragTest.ExitId", playExit);
+                yield return new ExitPlayMode();
+                var stopped = Read(SessionState.GetString("Funplay.DragTest.ExitId", ""))["data"];
+                Assert.AreEqual("interrupted", (string)stopped["status"], stopped.ToString()); Assert.IsTrue((bool)stopped["cleanup_verified"]);
+                SessionState.EraseString("Funplay.DragTest.ExitId");
             }
-            finally { if (guard.added) InputSystem.RemoveDevice(guard); VerificationScope.End(scope); inputSettings.Dispose(); }
-            // A separate unscoped job proves the input service also owns Play-exit cleanup.
-            string playExit = Id(InputFrameJob.StartDrag(new Vector2(10, 10), new Vector2(100, 100), 2, "left", null, "touch", 0, 0, null, null));
-            SessionState.SetString("Funplay.DragTest.ExitId", playExit);
-            yield return new ExitPlayMode();
-            var stopped = Read(SessionState.GetString("Funplay.DragTest.ExitId", ""))["data"];
-            Assert.AreEqual("interrupted", (string)stopped["status"], stopped.ToString()); Assert.IsTrue((bool)stopped["cleanup_verified"]);
-            SessionState.EraseString("Funplay.DragTest.ExitId");
         }
         [UnityTearDown] public IEnumerator RestoreOwnedPlayState()
         {

@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.7",
+                "1.0.8",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,
@@ -70,6 +70,8 @@ namespace Funplay.Editor.MCP.Server
                     "After source/resource edits use `prepare_editor` with the intended edit/play target and a unique request_key; retain data.task.task_id and use `get_task` with bounded waiting and the last revision. Require operation.status=ready, current_editor.ready=true and the expected current mode before validation.",
                     "Check compiler errors, console exceptions and project initialization separately from Editor preparation.",
                     "Separate Editor readiness, actual PlayerLoop frame/clock progression, input fidelity, rendered correctness and application acceptance. Encoded video frames and dispatched UI/physics events do not prove gameplay advanced or legacy Input Down/Held/Up occurred. For scoped verification, risky references or continuation evidence, read the execution-trust reference.",
+                    ProjectSkillReferences.InputBackendCompatibilityGuidance,
+                    ProjectSkillReferences.BackgroundExecutionGuidance,
                     "After a dropped connection, retry the operation status read using the same ID/key. Historical reload recovery and HTTP reachability alone do not establish current readiness.",
                     "`request_recompile` is rejected while Unity is in Play Mode — Unity does not process script compilation or domain reloads while playing. Call `exit_play_mode` first, then retry `request_recompile`.",
                     "If an arbitrary edit is interrupted, its result remains unknown until exact object/asset readback establishes what executed; preparation IDs do not make arbitrary scripts replay-safe.",
@@ -83,7 +85,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.9",
+                "1.0.10",
                 "Unity UI Composition",
                 "Build and revise Unity UI, primarily uGUI mobile page prefabs, with framework-aware routing, Sprite import safety, text effects, localization and visual verification.",
                 true,
@@ -107,6 +109,8 @@ namespace Funplay.Editor.MCP.Server
                     "Prefer a complete, saved, Editor-authored page prefab as the UI deliverable, with nested control prefabs and serialized references as needed. Runtime code should instantiate or pool these prefabs, bind data and listeners, and handle state or animation; do not procedurally reconstruct stable pages or controls at runtime merely for implementation convenience.",
                     "Only when runtime construction is explicitly justified, keep a dynamic TMP_InputField inactive or disabled until its textComponent and textViewport (plus placeholder when used) are assigned; its caret renderer is initialized during OnEnable only when the text component is already bound, so bind first and enable last.",
                     "Use one EventSystem and the matching input module, keep Raycast Target enabled only on graphics that receive pointer input, and synchronize CanvasGroup alpha, interactable, and blocksRaycasts during transitions.",
+                    ProjectSkillReferences.InputBackendCompatibilityGuidance,
+                    ProjectSkillReferences.BackgroundExecutionGuidance,
                     "Animate a visual child rather than a RectTransform driven by a Layout Group, kill or cancel prior animations before replay, restore deterministic state on disable, and use unscaled time for UI that must work while gameplay is paused.",
                     "Clamp edge controls after layout and visual children are finalized by measuring their complete RectTransform bounds, not only the root sizeDelta.",
                     "Prefer serialized component references and stable semantic names over Transform.Find paths or default duplicate names.",
@@ -1587,6 +1591,8 @@ These are original Funplay adaptations informed by the pinned Unity official plu
 - For a vertical ScrollRect, top-anchor the Content and set its pivot to the top so growth is predictable. Preserve the normalized position intentionally when refreshing content.
 - Use RectMask2D for rectangular viewports. Use Mask only when the clipping shape must follow a Graphic.
 - Give touch controls a project-defined minimum hit area even when the visible art is smaller. Use one transparent or visible root Graphic or raycast padding rather than making every child Image a target.
+- __INPUT_BACKEND_COMPATIBILITY__
+- __BACKGROUND_EXECUTION_GUIDANCE__
 - Add listeners once and remove them in the matching lifecycle. Disable interaction while entrance or exit animation makes a control visually unavailable.
 
 ## Animation And Prefab Safety
@@ -1624,7 +1630,8 @@ These are original Funplay adaptations informed by the pinned Unity official plu
 - [Screen.safeArea](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Screen-safeArea.html), [relative RectTransform bounds](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/RectTransformUtility.CalculateRelativeRectTransformBounds.html), and [Device Simulator](https://docs.unity3d.com/6000.0/Documentation/Manual/device-simulator-introduction.html)
 - [Sprite Atlas](https://docs.unity3d.com/6000.0/Documentation/Manual/sprite/atlas/create-sprite-atlas.html), [platform texture overrides](https://docs.unity3d.com/6000.0/Documentation/Manual/class-TextureImporter-type-specific.html), and [official uGUI optimization guide](https://learn.unity.com/course/introduction-to-ui-in-unity/tutorial/optimizing-unity-ui)
 
-" + BuildReliableUiToolGuidance();
+".Replace("__INPUT_BACKEND_COMPATIBILITY__", ProjectSkillReferences.InputBackendCompatibilityGuidance)
+                .Replace("__BACKGROUND_EXECUTION_GUIDANCE__", ProjectSkillReferences.BackgroundExecutionGuidance) + BuildReliableUiToolGuidance();
         }
 
 
@@ -1931,7 +1938,10 @@ $@"
 - Source repository: `https://github.com/FunplayAI/funplay-unity-mcp`
 ";
 
-            return header + BuildProjectCompatibilityRouting() + body + BuildReliableUiToolGuidance() + BuildGameViewRecordingGuidance() + footer;
+            return header + BuildProjectCompatibilityRouting() +
+                ProjectSkillReferences.InputBackendCompatibilityGuidance + "\n\n" +
+                ProjectSkillReferences.BackgroundExecutionGuidance + "\n" + body +
+                BuildReliableUiToolGuidance() + BuildGameViewRecordingGuidance() + footer;
         }
 
         private static ProjectSkillsManifest CreateDefaultManifest()

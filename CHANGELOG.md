@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.3] - 2026-10-28
+
+### Changed
+
+- Built-in `unity-mcp-workflow` v1.0.8 and `unity-ui-composition` v1.0.10 recommend **Active Input Handling = Both** for legacy-input-only projects that need New Input System click/drag simulation, after checking compatibility and obtaining user approval. Guidance preserves existing input consumers, EventSystem modules and bindings; Both does not inject synthetic input into legacy `UnityEngine.Input` polling.
+- Both Skills recommend **Player > Run In Background** when background verification is needed, with user approval. The linked execution-trust reference distinguishes persistent Player settings, runtime overrides, actual PlayerLoop progression and Input System background/focus policies. Editor execution is not diagnosed from that checkbox alone, and background execution is not claimed as input acceptance or mobile background support. Explicitly authorized temporary verification scopes retain their owned cleanup/restoration requirements.
+- Short shared recommendations reach all six supported client targets; detailed setup, restart/reconnect, compatibility and focus checks remain in the conditional reference. Existing managed Skills installations receive the usual update notice. No tools, dependencies or automatic project-setting mutations are added: Core remains 40 and Full remains 185 across 43 modules.
+
+### Fixed
+
+- The owned drag-cleanup test keeps its temporary in-memory InputSettings through the final Play Mode exit, instead of restoring focus restrictions before starting that last gesture. This removes a background-window test failure without weakening its cleanup assertions or changing production input policies/project settings.
+
+### Pull requests and issues
+
+- Implements the user's direct suggestions about dual input backends and background verification. No numbered GitHub issue is closed or PR merged by this release.
+
+### Validation
+
+- All **824 EditMode cases passed** with zero failures/skips in the owned, graphics-enabled FunplayMcp Unity 2022.3.62f3c1 / Input System 1.14 session on macOS, including 141 Skills-related cases and all 27 drag cases. Skills export preserves an existing legacy-only/background-disabled configuration and package manifest byte-for-byte; the actual test project's Player settings and dependency manifests also retained their original SHA256 hashes.
+- All six client targets were exported: ten SKILL.md files passed the skill validator, two Cursor rules retained their metadata, and all 30 relative reference links resolved. The .NET 8 v0.7.3 bridge passed version, Content-Length UTF-8 framing, empty HTTP 202 notification and project-scoped path checks against an isolated local HTTP fixture. Other platforms and Unity versions are not claimed as live-tested.
+
 ## [0.7.2] - 2026-10-26
 
 ### Fixed

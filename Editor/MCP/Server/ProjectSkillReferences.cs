@@ -13,6 +13,12 @@ namespace Funplay.Editor.MCP.Server
         private const string OfficialSource =
             "https://github.com/Unity-Technologies/unity-agent-plugin/tree/" + OfficialPluginRevision + "/skills/";
 
+        internal const string InputBackendCompatibilityGuidance =
+            "For legacy-input-only projects that need New Input System click/drag simulation, recommend `Active Input Handling = Both` after compatibility checks and user approval. Do not silently change input settings; `Both` does not make legacy `UnityEngine.Input` receive synthetic input. Read the workflow's execution-trust reference for setup and verification.";
+
+        internal const string BackgroundExecutionGuidance =
+            "For background Play Mode verification, recommend enabling `Player > Run In Background` with user approval. Also check Input System background/focus policies: advancing frames and accepting input are separate requirements. Read the workflow's execution-trust reference; do not silently change persistent settings.";
+
         private static readonly IReadOnlyDictionary<string, string> Workflow = new Dictionary<string, string>
         {
             ["references/unity-mcp-workflow/execution-trust.md"] =
@@ -31,6 +37,22 @@ Use the current tools/list and exposed get_tool_capabilities. Distinguish implem
 Report compilation/import, resource provenance, configured components, API/event dispatch, actual input edges, actual rendered output and end-to-end application behavior separately. Editor ready means import/compile/mode readiness only. Require multiple actual PlayerLoop frame/clock samples; advancing wall time or encoded video frames does not prove gameplay Update advanced. Inspect pause, timeScale, focus and runInBackground without changing them through a status read.
 
 Select strict input_route when fidelity matters. UI EventSystem dispatch, direct Button.onClick and physics messages are distinct test paths, not legacy UnityEngine.Input injection. Unsupported legacy polling must be reported. New Input System synthetic input must show Down/Held/Up on distinct real PlayerLoop frames; even those edges do not prove the application's handler accepted the action. Never patch gameplay input or fabricate focus/SDK-ready/outcome state to make a test pass.
+
+## Legacy input projects and simulation
+
+- Inspect the installed `com.unity.inputsystem` package, active backends, actual input consumer and EventSystem module before recommending a change. An ordinary uGUI click via `simulate_mouse_click(input_route=ui_eventsystem)` may already work without changing backends; use it when handler dispatch is the intended test.
+- If a legacy-input-only project needs `simulate_mouse_click(input_route=new_input_system)` or `simulate_mouse_drag`, recommend **Both** rather than disabling legacy support. With user approval, use `Edit > Project Settings > Player > Active Input Handling = Both` and ensure a compatible Input System package is installed. Preserve unsaved work before the required Editor restart; reconnect MCP, reverify project/process identity, and wait for package/import/compile readiness before retesting. Installing dependencies, changing settings and restarting are not authorized merely by asking to inspect UI.
+- Both enables two backends, not a bridge between them. Synthetic New Input System devices do not feed `UnityEngine.Input.GetMouseButton*`, `GetTouch` or legacy-only third-party input. Preserve the existing EventSystem/module and bindings; do not automatically replace `StandaloneInputModule`, stack active UI input modules, re-pair `PlayerInput` or migrate gameplay code. Verify that the intended New Input System consumer accepts the device, that Dynamic updates and real PlayerLoop frames advance, and that focus policies allow input. Report an unsupported legacy polling test rather than claiming that Both fixes it.
+
+See [Unity Input System installation and backend activation](https://docs.unity3d.com/Packages/com.unity.inputsystem@1.7/manual/Installation.html); check the installed Unity/package version before applying setup instructions.
+
+## Background execution and input
+
+- When verification needs the Unity game to continue while another application is foreground, recommend `Edit > Project Settings > Player > Run In Background`, where available for the installed version/platform. Enabling this persistent default (`PlayerSettings.runInBackground`) requires user approval; inspect the runtime `Application.runInBackground` separately because game code can override it. This is not a guarantee of mobile background execution.
+- Do not diagnose an unfocused Editor from that checkbox alone: Unity's Input System documentation treats background execution as already enabled in the Editor. Verify real PlayerLoop frame progression, pause state and the actual device/consumer. Inspect `Input System Package > Background Behavior` and `Play Mode Input Behavior`: devices may still be reset, disabled or routed away from Game View when focus is lost. Changing these policies can affect normal game/Editor input; do not automatically set Ignore Focus or route every device to Game View. A running loop does not prove a click/drag reached the application.
+- Distinguish a permanent project preference from an explicitly authorized temporary test. When exposed, `verification_scope(allow_background=true)` can own a temporary runtime flag; end that scope and inspect cleanup/restoration instead of leaving a test-only override behind. It does not change Input System focus policies. Status reads must never enable background execution, steal focus or unpause the game.
+
+See [PlayerSettings.runInBackground](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/PlayerSettings-runInBackground.html), [Application.runInBackground and platform limits](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Application-runInBackground.html), and [Input System background/focus settings](https://docs.unity3d.com/Packages/com.unity.inputsystem@1.7/manual/Settings.html#background-behavior).
 
 ## Owned verification and resources
 

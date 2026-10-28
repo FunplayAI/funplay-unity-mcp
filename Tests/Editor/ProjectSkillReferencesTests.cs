@@ -72,6 +72,41 @@ namespace Funplay.Editor.Tests
             Assert.AreEqual(30, paths.Length);
         }
 
+        [TestCaseSource(nameof(Platforms))]
+        public void ExportsInputCompatibilityAdviceWithoutChangingProjectInputConfiguration(string platform)
+        {
+            // Exported recommendations must not apply the recommended migration themselves.
+            var settings = Path.Combine(projectRoot, "ProjectSettings", "ProjectSettings.asset");
+            var packages = Path.Combine(projectRoot, "Packages", "manifest.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(settings));
+            Directory.CreateDirectory(Path.GetDirectoryName(packages));
+            const string legacySettings = "%YAML 1.1\nPlayerSettings:\n  activeInputHandler: 0\n  runInBackground: 0\n";
+            const string noInputSystem = "{\"dependencies\":{}}\n";
+            File.WriteAllText(settings, legacySettings);
+            File.WriteAllText(packages, noInputSystem);
+
+            Apply(platform);
+
+            Assert.AreEqual(legacySettings, File.ReadAllText(settings));
+            Assert.AreEqual(noInputSystem, File.ReadAllText(packages));
+            foreach (var file in Current(platform).Files.Where(file => file.SkillId != "project"))
+            {
+                var content = File.ReadAllText(file.Path);
+                // Verify both entry points receive the shared policy once, without duplicating prose.
+                foreach (var guidance in new[]
+                {
+                    ProjectSkillReferences.InputBackendCompatibilityGuidance,
+                    ProjectSkillReferences.BackgroundExecutionGuidance
+                })
+                {
+                    var first = content.IndexOf(guidance, StringComparison.Ordinal);
+                    Assert.GreaterOrEqual(first, 0, file.Path);
+                    Assert.AreEqual(-1, content.IndexOf(guidance, first + guidance.Length,
+                        StringComparison.Ordinal), file.Path);
+                }
+            }
+        }
+
         [Test, Combinatorial]
         public void DetectsAndRepairsMissingOrStaleReferences(
             [Values("codex", "claude", "cursor", "opencode", "dsh", "antigravity")] string platform,
@@ -165,8 +200,8 @@ namespace Funplay.Editor.Tests
             foreach (var file in Current(platform).Files)
             {
                 File.WriteAllText(file.Path, File.ReadAllText(file.Path)
-                    .Replace("unity-mcp-workflow@1.0.7", "unity-mcp-workflow@1.0.5")
-                    .Replace("unity-ui-composition@1.0.9", "unity-ui-composition@1.0.7"));
+                    .Replace("unity-mcp-workflow@1.0.8", "unity-mcp-workflow@1.0.7")
+                    .Replace("unity-ui-composition@1.0.10", "unity-ui-composition@1.0.9"));
                 foreach (var relative in ProjectSkillReferences.GetForSkill(file.SkillId).Keys)
                     File.Delete(Path.Combine(Path.GetDirectoryName(file.Path), relative));
             }

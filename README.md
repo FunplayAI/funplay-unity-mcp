@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.2"
+    "com.gamebooom.unity.mcp": "0.7.3"
   }
 }
 ```
@@ -447,7 +447,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Version 0.7.2 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for identity migration, strict input, continuous dragging, owned cleanup, reference preservation and evidence reuse.
+Version 0.7.3 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for identity migration, strict input, continuous dragging, owned cleanup, reference preservation and evidence reuse.
 
 | Category | Tools |
 |----------|-------|
