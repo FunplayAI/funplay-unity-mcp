@@ -68,7 +68,11 @@ namespace Funplay.Editor.Tools.Helpers
                 throw new ArgumentException("Timestamps must be finite and within 0..last_frame_seconds. Markers after the final frame have no recorded visual evidence.");
             return times.Distinct().OrderBy(x => x).ToArray();
         }
-        internal static bool NativeDecoderAvailable => typeof(EditorWindow).Assembly.GetType("UnityEditorInternal.Media.MediaDecoder")?
+        // Unity 6 split the decoder out of UnityEditor.CoreModule into UnityEditor.MediaModule,
+        // next to MediaTime; older editors keep it in the EditorWindow assembly.
+        static Type MediaDecoderType => typeof(MediaTime).Assembly.GetType("UnityEditorInternal.Media.MediaDecoder")
+            ?? typeof(EditorWindow).Assembly.GetType("UnityEditorInternal.Media.MediaDecoder");
+        internal static bool NativeDecoderAvailable => MediaDecoderType?
             .GetMethod("GetNextFrame", new[] { typeof(Texture2D), typeof(MediaTime).MakeByRefType() }) != null;
         internal static object DecoderAvailability() => new { unity_decoder = NativeDecoderAvailable,
             installed_ffmpeg = InstalledVideoDecoder.Resolve(), external_requires_explicit_opt_in = true,
@@ -90,7 +94,7 @@ namespace Funplay.Editor.Tools.Helpers
                 if (recording.width < 2 || recording.width > 1920 || recording.height < 2 || recording.height > 1920) return Response.Error("INVALID_RECORDING_DIMENSIONS");
                 // Unity provides no public Edit Mode video decoder. Feature-detect its narrow native
                 // decoder interface; unsupported editor versions fail explicitly, with no shell tools.
-                var type = typeof(EditorWindow).Assembly.GetType("UnityEditorInternal.Media.MediaDecoder");
+                var type = MediaDecoderType;
                 nextFrame = type?.GetMethod("GetNextFrame", new[] { typeof(Texture2D), typeof(MediaTime).MakeByRefType() });
                 bool useExternal = backend == "ffmpeg" || backend == "auto" && nextFrame == null;
                 if (!useExternal && nextFrame == null || useExternal && !allowExternal) return Response.Error("VIDEO_DECODER_UNAVAILABLE", new {

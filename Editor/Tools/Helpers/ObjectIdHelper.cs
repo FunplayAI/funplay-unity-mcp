@@ -52,7 +52,7 @@ namespace Funplay.Editor.Tools.Helpers
                 return "0";
 
 #if UNITY_6000_4_OR_NEWER
-            var id = obj.GetEntityId().ToString();
+            var id = FormatEntityId(obj.GetEntityId());
             CacheEntityId(id, obj);
             return id;
 #else
@@ -63,7 +63,7 @@ namespace Funplay.Editor.Tools.Helpers
         internal static string GetSerializedReferenceId(SerializedProperty property)
         {
 #if UNITY_6000_4_OR_NEWER
-            return property.objectReferenceEntityIdValue == EntityId.None ? "0" : property.objectReferenceEntityIdValue.ToString();
+            return property.objectReferenceEntityIdValue == EntityId.None ? "0" : FormatEntityId(property.objectReferenceEntityIdValue);
 #else
             return property.objectReferenceInstanceIDValue.ToString(CultureInfo.InvariantCulture);
 #endif
@@ -84,7 +84,7 @@ namespace Funplay.Editor.Tools.Helpers
                 return cachedObject;
             }
 
-            if (EntityIdParseMethod != null && TryParseEntityId(objectId, out var entityId))
+            if (TryParseEntityId(objectId, out var entityId))
             {
                 var resolved = EditorUtility.EntityIdToObject(entityId);
                 if (resolved != null)
@@ -103,6 +103,18 @@ namespace Funplay.Editor.Tools.Helpers
         }
 
 #if UNITY_6000_4_OR_NEWER
+        // Unity 7 formats EntityId.ToString() as "index:version", which breaks the numeric id
+        // contract clients and the by-id/by-name auto-detection rely on. Its public ULong round
+        // trip keeps ids numeric; 6.4-6.x keep their existing format unchanged.
+        private static string FormatEntityId(EntityId entityId)
+        {
+#if UNITY_7000_0_OR_NEWER
+            return EntityId.ToULong(entityId).ToString(CultureInfo.InvariantCulture);
+#else
+            return entityId.ToString();
+#endif
+        }
+
         private static void CacheEntityId(string id, UnityObject obj)
         {
             EntityIdCache[id] = new WeakReference<UnityObject>(obj);
@@ -129,6 +141,13 @@ namespace Funplay.Editor.Tools.Helpers
         private static bool TryParseEntityId(string objectId, out EntityId entityId)
         {
             entityId = EntityId.None;
+#if UNITY_7000_0_OR_NEWER
+            if (ulong.TryParse(objectId, NumberStyles.None, CultureInfo.InvariantCulture, out var rawId))
+            {
+                entityId = EntityId.FromULong(rawId);
+                return entityId.IsValid();
+            }
+#endif
             if (EntityIdParseMethod == null)
                 return false;
 

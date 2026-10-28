@@ -40,6 +40,39 @@ public class AmbiguousRandomSyntax
         }
 
         [Test]
+        public void RoslynCompiler_RepeatedCompiles_LoadDistinctAssemblies()
+        {
+            const string code = "public class RepeatedCompile { public static string Run() { return \"ok\"; } }";
+            var compiler = new RoslynCscScriptCompiler();
+
+            var first = compiler.Compile(code);
+            var second = compiler.Compile(code);
+
+            // CoreCLR editors reject a second load of the same simple assembly name.
+            Assert.AreEqual(ScriptCompilationStatus.Success, first.Status, first.Message);
+            Assert.AreEqual(ScriptCompilationStatus.Success, second.Status, second.Message);
+            Assert.AreNotEqual(first.Assembly.GetName().Name, second.Assembly.GetName().Name);
+        }
+
+        [Test]
+        public void RoslynCompiler_DotnetHost_CompilesWithoutMonoProfile()
+        {
+            if (!RoslynCscScriptCompiler.TryResolveDotnetCompilerHost(out var dotnetPath, out var cscDllPath))
+                Assert.Ignore("This Unity install does not bundle a dotnet host with csc.dll.");
+
+            var compiler = new RoslynCscScriptCompiler(
+                dotnetPath,
+                cscDllPath,
+                monoLibRoot: System.IO.Path.Combine(System.IO.Path.GetTempPath(), "funplay-missing-mono-profile"));
+
+            var result = compiler.Compile("public class DotnetHostSmoke { public static string Run() { return \"dotnet-ok\"; } }");
+
+            Assert.AreEqual(ScriptCompilationStatus.Success, result.Status, result.Message);
+            var run = result.Assembly.GetType("DotnetHostSmoke").GetMethod("Run");
+            Assert.AreEqual("dotnet-ok", run.Invoke(null, null));
+        }
+
+        [Test]
         public void CompilerPipeline_FallsBackToCodeDomWhenRoslynUnavailable()
         {
             var result = ScriptCompilerPipeline.Compile(

@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `execute_code` works more than once per code reload on CoreCLR editors (Unity 7). Every snippet compiled to the same `Snippet` assembly name; Mono accepts duplicate names from `Assembly.Load(byte[])`, but Unity's collectible load context rejects them, so every call after the first failed with `COMPILATION_BACKEND_UNAVAILABLE`. Output assemblies now get a unique name.
+- The dotnet-hosted Roslyn path no longer waits ~20 s per compile. `/shared:false` is not a toggle: csc reads it as the pipe name of a compiler server called `false`, waits for it, then falls back to compiling in-process. csc compiles in-process by default, so the flag is dropped (24.5 s -> 0.55 s in a Unity 7 Editor).
+- The dotnet compiler host is also found in Unity 7's `DotNetSdk` layout (`DotNetSdk/dotnet` + `DotNetSdk/sdk/<version>/Roslyn/bincore/csc.dll`), and a missing Mono reference profile no longer fails the toolchain: it only backfilled references the editor had not loaded itself. Mono stays the preferred host, so existing editors resolve the same toolchain as before.
+- The keepalive broker no longer keeps editor sockets alive. On macOS/Linux, CoreCLR editors start children without closing the editor's descriptors, so the broker held e.g. the asset-import worker IPC listener after Unity exited; the broker now closes inherited sockets before opening its own. On Windows, both Mono and CoreCLR create children with `bInheritHandles: TRUE`; the broker is now started through ShellExecute (hidden window), which does not inherit handles. An already-running broker is reused as before, so the change applies the next time the broker is started.
+- `package.json` declares the `com.unity.ugui` dependency the editor code already uses (`UnityEngine.UI` / `EventSystems`). Projects without uGUI previously failed to compile the package.
+- Object ids stay numeric on Unity 7. Unity 7 formats `EntityId.ToString()` as `index:version` (for example `28613:256`), so ids handed to clients were no longer numeric and the by-id/by-name auto-detection treated them as names: parent/target ids failed with `UI_PARENT_NOT_UNIQUE` / `INVALID_OBJECT_QUERY`. Unity 7 now uses the public `EntityId.ToULong` / `FromULong` round trip; `index:version` input is still accepted, and 6.4-6.x keep their existing format.
+- UI creation accepts TMP's built-in settings on com.unity.ugui 7 (Unity 7). ugui 7 no longer ships TMP Essential Resources: it uses a TMP Settings asset inside the package when the project has none. TMP text creation used to require `Resources/TMP Settings` and refused with `TMP_RESOURCES_NOT_IMPORTED`. The lookup now also finds the package asset, the way TMP does; older ugui versions without an import still report the error.
+- The Edit Mode video decoder is found on Unity 6+. `UnityEditorInternal.Media.MediaDecoder` moved from `UnityEditor.CoreModule` to `UnityEditor.MediaModule`, so frame extraction reported `VIDEO_DECODER_UNAVAILABLE` on Unity 6 and 7. The decoder is now looked up next to `MediaTime`, falling back to the old assembly.
+- Camera `clearFlags` reports `SolidColor` on every runtime. `CameraClearFlags.Color` and `SolidColor` share a value, and `Enum.ToString` picks a different alias on Mono (`SolidColor`) and CoreCLR (`Color`).
+- Tests: the TMP material fixture reads `TMP_Asset.material` as a field or a property (it is a property in com.unity.ugui 2.0+) and skips when TMP settings are unavailable instead of when no font asset exists (ugui ships font assets in the package); the exported Core tool count accounts for the two Input System-only tools in projects using the legacy Input Manager.
+
+### Validation
+
+- macOS, same source referenced by two projects: Unity 6000.3.13f1 (legacy Input Manager, no TMP resources imported) and Unity 7000.0.0a12 (Input System, ugui 7.0). Full `Funplay.Editor.Tests` EditMode runs:
+
+  | | unmodified v0.7.3 | this change |
+  |---|---|---|
+  | Unity 6000.3.13f1 | 788 passed / 2 failed | **800 passed / 0 failed** / 23 skipped |
+  | Unity 7000.0.0a12 | 772 passed / 26 failed | **801 passed / 0 failed** / 25 skipped |
+
+- Live checks on both editors: repeated `execute_code`, dotnet-hosted compile, and broker survival across domain reloads with zero failed requests. On Unity 7, TMP text creation was also exercised for real through the built-in settings rather than skipped.
+- The Windows ShellExecute change is based on the .NET 10 / Mono / Wine sources and has **not** been run on Windows.
+
 ## [0.7.3] - 2026-10-28
 
 ### Changed

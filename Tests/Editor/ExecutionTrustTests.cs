@@ -62,7 +62,12 @@ namespace Funplay.Editor.Tests
         [Test] public void ExportedGuardIsOptionalForMutationsAndDoesNotInflateReadSchemas()
         {
             var tools = JArray.FromObject(new MCPToolExporter(null).ExportTools());
+#if ENABLE_INPUT_SYSTEM
             Assert.AreEqual(40, tools.Count);
+#else
+            // simulate_key_press / simulate_key_combo only compile with the Input System backend.
+            Assert.AreEqual(38, tools.Count);
+#endif
             var write = tools.Single(t => (string)t["name"] == "set_component_property");
             Assert.AreEqual("string", (string)write["inputSchema"]["properties"]["expected_context"]["type"]);
             Assert.IsFalse(write["inputSchema"]["required"].Values<string>().Contains("expected_context"));
