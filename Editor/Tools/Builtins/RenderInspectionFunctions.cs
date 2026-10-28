@@ -61,7 +61,7 @@ namespace Funplay.Editor.Tools.Builtins
                     failures, bindings, pipeline = Identity(GraphicsSettings.currentRenderPipeline),
                     cameras = cameras.Take(32).Select(c => new { camera = Identity(c), c.enabled, active = c.gameObject.activeInHierarchy,
                         c.depth, c.cullingMask, rect = c.rect.ToString(), c.targetDisplay, target = Identity(c.targetTexture),
-                        clear_flags = c.clearFlags.ToString(), background = c.backgroundColor.ToString(), c.orthographic, c.fieldOfView, c.nearClipPlane, c.farClipPlane }).ToArray(),
+                        clear_flags = CameraFunctions.ClearFlagsName(c.clearFlags), background = c.backgroundColor.ToString(), c.orthographic, c.fieldOfView, c.nearClipPlane, c.farClipPlane }).ToArray(),
                     rendered_correctly = (bool?)null,
                     limits = "Configured shared bindings, not GPU draw-call proof. MaterialPropertyBlock, project custom Graphic overrides, SRP renderer features and replacement shaders require separate evidence; no inspector overlay substitutes for the real camera render."
                 });
