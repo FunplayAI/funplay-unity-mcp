@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Declare the uGUI package dependency and reference `UnityEngine.UI` from the editor and test assemblies. Fresh package imports can now resolve UI and EventSystems types used by inspection, input simulation and UI tools.
+
 ## [0.7.3] - 2026-10-28
 
 ### Changed

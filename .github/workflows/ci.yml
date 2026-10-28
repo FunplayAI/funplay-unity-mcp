@@ -39,6 +39,18 @@ jobs:
               for key in ("name", "version", "displayName", "unity"):
                   if key not in package or not package[key]:
                       errors.append(f"package.json is missing required key: {key}")
+              if not package.get("dependencies", {}).get("com.unity.ugui"):
+                  errors.append("package.json must declare com.unity.ugui for the UI tools")
+
+          # Both assemblies directly use uGUI types, including EventSystems.
+          for relative_path in ("Editor/Funplay.Editor.asmdef", "Tests/Editor/Funplay.Editor.Tests.asmdef"):
+              try:
+                  assembly = json.loads((root / relative_path).read_text(encoding="utf-8"))
+              except Exception as exc:
+                  errors.append(f"{relative_path} is not valid JSON: {exc}")
+              else:
+                  if "UnityEngine.UI" not in assembly.get("references", []):
+                      errors.append(f"{relative_path} must reference UnityEngine.UI")
 
           forbidden_paths = []
           for path in root.rglob("*"):
