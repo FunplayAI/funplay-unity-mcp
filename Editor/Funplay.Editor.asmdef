@@ -3,7 +3,8 @@
     "rootNamespace": "Funplay.Editor",
     "references": [
         "Unity.Newtonsoft.Json",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [
         "Editor"
