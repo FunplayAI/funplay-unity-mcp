@@ -96,8 +96,7 @@ namespace Funplay.Editor.Tests
         }
         [Test] public void TmpCreationUsesTmpOrReportsMissingResourcesWithoutLegacyFallback()
         {
-            var type = ProjectTypeCatalog.Candidates("TMPro.TMP_Settings").SingleOrDefault();
-            if (type != null && Resources.Load("TMP Settings", type) != null)
+            if (UICreationService.FindTmpSettings() != null)
             {
                 var created = Create(text_component: "tmp");
                 Assert.IsTrue((bool)created["success"], created.ToString());
@@ -130,8 +129,13 @@ namespace Funplay.Editor.Tests
         {
             var font = AssetDatabase.FindAssets("t:TMP_FontAsset").Select(AssetDatabase.GUIDToAssetPath)
                 .Select(AssetDatabase.LoadMainAssetAtPath).FirstOrDefault(x => x != null);
-            if (font == null) Assert.Ignore("TMP Essential Resources are needed for the positive material fixture.");
-            var sourceMaterial = font.GetType().GetField("material").GetValue(font) as Material;
+            // com.unity.ugui ships font assets inside the package, so finding one does not mean TMP is
+            // usable; use the same TMP Settings lookup as UI creation.
+            if (font == null || UICreationService.FindTmpSettings() == null)
+                Assert.Ignore("TMP Essential Resources are needed for the positive material fixture.");
+            // TMP_Asset.material is a field in older TMP releases and a property in com.unity.ugui 2.0+.
+            var sourceMaterial = (font.GetType().GetField("material")?.GetValue(font)
+                ?? font.GetType().GetProperty("material")?.GetValue(font)) as Material;
             Assert.IsNotNull(sourceMaterial);
             var suffix = "FunplayFontTests_" + Guid.NewGuid().ToString("N");
             AssetDatabase.CreateFolder("Assets", suffix); folder = "Assets/" + suffix;

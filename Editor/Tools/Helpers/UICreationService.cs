@@ -196,8 +196,7 @@ namespace Funplay.Editor.Tools.Helpers
             if (policy == "tmp")
             {
                 if (ProjectUIDefaults.TmpType == null) throw new UIConfigurationException("TMP_NOT_AVAILABLE", "Install TextMeshPro for this project, or explicitly choose legacy Text for a legacy project.");
-                var settingsType = ProjectTypeCatalog.Candidates("TMPro.TMP_Settings").SingleOrDefault();
-                if (settingsType == null || Resources.Load("TMP Settings", settingsType) == null)
+                if (FindTmpSettings() == null)
                     throw new UIConfigurationException("TMP_RESOURCES_NOT_IMPORTED", "Import TMP Essential Resources in this project first. No objects were created and no dependency was silently substituted.");
             }
             UnityEngine.Object font = !string.IsNullOrEmpty(path) ? AssetDatabase.LoadMainAssetAtPath(path) : existing?.GetType().GetProperty("font")?.GetValue(existing) as UnityEngine.Object;
@@ -208,12 +207,31 @@ namespace Funplay.Editor.Tools.Helpers
                 if (policy == "legacy") font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 else
                 {
-                    var type = ProjectTypeCatalog.Candidates("TMPro.TMP_Settings").Single();
-                    using (var serialized = new SerializedObject(Resources.Load("TMP Settings", type))) font = serialized.FindProperty("m_defaultFontAsset")?.objectReferenceValue;
+                    using (var serialized = new SerializedObject(FindTmpSettings())) font = serialized.FindProperty("m_defaultFontAsset")?.objectReferenceValue;
                 }
             }
             if (!MatchesFont(font, policy)) throw new UIConfigurationException("FONT_ASSET_REQUIRED", "Choose a valid " + (policy == "tmp" ? "TMP Font Asset" : "Unity Font") + " for the selected text component.");
             return font;
+        }
+        // Before com.unity.ugui 7, TMP only works once TMP Essential Resources put "TMP Settings" under
+        // Resources. ugui 7+ ships a built-in TMP Settings asset in the package and uses it when the
+        // project has none, so look it up the way TMP does instead of requiring an import. Avoid
+        // TMP_Settings.instance: older TMP versions may open the import window from it.
+        internal static UnityEngine.Object FindTmpSettings()
+        {
+            var settingsType = ProjectTypeCatalog.Candidates("TMPro.TMP_Settings").SingleOrDefault();
+            if (settingsType == null)
+                return null;
+
+            var imported = Resources.Load("TMP Settings", settingsType);
+            if (imported != null)
+                return imported;
+
+            return AssetDatabase.FindAssets("t:TMP_Settings")
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .Select(path => AssetDatabase.LoadAssetAtPath(path, settingsType))
+                .FirstOrDefault(settings => settings != null);
         }
         internal static bool MatchesFont(UnityEngine.Object font, string policy) => font != null && (policy == "legacy" ? font is Font : font.GetType().FullName == "TMPro.TMP_FontAsset");
         internal static void ValidateTmpMaterial(UnityEngine.Object font, Material material)
