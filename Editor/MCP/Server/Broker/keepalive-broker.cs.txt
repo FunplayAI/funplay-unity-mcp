@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -81,6 +82,8 @@ namespace Funplay.UnityMcp.Broker
 
         public static int Main(string[] args)
         {
+            CloseInheritedSockets();
+
             var port = 8765;
             Token = string.Empty;
 
@@ -941,5 +944,44 @@ namespace Funplay.UnityMcp.Broker
         {
             Console.Error.WriteLine("[funplay-broker " + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + message);
         }
+
+        // CoreCLR editors (Unity 7+) spawn children without closing the editor's descriptors, so
+        // the broker would keep editor sockets (e.g. the asset-import worker IPC listener) open
+        // after Unity exits. Runs before the broker opens any socket, so every socket is inherited.
+        private static void CloseInheritedSockets()
+        {
+            if (Path.DirectorySeparatorChar == '\\' || !Directory.Exists("/dev/fd"))
+                return;
+
+            var closed = 0;
+            try
+            {
+                var address = new byte[256];
+                foreach (var entry in Directory.GetFileSystemEntries("/dev/fd"))
+                {
+                    int fd;
+                    if (!int.TryParse(Path.GetFileName(entry), out fd) || fd <= 2)
+                        continue;
+
+                    var length = address.Length;
+                    if (getsockname(fd, address, ref length) == 0 && close(fd) == 0)
+                        closed++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("warn: could not close inherited sockets: " + ex.Message);
+                return;
+            }
+
+            if (closed > 0)
+                Log("closed " + closed + " inherited socket(s)");
+        }
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern int getsockname(int fd, byte[] address, ref int length);
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern int close(int fd);
     }
 }

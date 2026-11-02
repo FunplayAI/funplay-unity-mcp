@@ -36,7 +36,7 @@ namespace Funplay.Editor.Tools.Builtins
                 nearClipPlane = camera.nearClipPlane,
                 farClipPlane = camera.farClipPlane,
                 backgroundColor = new { r = bg.r, g = bg.g, b = bg.b, a = bg.a, hex = "#" + ColorUtility.ToHtmlStringRGBA(bg) },
-                clearFlags = camera.clearFlags.ToString(),
+                clearFlags = ClearFlagsName(camera.clearFlags),
                 depth = camera.depth,
                 cullingMask = camera.cullingMask,
                 cullingMaskLayers = CullingMaskToLayerNames(camera.cullingMask),
@@ -186,6 +186,13 @@ namespace Funplay.Editor.Tools.Builtins
             if (mask == -1) return "Everything";
             if (mask == 0) return "Nothing";
             return string.Join(", ", CullingMaskToLayerNames(mask));
+        }
+
+        // CameraClearFlags.Color and SolidColor share a value. Enum.ToString picks one of the
+        // aliases differently on Mono ("SolidColor") and CoreCLR ("Color"), so name it explicitly.
+        internal static string ClearFlagsName(CameraClearFlags flags)
+        {
+            return flags == CameraClearFlags.SolidColor ? "SolidColor" : flags.ToString();
         }
 
         private static System.Collections.Generic.List<string> CullingMaskToLayerNames(int mask)

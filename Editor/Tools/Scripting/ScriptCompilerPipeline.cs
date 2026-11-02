@@ -188,7 +188,9 @@ namespace Funplay.Editor.Tools.Scripting
             try
             {
                 var sourcePath = Path.Combine(tempRoot, "Snippet.cs");
-                var outputPath = Path.Combine(tempRoot, "Snippet.dll");
+                // csc derives the assembly name from the output file. CoreCLR editors (Unity 7+)
+                // refuse to load a second assembly with the same simple name, so keep it unique.
+                var outputPath = Path.Combine(tempRoot, "Snippet_" + Path.GetFileName(tempRoot) + ".dll");
                 var responsePath = Path.Combine(tempRoot, "csc.rsp");
 
                 File.WriteAllText(sourcePath, code ?? string.Empty, Encoding.UTF8);
@@ -307,12 +309,8 @@ namespace Funplay.Editor.Tools.Scripting
                 return false;
             }
 
-            if (string.IsNullOrEmpty(monoLibRoot))
-            {
-                error = "Unity Mono reference profile was not found.";
-                return false;
-            }
-
+            // The Mono profile only backfills references the editor has not loaded itself, so a
+            // CoreCLR editor without MonoBleedingEdge still compiles against its loaded assemblies.
             error = null;
             return true;
         }
@@ -338,10 +336,10 @@ namespace Funplay.Editor.Tools.Scripting
 
         private static string BuildCompilerArguments(string cscPath, string responsePath)
         {
-            var sharedFlag = string.Equals(Path.GetFileName(cscPath), "csc.dll", StringComparison.OrdinalIgnoreCase)
-                ? " /shared:false"
-                : string.Empty;
-            return $"{QuoteArgument(cscPath)} -noconfig{sharedFlag} @{QuoteArgument(responsePath)}";
+            // csc compiles in-process unless /shared is passed. "/shared:false" is not a toggle: it
+            // names a compiler-server pipe called "false", and waiting on that server added ~20 s
+            // to every dotnet-hosted compile.
+            return $"{QuoteArgument(cscPath)} -noconfig @{QuoteArgument(responsePath)}";
         }
 
         private static bool TryResolvePreferredCompilerHost(out string compilerHostPath, out string cscPath)
@@ -358,6 +356,11 @@ namespace Funplay.Editor.Tools.Scripting
                 }
             }
 
+            return TryResolveDotnetCompilerHost(out compilerHostPath, out cscPath);
+        }
+
+        internal static bool TryResolveDotnetCompilerHost(out string compilerHostPath, out string cscPath)
+        {
             compilerHostPath = FindFirstExisting(GetDotnetCandidates());
             cscPath = FindFirstExisting(GetCscDllCandidates());
             return !string.IsNullOrEmpty(compilerHostPath) && !string.IsNullOrEmpty(cscPath);
@@ -409,6 +412,9 @@ namespace Funplay.Editor.Tools.Scripting
                 return;
             }
 
+            if (string.IsNullOrEmpty(monoLibRoot))
+                return;
+
             var path = Path.Combine(monoLibRoot, fileName);
             if (File.Exists(path))
                 references[fileName] = path;
@@ -456,13 +462,34 @@ namespace Funplay.Editor.Tools.Scripting
         private static IEnumerable<string> GetDotnetCandidates()
         {
             foreach (var root in GetUnityToolRoots())
+            {
                 yield return Path.Combine(root, "NetCoreRuntime", DotnetExecutableName());
+                // Unity 7 replaced NetCoreRuntime/DotNetSdkRoslyn with a full SDK under DotNetSdk.
+                yield return Path.Combine(root, "DotNetSdk", DotnetExecutableName());
+            }
         }
 
         private static IEnumerable<string> GetCscDllCandidates()
         {
             foreach (var root in GetUnityToolRoots())
+            {
                 yield return Path.Combine(root, "DotNetSdkRoslyn", "csc.dll");
+
+                var sdkRoot = Path.Combine(root, "DotNetSdk", "sdk");
+                if (!Directory.Exists(sdkRoot))
+                    continue;
+
+                var sdkDirectories = Directory.GetDirectories(sdkRoot)
+                    .OrderByDescending(path => ParseSdkVersion(Path.GetFileName(path)));
+                foreach (var sdkDirectory in sdkDirectories)
+                    yield return Path.Combine(sdkDirectory, "Roslyn", "bincore", "csc.dll");
+            }
+        }
+
+        private static Version ParseSdkVersion(string directoryName)
+        {
+            var numericPart = directoryName.Split('-')[0];
+            return Version.TryParse(numericPart, out var version) ? version : new Version(0, 0);
         }
 
         private static IEnumerable<string> GetMonoLibRootCandidates()
