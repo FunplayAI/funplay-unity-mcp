@@ -207,8 +207,10 @@ namespace Funplay.Editor.Tools
         /// </summary>
         public static bool IsEnabled(string name)
         {
-            return !_disabledTools.Contains(name) && !BlockedTools.Contains(name);
+            lock (_lock) return !_disabledTools.Contains(name) && !BlockedTools.Contains(name);
         }
+
+        internal static bool HasManualOverride(string name) { lock (_lock) return _manualTools.ContainsKey(name); }
 
         /// <summary>
         /// Get all registered manual tools (for use by ToolSchemaBuilder and FunctionInvokerController).

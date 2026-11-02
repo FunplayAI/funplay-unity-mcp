@@ -43,9 +43,85 @@ there is no current project entry; they are not deleted automatically. Unreadabl
 produce a review notice without preventing the rest of the window from loading. Inspection
 never edits client files.
 
-Both direct HTTP and Broker preserve scoped routing. Broker v5 upgrades replace older broker
+Both direct HTTP and Broker preserve scoped routing. Broker v6 upgrades replace older broker
 processes through the existing managed upgrade mechanism. JSON result envelopes, MCP result
 metadata and visual geometry include context so evidence can be attributed independently.
+
+## Durable execution receipts and honest results
+
+`execute_code` keeps its existing templates, safety settings and main-thread Unity execution.
+Admission persists an execution receipt before scheduling code. Provide a unique `request_key`
+for every logical operation; retain `data.task.task_id` (`execution:<id>`). Keyed starts wait
+up to `wait_seconds` (default 2, range 0..30) and can return a short job's result in one call.
+Unkeyed MCP starts return a receipt immediately. Waiting never moves user code off the Unity
+thread. Execution status queries read cached DTO/journal state without queuing behind that thread.
+
+Recover a missing start response without replaying:
+
+```json
+{"kind":"execution","request_key":"profile-prefab-edit-001","wait_seconds":20}
+```
+
+Identical retained keys return the same task; different code/effective settings/context
+return `EXECUTION_REQUEST_KEY_CONFLICT`. Keys are hashed, not stored as plaintext. Source code
+is not stored in the durable execution journal (the existing session history is separate).
+After domain reload or process restart, queued/preparing jobs become `interrupted` with
+`executed=false`; interrupted bodies become `outcome_unknown` with `executed=null`. Confirmed
+return remains `execution_status=returned`, even when delivery was interrupted. None is resumed
+automatically. A new process has a new context: use `get_task` for historical key lookup rather
+than repeating the start. `replay_execute_code` is an explicitly new operation, not recovery.
+
+Inspect `result_success`, `executed`, `execution_status`, `serialization_status` and native
+errors independently. A successful status query is not a successful command. Supported Unity
+value types have finite field-only JSON contracts (including nested arrays/dictionaries), and
+Unity objects become small identity references, not traversed scene graphs. Cycles, non-finite
+numbers, excessive depth (64) and output over 8 MiB produce explicit `RESULT_SERIALIZATION_FAILED`
+or `RESULT_TOO_LARGE` envelopes with execution/recovery identity. They never fall back to a
+successful `ToString()` response. A save can have succeeded before result delivery failed;
+read back the actual asset/object state before deciding on another write.
+
+Results over 16 KiB return a reference to an immutable UTF-8 JSON snapshot, not a truncated
+message. Use the same task with `result_format=items`, a JSON Pointer such as
+`result_path=/data/returnValue/rows`, and `offset`/`limit` (1..500). Follow
+`result_page.next_offset`; content pages are capped at 16 KiB. Oversized single items return
+`RESULT_ITEM_TOO_LARGE`: choose a narrower pointer or `result_format=text`. Text reads use
+UTF-16 code-unit offsets; follow `next_offset` to preserve surrogate pairs. They return exact
+raw snapshot chunks with the original SHA256, not reformatted JSON. Check the same hash across
+pages. Summary integrity status distinguishes verified bytes from a hash not checked in that
+read; missing/changed payloads are not trusted or silently regenerated.
+
+Snapshots live under `Library/FunplayMcp/Executions`, with a 32 MiB payload quota, 128 receipt
+records, 24-hour retention and 4096 protected keyed receipts/tombstones. Admission/result
+writes and explicit cleanup maintain retention; reads never expire/delete files. Old owned
+payloads can be evicted but retry tombstones remain, so an expired receipt cannot execute
+again accidentally. Capacity exhaustion fails closed. Corrupt/unwritable journals block new
+admission; a readable in-memory failure receipt discloses that it is no longer durable.
+
+Explicit `execute_code(action=cancel, task_id=...)` can cancel before user code starts. It
+cannot interrupt a synchronous call; `EXECUTION_NOT_INTERRUPTIBLE` never claims a stop or
+rollback. `timeout_seconds` (5..900) is a cooperative preparation budget, not forced execution
+cancellation; a synchronous body can finish late and reports `budget_exceeded`. Distinguish
+this from `wait_seconds` and response deadlines: direct HTTP 60 seconds, broker hold/client
+300 seconds, stdio wrapper default 120 seconds (configurable). Transport errors identify their
+layer and state that underlying work was not cancelled and its outcome is unknown. Use the
+task ID/original key or exact state readback, never a blind retry. Queue/refresh/compile/body/
+serialization/persistence timings and UTF-8 payload bytes support diagnosis; ~345 KB alone
+does not establish the cause of a timeout.
+
+`execute_code(action=cleanup, task_id=...)` removes only a terminal owned unchanged result.
+It never rolls back project edits or forgets retry protection. Changed cached files are
+preserved with `cleanup_pending`. Full-only `action=forget, confirm_forget=true` deliberately
+removes the key's retry protection; it is operator management, never automatic recovery.
+`get_task` requires exposure of itself and the originating execution tool, including custom
+lists; it cannot cancel/clean/forget through a read. Optional `include_diagnostics=true` on
+execution/input returns bounded stage/type/sanitized method identities, not raw file paths,
+arguments, source or stack text. Input receipts retain owned-device identity and separate
+cleanup verification from event delivery/application acceptance.
+
+The journal is not a business transaction, arbitrary side-effect rollback, global actor lock,
+security sandbox or exactly-once guarantee across storage loss/power failure. Do not delete
+journal/Library files to bypass key protection. User code remains responsible for targeted
+saves, Undo registration, business invariants and exception-safe owned-resource cleanup.
 
 ## Readiness is layered
 

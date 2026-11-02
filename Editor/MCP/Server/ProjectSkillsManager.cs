@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.8",
+                "1.0.9",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,
@@ -67,6 +67,7 @@ namespace Funplay.Editor.MCP.Server
                     "For `execute_code`, prefer the IFunplayCommand template over the legacy `static string Run()`: include `using Funplay.Editor.Tools.Scripting;`, implement `IFunplayCommand`, and use `ctx.RegisterObjectCreation`, `ctx.RegisterObjectModification`, `ctx.DestroyObject` so created/modified objects participate in editor Undo automatically. Use `ctx.Log` / `ctx.LogWarning` / `ctx.LogError` for traceable output that comes back in the response (without polluting the Unity console).",
                     "Batch related Unity-side changes in one guarded `execute_code` snippet. Null-guard every lookup, return explicit missing path/object/component messages, and include concise before/after values.",
                     "`execute_code` refreshes by default. Use skip_refresh only after independently verifying that the intended assemblies are ready, for example when initiating a test that must not be interrupted by another refresh.",
+                    "For project-specific execute_code work, use a unique request_key, retain execution task identity, and recover through get_task(kind=execution). Serialization failure or a response timeout is not rollback; inspect executed/execution_status and exact saved state before any new write. Read large stored results in bounded pages rather than repeating the snippet.",
                     "After source/resource edits use `prepare_editor` with the intended edit/play target and a unique request_key; retain data.task.task_id and use `get_task` with bounded waiting and the last revision. Require operation.status=ready, current_editor.ready=true and the expected current mode before validation.",
                     "Check compiler errors, console exceptions and project initialization separately from Editor preparation.",
                     "Separate Editor readiness, actual PlayerLoop frame/clock progression, input fidelity, rendered correctness and application acceptance. Encoded video frames and dispatched UI/physics events do not prove gameplay advanced or legacy Input Down/Held/Up occurred. For scoped verification, risky references or continuation evidence, read the execution-trust reference.",
@@ -85,7 +86,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.10",
+                "1.0.11",
                 "Unity UI Composition",
                 "Build and revise Unity UI, primarily uGUI mobile page prefabs, with framework-aware routing, Sprite import safety, text effects, localization and visual verification.",
                 true,
@@ -1425,7 +1426,7 @@ description: {skill.Description}
 
 For package setup, unresolved types or version-dependent APIs, read [Project compatibility and package readiness](references/unity-mcp-workflow/project-compatibility.md). Distinguish requested, resolved and actually loaded packages before using their APIs. Keep the current MCP session and the project's Unity version; this skill does not require Unity 6 or the Unity CLI.
 
-For identity guards, strict input, PlayerLoop stalls, owned verification cleanup, serialized-reference protection and hash-validated continuation, read [Execution trust and faithful verification](references/unity-mcp-workflow/execution-trust.md). Keep compile, resource, input, render and application acceptance separate.
+For identity guards, recoverable execution tasks/results, strict input, PlayerLoop stalls, owned cleanup, serialized-reference protection and hash-validated continuation, read [Execution trust and faithful verification](references/unity-mcp-workflow/execution-trust.md). Keep compile, resource, input, render and application acceptance separate.
 
 ";
         }
@@ -1647,6 +1648,7 @@ These are original Funplay adaptations informed by the pinned Unity official plu
 ## Structured UI Workflows
 
 - Short MCP tasks briefly wait for completion (wait_seconds defaults to 2; zero returns immediately). For longer tasks use `get_task(data.task.task_id, wait_seconds=20, after_revision=<last revision>)`; it waits for completion or a meaningful state change. Honor poll_after_ms on unchanged responses instead of making the model poll every second. wait_complete is not proof of success: inspect native status, errors and ready/complete/restoration fields. A read_timeout carries only the snapshot_at observation. Cancellation of the HTTP wait does not cancel the task. On lost preparation/preview responses recover through kind + the original request_key; do not replay mutations. Recording and Test Runner starts return immediately, as do preparation/preview starts without a recovery key.
+- If a project-specific UI check/edit requires `execute_code`, pass a unique request_key and retain its execution task ID. Unkeyed MCP starts return a receipt first; query `get_task(kind=execution, request_key=...)` after a lost response, not the snippet again. Native Unity values remain structured JSON. Check executed, execution_status, serialization_status and result_success independently: a failed serialization/timeout does not undo a prefab save. For large snapshots, use get_task result_format=items with a JSON Pointer/result_path, or text with the returned next_offset; keep the original SHA256. Never hide missing results behind ToString, truncate evidence silently, or infer that ~345 KB alone caused a timeout. Cancel can stop preparation, not synchronous Unity code; cleanup removes only the owned result, not project changes or retry protection.
 - Inspect before modifying: use `find_game_objects` with component/property filters and projections, `inspect_ui_sprites` for Image/effective Sprite/importer/border/local-ID associations, and `find_project_types` for exact type and assembly names. Check ambiguity, partial errors, scan completeness and pagination; an incomplete scan is not proof of absence. Component setters distinguish live in-memory readback from saved/reimported prefab values.
 - Run `audit_ui` on relevant live roots or saved prefabs/scenes; small scans can finish in one call, otherwise read status and finding pages through `get_task`. It checks missing borders, missing/required references, transparent raycast blockers, text/clipping and layout conflicts without fixing or saving assets. Review measured evidence and contextual warnings; suppress intentional exceptions only with an explicit project reason. Do not invent border values or infer design fidelity from a clean audit.
 - Before creating new UI, read `get_ui_defaults`. `create_project_ui` can reuse templates and retain their prefab connection, label bindings, font/material and authored geometry. Explicit overrides take precedence; existing template component types are not converted. `configure_ui_defaults` changes project-scoped authoring preferences, so use it only when that shared convention is intended. Tied/incomplete convention scans or missing TMP resources require a deliberate choice/action, never a silent legacy fallback. This is Edit Mode authoring: save the intended scene/prefab explicitly and preserve existing UI when revising it.

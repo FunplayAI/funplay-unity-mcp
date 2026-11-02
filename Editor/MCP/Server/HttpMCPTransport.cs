@@ -403,9 +403,7 @@ namespace Funplay.Editor.MCP.Server
                         }
                         catch (OperationCanceledException)
                         {
-                            var errResponse = timeoutCts.IsCancellationRequested
-                                ? CreateErrorResponse(request.Id, -32000, "Request timeout")
-                                : CreateErrorResponse(request.Id, -32000, "Request cancelled");
+                            var errResponse = MCPWaitFailure.Create(request, "unity_http", 60, timeoutCts.IsCancellationRequested);
                             await SendResponseAsync(stream, errResponse, CancellationToken.None);
                         }
                     }

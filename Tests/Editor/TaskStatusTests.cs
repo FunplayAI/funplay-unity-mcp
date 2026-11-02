@@ -218,6 +218,15 @@ namespace Funplay.Editor.Tests
             Assert.IsFalse((bool)result["data"]["task"]["wait_complete"]);
             Assert.Less(now, 1);
         }
+        [Test] public void BlockedStoredReadIdentifiesItsLayerAndNeverClaimsCancellation()
+        {
+            var blocked = new TaskCompletionSource<string>();
+            var result = JObject.Parse(MCPTaskWaiter.InitialReadAsync(blocked.Task, 25, CancellationToken.None, "execution_store").GetAwaiter().GetResult());
+            Assert.AreEqual("EXECUTION_STATUS_UNAVAILABLE", (string)result["code"]);
+            Assert.AreEqual("execution_store", (string)result["data"]["layer"]);
+            Assert.IsFalse((bool)result["data"]["underlying_operation_cancelled"]); Assert.IsFalse((bool)result["data"]["retry_safe"]);
+            Assert.IsFalse(blocked.Task.IsCompleted); blocked.SetResult("{}");
+        }
         [TestCase("record_game_view", "recording")]
         [TestCase("prepare_editor", "editor")]
         [TestCase("start_ui_preview_session", "ui_preview")]

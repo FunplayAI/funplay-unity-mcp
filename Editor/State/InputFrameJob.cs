@@ -6,6 +6,7 @@ using Funplay.Editor.MCP.Server;
 using Funplay.Editor.Tools.Helpers;
 using Funplay.Editor.Tools.Builtins;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
@@ -39,6 +40,8 @@ namespace Funplay.Editor.State
         public string gesture = "click", source_tool = "simulate_mouse_click", pointer_device = "mouse", button = "left";
         public string request_key, request_signature, device_name, cleanup_method;
         public string input_background_behavior, editor_input_behavior;
+        public string error_code, error_stage, exception_type;
+        public JObject diagnostic;
         public bool focused_at_start, run_in_background_at_start;
         public int device_id, observed_frames, hold_frames;
         public ProjectExecutionContext context;
@@ -164,7 +167,7 @@ namespace Funplay.Editor.State
                 if (job.gesture == "drag") VideoRecordingFunctions.RecordMarker("drag", "Cross-frame " + job.pointer_device + " drag started; application acceptance is unverified", job.start.Vector, job.end.Vector, job.geometry);
                 Save(); return Read(active.job_id);
             }
-            catch (Exception ex) { var id = active.job_id; Finish("failed", ex.Message); return Read(id); }
+            catch (Exception ex) { var id = active.job_id; RecordFailure(active, "device_setup", ex); Finish("failed", "INPUT_DEVICE_SETUP_FAILED"); return Read(id); }
 #else
             return Response.Error("INPUT_BACKEND_UNAVAILABLE", Availability());
 #endif
@@ -176,11 +179,14 @@ namespace Funplay.Editor.State
             var job = Find(id, requestKey);
             return job == null || allowed(job.source_tool);
         }
-        internal static object Read(string id, string requestKey = null)
+        internal static object Read(string id, string requestKey = null, bool diagnostics = false)
         {
             var job = Find(id, requestKey);
-            return job == null ? Response.Error("INPUT_JOB_NOT_FOUND") : Response.Success("Synthetic input job: " + job.status + ". No business acceptance is inferred.", job);
+            if (job == null) return Response.Error("INPUT_JOB_NOT_FOUND");
+            return Response.Success("Synthetic input job: " + job.status + ". No business acceptance is inferred.", View(job, diagnostics));
         }
+        private static JObject View(InputFrameReceipt job, bool diagnostics)
+        { var copy = JObject.FromObject(job); if (!diagnostics) copy.Remove("diagnostic"); return copy; }
         internal static object Cancel(string id, string requiredTool = null)
         {
             var old = Find(id);
@@ -188,7 +194,7 @@ namespace Funplay.Editor.State
             if (requiredTool != null && old.source_tool != requiredTool) return Response.Error("INPUT_JOB_OWNER_TOOL_MISMATCH");
             if (active?.job_id == id) Finish("cancelled", null);
             else if (old.status == "cleanup_pending") { old.status = "cancelled"; old.phase = "cancelled"; Cleanup(old); Save(); }
-            if (old.status == "cleanup_pending") return Response.Error("INPUT_CLEANUP_UNVERIFIED", old);
+            if (old.status == "cleanup_pending") return Response.Error("INPUT_CLEANUP_UNVERIFIED", View(old, false));
             return Read(id);
         }
         private static void Observe(PlayerClockSample frame)
@@ -238,7 +244,7 @@ namespace Funplay.Editor.State
                 if (releaseFrame >= 0 && frame.frame > releaseFrame && !held) Finish("completed", null);
                 else Save();
             }
-            catch (Exception ex) { Finish("failed", "INPUT_FRAME_FAILED: " + ex.Message); }
+            catch (Exception ex) { RecordFailure(active, "player_frame", ex); Finish("failed", "INPUT_FRAME_FAILED"); }
 #endif
         }
         internal static void AddEdge(InputFrameReceipt job, InputFrameEdge edge)
@@ -313,6 +319,7 @@ namespace Funplay.Editor.State
         private static void Finish(string status, string error)
         {
             if (active == null) return;
+            if (error != null) { active.error_code = error; active.error_stage = active.error_stage ?? active.phase; }
             active.status = status; active.phase = status; active.error = error; active.complete = status == "completed";
             active.finished_wall_seconds = PlayerLoopWitness.Wall;
             Cleanup(active);
@@ -338,7 +345,15 @@ namespace Funplay.Editor.State
                 job.cleanup_verified = true;
                 job.cleanup_method = job.up_observed ? "released_then_owned_device_removed" : "owned_device_reset_and_removed_no_release_frame_claimed";
             }
-            catch (Exception ex) { job.status = "cleanup_pending"; job.phase = "cleanup_pending"; job.error = ex.Message; job.complete = false; job.cleanup_verified = false; }
+            catch (Exception ex) { RecordFailure(job, "cleanup", ex); job.status = "cleanup_pending"; job.phase = "cleanup_pending"; job.error = "INPUT_CLEANUP_PENDING"; job.error_code = job.error; job.complete = false; job.cleanup_verified = false; }
+        }
+        private static void RecordFailure(InputFrameReceipt job, string stage, Exception error)
+        {
+            if (job == null) return;
+            job.error_stage = stage; job.exception_type = Tools.Helpers.ToolResultSerializer.Short(error.GetType().FullName, 256);
+            job.diagnostic = OperationDiagnostic.Capture(stage, error);
+            job.diagnostic["unity_version"] = Application.unityVersion;
+            job.diagnostic["owned_device_id"] = job.device_id; job.diagnostic["owned_device_name"] = job.device_name;
         }
         private static void Save() => SessionState.SetString(Key, JsonConvert.SerializeObject(jobs));
     }

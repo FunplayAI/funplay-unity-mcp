@@ -93,6 +93,10 @@ namespace Funplay.Editor.Tests
         [TestCase("c7f1f5f9d7b9435eba6de82753512796", "touch")]
         [TestCase("11111111111111111111111111111111", "mouse")]
         [TestCase("11111111111111111111111111111111", "touch")]
+        [TestCase("6c2185599d104682a372791902547803", "mouse")]
+        [TestCase("6c2185599d104682a372791902547803", "touch")]
+        [TestCase("2ebabb599a6542b09816815489996023", "mouse")]
+        [TestCase("2ebabb599a6542b09816815489996023", "touch")]
         public void OwnedPointerDeviceNamesDoNotParseNumericGuidSuffixes(string id, string pointer)
         {
             InputDevice owned = null, guard = null;

@@ -178,10 +178,7 @@ namespace Funplay.Editor.MCP.Server
                         }
                         else
                         {
-                            responseJson = SerializeResponse(CreateError(
-                                request.Id,
-                                -32000,
-                                timeoutCts.IsCancellationRequested ? "Request timeout" : "Request cancelled"));
+                            responseJson = SerializeResponse(MCPWaitFailure.Create(request, "unity_broker_client", RequestExecutionTimeoutSeconds, timeoutCts.IsCancellationRequested));
                         }
                     }
                 }

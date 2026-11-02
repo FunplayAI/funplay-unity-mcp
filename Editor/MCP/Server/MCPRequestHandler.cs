@@ -60,7 +60,7 @@ namespace Funplay.Editor.MCP.Server
                     return request.Id == null ? null : CreateErrorResponse(request.Id, -32602,
                         "PROJECT_CONTEXT_MISMATCH", _contextMetadata);
 
-                if (ShouldLogRequest(request.Method) && !MCPServerService.IsBoundedStatusRequest(request))
+                if (ShouldLogRequest(request.Method) && !MCPServerService.IsBoundedStatusRequest(request) && !MCPServerService.IsDurableExecutionRequest(request))
                     PluginDebugLogger.Log($"[Funplay MCP Server] Handling request: {request.Method}");
 
                 return request.Method switch
@@ -146,7 +146,7 @@ namespace Funplay.Editor.MCP.Server
 
                 // The bounded status path starts on a pool thread. Avoid settings/Unity access
                 // in logging here; the bridge logs after marshalling the actual read.
-                if (!MCPServerService.IsBoundedStatusRequest(request))
+                if (!MCPServerService.IsBoundedStatusRequest(request) && !MCPServerService.IsDurableExecutionRequest(request))
                     PluginDebugLogger.Log($"[Funplay MCP Server] Calling tool: {toolName}");
                 var result = await _executionBridge.ExecuteToolAsync(toolName, arguments, ct, request.TransportProjectId).ConfigureAwait(false);
 

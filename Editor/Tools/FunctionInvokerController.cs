@@ -60,7 +60,7 @@ namespace Funplay.Editor.Tools
             {
                 var args = BuildArguments(method, functionCall.Parameters);
                 var result = method.Invoke(null, args);
-                return await NormalizeResultAsync(result);
+                return await NormalizeResultAsync(result, functionCall.FunctionName);
             }
             catch (ToolArgumentException pex)
             {
@@ -82,7 +82,7 @@ namespace Funplay.Editor.Tools
             }
         }
 
-        private static async Task<string> NormalizeResultAsync(object result)
+        private static async Task<string> NormalizeResultAsync(object result, string tool)
         {
             if (result is Task task)
             {
@@ -90,32 +90,24 @@ namespace Funplay.Editor.Tools
 
                 var resultProperty = task.GetType().GetProperty("Result");
                 if (resultProperty == null)
-                    return SerializeResult(null);
+                    return SerializeResult(null, tool);
 
                 var taskResult = resultProperty.GetValue(task);
-                return SerializeResult(taskResult);
+                return SerializeResult(taskResult, tool);
             }
 
-            return SerializeResult(result);
+            return SerializeResult(result, tool);
         }
 
         // Tools may return either a plain string (backward-compatible behavior) or a structured
         // object (e.g. via Response.Success/Error) which we JSON-encode for the client.
-        private static string SerializeResult(object value)
+        internal static string SerializeResult(object value, string tool = null)
         {
             if (value == null)
                 return JsonConvert.SerializeObject(Response.Success("OK"));
             if (value is string s)
                 return WrapLegacyStringResult(s);
-            try
-            {
-                return JsonConvert.SerializeObject(value);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Funplay] Failed to serialize tool result: {ex.Message}");
-                return JsonConvert.SerializeObject(Response.Success(value.ToString() ?? "OK"));
-            }
+            return ToolResultSerializer.Serialize(value, tool);
         }
 
         // Legacy tools return a bare human-readable string on success and only switch to a
@@ -222,7 +214,7 @@ namespace Funplay.Editor.Tools
             return args;
         }
 
-        private object ConvertValue(string value, Type targetType)
+        internal object ConvertValue(string value, Type targetType)
         {
             if (targetType == typeof(string))
                 return value;
@@ -250,9 +242,9 @@ namespace Funplay.Editor.Tools
                 return double.Parse(value, CultureInfo.InvariantCulture);
             if (targetType == typeof(bool))
             {
-                if (value == "true" || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase))
+                if (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase))
                     return true;
-                if (value == "false" || value == "0" || value.Equals("no", StringComparison.OrdinalIgnoreCase))
+                if (value.Equals("false", StringComparison.OrdinalIgnoreCase) || value == "0" || value.Equals("no", StringComparison.OrdinalIgnoreCase))
                     return false;
                 throw new FormatException($"'{value}' is not a boolean (expected true/false/1/0/yes/no)");
             }

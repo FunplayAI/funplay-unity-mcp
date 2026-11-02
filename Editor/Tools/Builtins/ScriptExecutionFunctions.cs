@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Funplay.Editor.DI;
 using Funplay.Editor.Settings;
+using Funplay.Editor.State;
 using Funplay.Editor.Tools.Helpers;
 using Funplay.Editor.Tools.Scripting;
 using Newtonsoft.Json;
@@ -45,18 +46,39 @@ namespace Funplay.Editor.Tools.Builtins
                      "(enabled by default); explicitly passing true or false overrides that default. Project namespaces are not auto-injected " +
                      "by default; add `using` directives in the snippet, or enable the ScriptAssemblies-based convenience toggle in the MCP Settings window. " +
                      "If a compile fails with CS0104 (a type name ambiguous between two imported namespaces, e.g. System.Random vs UnityEngine.Random) or CS0433 (a type provided by multiple loaded assemblies) the error carries a structured `ambiguous` list; for CS0104 pass preferred_namespaces (comma-separated) to auto-insert a using-alias binding the name to that namespace and recompile once. CS0433 (same fully-qualified type in two assemblies) can't be fixed by an alias — use extern alias / drop a reference / reflection. " +
-                     "Every invocation is appended to a session-scoped history (see get_execute_code_history / replay_execute_code).")]
+                     "Admission journals an execution task before scheduling Unity code. Use a unique request_key for recovery without replay; unkeyed MCP starts return a receipt immediately. " +
+                     "Small keyed jobs can finish within wait_seconds; otherwise query get_task(kind=execution). Large outputs become bounded, hashed snapshots with items/text pagination. " +
+                     "Serialization failure is not rollback: inspect executed and execution_status, never automatically replay. timeout_seconds cannot force-stop synchronous Unity code. " +
+                     "Invocations reaching validation are recorded in session history; replay is an explicit NEW operation, not recovery.")]
         [SceneEditingTool]
         public static async Task<object> ExecuteCode(
-            [ToolParam("C# code to execute. See description for IFunplayCommand vs legacy Run() templates.")] string code,
+            [ToolParam("C# code for action=start. Omit it for explicit cancel/cleanup/forget controls.", Required = false)] string code = null,
             [ToolParam("If true, reject the call before compile when the code contains obviously dangerous patterns. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null,
             [ToolParam("If true, skip the pre-compile AssetDatabase.Refresh + wait-for-ready. Use only when the editor is already up to date -- e.g. a read-only inspection snippet, or during a live Play Mode session you must not disturb. The default refresh can trigger an import/domain reload (from your own OR another actor's pending changes in a shared editor) that wipes Play Mode runtime state. When skipped, external file edits made since the last compile are NOT picked up.", Required = false)] bool skip_refresh = false,
-            [ToolParam("Optional comma-separated namespaces used to auto-resolve CS0104 ambiguity: when an unqualified type name is ambiguous between two imported namespaces, a using-alias binding that name to the candidate in the listed (winning) namespace is inserted and the snippet is recompiled once. Does NOT fix CS0433 (same fully-qualified type in two assemblies). If it stays ambiguous, a structured COMPILATION_FAILED error with an `ambiguous` array is returned.", Required = false)] string preferred_namespaces = null)
+            [ToolParam("Optional namespaces for one CS0104 using-alias compile retry; cannot resolve CS0433.", Required = false)] string preferred_namespaces = null,
+            [ToolParam("Unique recovery/idempotency key for this logical execution; repeated identical keys never replay retained or expired executions. Use a new key for a genuinely new operation.", Required = false)] string request_key = null,
+            [ToolParam("Bounded response wait, 0..30 seconds, default 2. Waiting or disconnecting never cancels user code.", Required = false)] int wait_seconds = 2,
+            [ToolParam("start (default), cancel before user code begins, cleanup a terminal result, or forget an idempotency key with explicit confirmation. Reads/pagination use get_task.", Required = false)] string action = "start",
+            [ToolParam("execution:<id> for a control action", Required = false)] string task_id = null,
+            [ToolParam("Cooperative preparation budget, 5..900 seconds. A synchronous Unity/user call cannot be force-stopped and may return after this budget.", Required = false)] int timeout_seconds = 300,
+            [ToolParam("Required true only for action=forget. Removes retry protection: that key could execute again. Cleanup alone never forgets keys.", Required = false)] bool confirm_forget = false)
+        {
+            action = action?.Trim().ToLowerInvariant();
+            if (action != "start") return ExecutionJobService.Control(action, task_id, confirm_forget, _ => true);
+            if (task_id != null || confirm_forget) return Response.Error("INVALID_EXECUTION_START_ARGUMENTS");
+            return await ExecutionJobService.StartAsync(new ExecutionOptions { Code = code, Safety = ResolveSafetyChecks(safety_checks),
+                Strict = ResolveStrictFilesystemSafety(), InjectNamespaces = ResolveProjectNamespaceInjection(),
+                SkipRefresh = skip_refresh, PreferredNamespaces = preferred_namespaces, Key = request_key,
+                WaitSeconds = wait_seconds, TimeoutSeconds = timeout_seconds });
+        }
+
+        internal static async Task<object> ExecuteCodeImmediate(string code, bool? safety_checks, bool skip_refresh,
+            string preferred_namespaces, ScriptExecutionTrace trace, bool? strictOverride = null, bool? namespaceOverride = null)
         {
             var effectiveSafetyChecks = ResolveSafetyChecks(safety_checks);
             if (effectiveSafetyChecks)
             {
-                var strictFilesystemChecks = ResolveStrictFilesystemSafety();
+                var strictFilesystemChecks = strictOverride ?? ResolveStrictFilesystemSafety();
                 if (ExecuteCodeSafetyPolicy.TryFindViolation(code, strictFilesystemChecks, out var pattern, out var reason))
                 {
                     var blocked = Response.Error("SAFETY_CHECK_BLOCKED",
@@ -74,6 +96,7 @@ namespace Funplay.Editor.Tools.Builtins
 
             if (!skip_refresh)
             {
+                trace.SetPhase("refreshing");
                 try
                 {
                     await EditorReadyHelper.RefreshAndWaitForReady();
@@ -90,25 +113,29 @@ namespace Funplay.Editor.Tools.Builtins
             var fullCode = BuildCodeForCompilation(
                 code,
                 className,
-                ResolveProjectNamespaceInjection(),
+                namespaceOverride ?? ResolveProjectNamespaceInjection(),
                 out var actualClassName);
 
             try
             {
-                var result = CompileAndExecute(fullCode, actualClassName, preferred_namespaces);
+                trace.SetPhase("compiling");
+                var result = CompileAndExecute(fullCode, actualClassName, preferred_namespaces, trace);
                 AppendHistory(code, IsSuccess(result), SummarizeResult(result), preferred_namespaces);
                 return result;
             }
             catch (Exception ex)
             {
                 var root = UnwrapTargetInvocationException(ex);
+                trace.Diagnostic = OperationDiagnostic.Capture(trace.Phase, root);
+                if (root is ExecutionAbortedException aborted)
+                { AppendHistory(code, false, aborted.Code, preferred_namespaces); return Response.Error(aborted.Code, new { executed = trace.Executed }); }
                 Debug.LogError($"[Funplay] ExecuteCode failed: {root.GetType().FullName}: {root.Message}\n{root.StackTrace}");
                 AppendHistory(code, false, $"{root.GetType().Name}: {root.Message}", preferred_namespaces);
                 return Response.Error("EXECUTE_CODE_FAILED", new
                 {
                     message = root.Message,
                     exception_type = root.GetType().FullName,
-                    stack = root.StackTrace,
+                    diagnostic_available = true,
                     outer_exception_type = ReferenceEquals(root, ex) ? null : ex.GetType().FullName,
                     outer_message = ReferenceEquals(root, ex) ? null : ex.Message
                 });
@@ -163,7 +190,10 @@ namespace Funplay.Editor.Tools.Builtins
         [SceneEditingTool]
         public static async Task<object> ReplayExecuteCode(
             [ToolParam("History index to replay (as returned by get_execute_code_history).")] int index,
-            [ToolParam("If true, re-evaluate the safety blocklist before re-running. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null)
+            [ToolParam("If true, re-evaluate the safety blocklist before re-running. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null,
+            [ToolParam("New logical execution key. Recovery uses get_task, not replay_execute_code.", Required = false)] string request_key = null,
+            [ToolParam("Bounded wait 0..30 seconds. Unkeyed replay returns its receipt immediately.", Required = false)] int wait_seconds = 2,
+            [ToolParam("Cooperative preparation budget 5..900 seconds; no forced stop of synchronous user code.", Required = false)] int timeout_seconds = 300)
         {
             var entries = LoadHistory().entries;
             if (entries.Count == 0)
@@ -178,7 +208,10 @@ namespace Funplay.Editor.Tools.Builtins
 
             // Forward the stored preferred_namespaces so a snippet that only compiled via CS0104
             // alias auto-resolution replays faithfully instead of failing with the original ambiguity.
-            return await ExecuteCode(entry.code, safety_checks, preferred_namespaces: entry.preferredNamespaces);
+            return await ExecutionJobService.StartAsync(new ExecutionOptions { Code = entry.code, SourceTool = "replay_execute_code",
+                Safety = ResolveSafetyChecks(safety_checks), Strict = ResolveStrictFilesystemSafety(), InjectNamespaces = ResolveProjectNamespaceInjection(),
+                PreferredNamespaces = entry.preferredNamespaces, Key = request_key, WaitSeconds = request_key == null ? 0 : wait_seconds,
+                TimeoutSeconds = timeout_seconds, StillAllowed = ExecutionJobService.InvocationAccess.Value ?? (() => true) });
         }
 
         [Description("Erase the entire execute_code history for the current Editor session. " +
@@ -295,7 +328,7 @@ namespace Funplay.Editor.Tools.Builtins
             return s.Substring(0, max) + "…";
         }
 
-        private static object CompileAndExecute(string code, string className, string preferredNamespaces)
+        private static object CompileAndExecute(string code, string className, string preferredNamespaces, ScriptExecutionTrace trace)
         {
             var compilation = ScriptCompilerPipeline.Compile(code);
 
@@ -313,7 +346,7 @@ namespace Funplay.Editor.Tools.Builtins
                         {
                             var retry = ScriptCompilerPipeline.Compile(BuildAliasRetryCode(aliasBlock, code));
                             if (retry.Status == ScriptCompilationStatus.Success && retry.Assembly != null)
-                                return ExecuteCompiledAssembly(retry.Assembly, className, retry.CompilerName, retry.Attempts);
+                                return ExecuteCompiledAssembly(retry.Assembly, className, retry.CompilerName, retry.Attempts, trace);
 
                             if (retry.Status == ScriptCompilationStatus.CompilationFailed)
                             {
@@ -367,7 +400,7 @@ namespace Funplay.Editor.Tools.Builtins
                 });
             }
 
-            return ExecuteCompiledAssembly(compilation.Assembly, className, compilation.CompilerName, compilation.Attempts);
+            return ExecuteCompiledAssembly(compilation.Assembly, className, compilation.CompilerName, compilation.Attempts, trace);
         }
 
         internal sealed class AmbiguousType
@@ -550,7 +583,8 @@ namespace Funplay.Editor.Tools.Builtins
             Assembly compiledAssembly,
             string className,
             string compilerName,
-            List<ScriptCompilerAttempt> compilerAttempts)
+            List<ScriptCompilerAttempt> compilerAttempts,
+            ScriptExecutionTrace trace)
         {
             // Prefer IFunplayCommand path: any class in the compiled assembly that implements it
             Type commandType = null;
@@ -565,7 +599,7 @@ namespace Funplay.Editor.Tools.Builtins
                 // Fall through to legacy Run() path
             }
             if (commandType != null)
-                return ExecuteAsCommand(commandType, compilerName);
+                return ExecuteAsCommand(commandType, compilerName, trace);
 
             // Legacy path: class with `static Run()`
             var type = compiledAssembly.GetType(className);
@@ -579,6 +613,8 @@ namespace Funplay.Editor.Tools.Builtins
 
             try
             {
+                trace.SetPhase("executing");
+                trace.Executed = true;
                 var result = method.Invoke(null, null);
                 return Response.Success("Executed (legacy Run()).", new
                 {
@@ -589,18 +625,24 @@ namespace Funplay.Editor.Tools.Builtins
             catch (TargetInvocationException ex)
             {
                 var inner = ex.InnerException ?? ex;
+                trace.Diagnostic = OperationDiagnostic.Capture("executing", inner);
                 Debug.LogError($"[Funplay] Script runtime error: {inner.Message}\n{inner.StackTrace}");
                 return Response.Error("RUNTIME_ERROR",
-                    new { message = inner.Message, stack = inner.StackTrace, compiler = compilerName });
+                    new { message = ToolResultSerializer.Short(inner.Message, 1024), diagnostic_available = true, exception_type = inner.GetType().FullName, compiler = compilerName });
             }
         }
 
-        private static object ExecuteAsCommand(Type commandType, string compilerName)
+        private static object ExecuteAsCommand(Type commandType, string compilerName, ScriptExecutionTrace trace)
         {
             IFunplayCommand instance;
+            trace.SetPhase("executing");
+            // Constructors and static initializers are user code too and may mutate the project.
+            trace.Executed = true;
             try { instance = (IFunplayCommand)Activator.CreateInstance(commandType); }
             catch (Exception ex)
             {
+                trace.Diagnostic = OperationDiagnostic.Capture("constructing", ex);
+                trace.Recovery = new { compiler = compilerName };
                 return Response.Error("COMMAND_INSTANTIATION_FAILED",
                     new { type = commandType.FullName, error = ex.Message, compiler = compilerName });
             }
@@ -612,11 +654,13 @@ namespace Funplay.Editor.Tools.Builtins
             }
             catch (Exception ex)
             {
+                trace.Diagnostic = OperationDiagnostic.Capture("executing", ex);
+                trace.Recovery = Recovery(ctx, compilerName);
                 Debug.LogError($"[Funplay] Command runtime error: {ex.Message}\n{ex.StackTrace}");
                 return Response.Error("COMMAND_RUNTIME_ERROR", new
                 {
                     message = ex.Message,
-                    stack = ex.StackTrace,
+                    diagnostic_available = true, exception_type = ex.GetType().FullName,
                     compiler = compilerName,
                     logs = ctx.Logs,
                     created = ctx.CreatedInstanceIds,
@@ -625,6 +669,7 @@ namespace Funplay.Editor.Tools.Builtins
                 });
             }
 
+            trace.Recovery = Recovery(ctx, compilerName);
             return Response.Success("Command executed.", new
             {
                 compiler = compilerName,
@@ -635,6 +680,15 @@ namespace Funplay.Editor.Tools.Builtins
                 returnValue = ctx.ReturnValue
             });
         }
+
+        private static object Recovery(ExecutionContext ctx, string compiler)
+            => new { compiler, created = ctx.CreatedInstanceIds.OfType<string>().Take(32).ToArray(),
+                modified = ctx.ModifiedInstanceIds.OfType<string>().Take(32).ToArray(),
+                destroyed = ctx.DestroyedInstanceIds.OfType<string>().Take(32).ToArray(),
+                created_count = ctx.CreatedInstanceIds.Count, modified_count = ctx.ModifiedInstanceIds.Count,
+                destroyed_count = ctx.DestroyedInstanceIds.Count,
+                logs = ctx.Logs.Take(8).Select(x => new { x.Level, Message = ToolResultSerializer.Short(x.Message, 512) }).ToArray(),
+                logs_count = ctx.Logs.Count, bounded_summary = true };
 
         private static string[] GetTypeNames(Assembly assembly)
         {

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Funplay.Editor.Tools.Builtins;
 using Funplay.Editor.Tools.Scripting;
 using NUnit.Framework;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -134,7 +135,7 @@ public class AmbiguousRandomSyntax
     }
 }";
             Assert.IsFalse(ExecuteCodeSafetyPolicy.TryFindViolation(code, true, out _, out var reason), reason);
-            var task = ScriptExecutionFunctions.ExecuteCode(code, safety_checks: true, skip_refresh: true);
+            var task = ExecutionTestCompletion.Finish(ScriptExecutionFunctions.ExecuteCode(code, safety_checks: true, skip_refresh: true));
             while (!task.IsCompleted)
                 yield return null;
             if (task.Exception != null)
@@ -355,11 +356,11 @@ public class AmbiguousRandomWithOtherError
         public IEnumerator ExecuteCodeHistory_PreservesPreferredNamespacesForReplay()
         {
             ScriptExecutionFunctions.ClearExecuteCodeHistory();
-            var task = ScriptExecutionFunctions.ExecuteCode(
+            var task = ExecutionTestCompletion.Finish(ScriptExecutionFunctions.ExecuteCode(
                 AmbiguousRandomCode,
                 false,
                 true,
-                "System");
+                "System"));
             while (!task.IsCompleted)
                 yield return null;
 
@@ -373,7 +374,7 @@ public class AmbiguousRandomWithOtherError
             Assert.AreEqual("System", GetProperty<string>(entry, "preferred_namespaces"));
             var index = GetProperty<int>(entry, "index");
 
-            var replay = ScriptExecutionFunctions.ReplayExecuteCode(index, false);
+            var replay = ExecutionTestCompletion.Finish(ScriptExecutionFunctions.ReplayExecuteCode(index, false));
             while (!replay.IsCompleted)
                 yield return null;
 
@@ -389,11 +390,11 @@ public class AmbiguousRandomWithOtherError
         public IEnumerator ExecuteCodeHistory_BlockedCallPreservesPreferredNamespaces()
         {
             ScriptExecutionFunctions.ClearExecuteCodeHistory();
-            var task = ScriptExecutionFunctions.ExecuteCode(
+            var task = ExecutionTestCompletion.Finish(ScriptExecutionFunctions.ExecuteCode(
                 "System.IO.File.Delete(\"blocked-by-test\");",
                 true,
                 true,
-                "UnityEngine");
+                "UnityEngine"));
             while (!task.IsCompleted)
                 yield return null;
 
@@ -442,7 +443,7 @@ public class AmbiguousRandomWithOtherError
             bool skipRefresh = false,
             string preferredNamespaces = null)
         {
-            var task = ScriptExecutionFunctions.ExecuteCode(code, false, skipRefresh, preferredNamespaces);
+            var task = ExecutionTestCompletion.Finish(ScriptExecutionFunctions.ExecuteCode(code, false, skipRefresh, preferredNamespaces));
             while (!task.IsCompleted)
                 yield return null;
 
@@ -466,6 +467,7 @@ public class AmbiguousRandomWithOtherError
 
         private static T GetProperty<T>(object obj, string name)
         {
+            if (obj is JObject json) return JsonValue<T>(json[name]);
             var prop = obj.GetType().GetProperty(name);
             Assert.NotNull(prop, $"Missing property {name} on {obj.GetType().FullName}");
             return (T)prop.GetValue(obj);
@@ -473,9 +475,20 @@ public class AmbiguousRandomWithOtherError
 
         private static T GetField<T>(object obj, string name)
         {
+            if (obj is JObject json) return JsonValue<T>(json[name]);
             var field = obj.GetType().GetField(name);
             Assert.NotNull(field, $"Missing field {name} on {obj.GetType().FullName}");
             return (T)field.GetValue(obj);
+        }
+
+        private static T JsonValue<T>(JToken value)
+        {
+            Assert.IsNotNull(value);
+            if (typeof(T) != typeof(object)) return value.ToObject<T>();
+            if (value is JValue scalar) return (T)scalar.Value;
+            if (value is JArray array) return (T)(object)(array.All(x => x.Type == JTokenType.String)
+                ? (object)array.Values<string>().ToArray() : array.Cast<object>().ToArray());
+            return (T)(object)value;
         }
 
         private static string Describe(object obj, int depth = 0)

@@ -121,7 +121,15 @@ namespace Funplay.Editor.Tools.Builtins
                     exposed = ToolRegistry.IsEnabled(name) && MCPToolExportPolicy.IsToolAllowed(name, profile, settings?.MCPCoreToolsConfigured ?? false, settings?.MCPCoreTools, settings?.MCPFullToolsConfigured ?? false, settings?.MCPFullTools),
                     read_only = ToolRegistry.GetMethod(name) != null && ToolRegistry.IsReadOnly(ToolRegistry.GetMethod(name)),
                     runtime = name == "extract_recording_frames" ? RecordingEvidenceService.DecoderAvailability() :
-                        name == "simulate_mouse_click" ? State.InputFrameJob.Availability() : null,
+                        name == "simulate_mouse_click" || name == "simulate_mouse_drag" ? State.InputFrameJob.Availability() :
+                        name == "execute_code" || name == "replay_execute_code" ? (object)new {
+                            durable_tasks = true, task_kind = "execution", main_thread_execution = true, cached_thread_safe_observation = true,
+                            idempotency_key_required_for_lost_response_recovery = true, interrupted_code_auto_replay = false,
+                            cancellation = "before_user_code_only", timeout = "cooperative_preparation_budget_not_forced_execution_stop",
+                            result_max_bytes = ToolResultSerializer.MaxBytes, inline_max_bytes = State.ExecutionJobStore.InlineBytes,
+                            page_max_bytes = State.ExecutionJobStore.PageBytes, snapshot_ttl_hours = 24, snapshot_quota_bytes = State.ExecutionJobStore.MaxStoredBytes,
+                            max_receipts = State.ExecutionJobStore.MaxRecords, max_protected_keys = State.ExecutionJobStore.MaxKeys,
+                            journal_available = State.ExecutionJobService.Store.Error == null } : null,
                     role = name == "execute_code" ? "fallback" : "structured"
                 }).ToArray(),
                 hint = "If implemented but unexposed, adjust MCP Server tool exposure deliberately; do not assume the plugin lacks the capability."

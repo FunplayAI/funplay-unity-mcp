@@ -488,11 +488,18 @@ namespace Funplay.Editor.MCP.Server
                     return;
                 }
 
-                // get_task owns a bounded initial Editor read in the bridge. Do not put an
-                // unbounded Editor-queue hop in front of it. Only this read-only entry can
-                // bypass the outer dispatch; Unity APIs and exposure checks still run there.
-                var response = IsBoundedStatusRequest(request)
-                    ? await Task.Run(() => requestHandler.HandleRequestAsync(request, default)).ConfigureAwait(false)
+                // get_task bounds its reads; execute_code journals admission before queuing
+                // its main-thread runner. Neither may wait behind an unbounded Editor hop.
+                // Fast paths retain cached identity/settings and exposure/write guards.
+                var response = IsBoundedStatusRequest(request) || IsDurableExecutionRequest(request)
+                    ? await Task.Run(() =>
+                    {
+                        // Keyed execution redelivery only recovers the journal. Unkeyed legacy
+                        // redelivery retains the existing no-replay recovery response.
+                        if (request.IsBrokerRedelivery && IsDurableExecutionRequest(request) && !HasExecutionKey(request))
+                            return Task.FromResult(TryCreateBrokerRedeliveryResponse(request));
+                        return requestHandler.HandleRequestAsync(request, default);
+                    }).ConfigureAwait(false)
                     : await _threadHelper.ExecuteAsyncOnEditorThreadAsync(
                     async () =>
                     {
@@ -715,6 +722,12 @@ namespace Funplay.Editor.MCP.Server
 
         internal static bool IsBoundedStatusRequest(MCPRequest request) => request?.JsonRpc == "2.0" &&
             request.Method == "tools/call" && string.Equals(GetToolName(request), "get_task", StringComparison.OrdinalIgnoreCase);
+
+        internal static bool IsDurableExecutionRequest(MCPRequest request) => request?.JsonRpc == "2.0" &&
+            request.Method == "tools/call" && string.Equals(GetToolName(request), "execute_code", StringComparison.OrdinalIgnoreCase) &&
+            !ToolRegistry.HasManualOverride("execute_code");
+        private static bool HasExecutionKey(MCPRequest request) => request.Params.TryGetValue("arguments", out var value) &&
+            value is Dictionary<string, object> arguments && arguments.TryGetValue("request_key", out var key) && key is string text && !string.IsNullOrWhiteSpace(text);
 
         /// <summary>
         /// The port this project wants to bind: a port the user picked always wins, otherwise it is

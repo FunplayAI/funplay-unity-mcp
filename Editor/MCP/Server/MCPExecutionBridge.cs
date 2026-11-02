@@ -38,6 +38,7 @@ namespace Funplay.Editor.MCP.Server
             _stateController = stateController ?? throw new ArgumentNullException(nameof(stateController));
             _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
             _interactionLog = interactionLog;
+            ExecutionJobService.Initialize(); // Warm Unity-owned paths/context on the constructing Editor thread.
         }
 
         public async Task<string> ExecuteToolAsync(
@@ -46,6 +47,10 @@ namespace Funplay.Editor.MCP.Server
             CancellationToken ct,
             string routeProjectId = null)
         {
+            if (string.Equals(toolName, "execute_code", StringComparison.OrdinalIgnoreCase) && !ToolRegistry.HasManualOverride("execute_code"))
+                return await ExecuteDurableAsync(arguments, ct, routeProjectId).ConfigureAwait(false);
+            if (string.Equals(toolName, "get_task", StringComparison.OrdinalIgnoreCase) && ExecutionJobService.IsExecutionRead(arguments) && !ToolRegistry.HasManualOverride("get_task"))
+                return await ReadExecutionAsync(arguments, ct, routeProjectId).ConfigureAwait(false);
             bool tracksPending = !string.Equals(toolName, "get_task", StringComparison.OrdinalIgnoreCase);
             var queryClock = System.Diagnostics.Stopwatch.StartNew();
             var invocation = _threadHelper.ExecuteAsyncOnEditorThreadAsync(async () =>
@@ -111,7 +116,15 @@ namespace Funplay.Editor.MCP.Server
                     }
 
                     PluginDebugLogger.Log($"[Funplay MCP Server] Executing tool: {toolName}");
-                    var result = await _invoker.InvokeAsync(functionCall);
+                    string result;
+                    var previousAccess = ExecutionJobService.InvocationAccess.Value;
+                    try
+                    {
+                        if (string.Equals(toolName, "replay_execute_code", StringComparison.OrdinalIgnoreCase))
+                            ExecutionJobService.InvocationAccess.Value = () => AllowedCached("replay_execute_code");
+                        result = await _invoker.InvokeAsync(functionCall);
+                    }
+                    finally { ExecutionJobService.InvocationAccess.Value = previousAccess; }
                     if (tracksPending) DomainReloadHandler.CompletePendingFunction(_stateController);
 
                     if (!string.IsNullOrEmpty(functionCall.Error))
@@ -158,6 +171,106 @@ namespace Funplay.Editor.MCP.Server
             _ = logging.ContinueWith(t => { var ignored = t.Exception; }, CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             return finalResult;
+        }
+
+        private bool AllowedCached(string tool) => ToolRegistry.IsEnabled(tool) && MCPToolExportPolicy.IsToolAllowed(tool,
+            MCPToolExportPolicy.Parse(_settings.MCPToolExportProfile), _settings.MCPCoreToolsConfigured, _settings.MCPCoreTools,
+            _settings.MCPFullToolsConfigured, _settings.MCPFullTools);
+
+        private string GuardCached(string tool, Dictionary<string, object> arguments, string route, bool write)
+        {
+            if (!AllowedCached(tool)) return ToolResultFormatter.Error("TOOL_NOT_EXPOSED", new { tool });
+            arguments.TryGetValue(MCPProjectContext.ExpectedArgument, out var expected);
+            if (expected != null && !(expected is string)) return ToolResultFormatter.Error("INVALID_EXPECTED_CONTEXT");
+            var error = MCPProjectContext.Validate(MCPProjectContext.Current, route, expected as string, write);
+            return error == null ? null : ToolResultFormatter.Error(error, new { context = MCPProjectContext.Current, executed = false });
+        }
+        private T Argument<T>(Dictionary<string, object> arguments, string name, T fallback = default)
+        {
+            if (!arguments.TryGetValue(name, out var value)) return fallback;
+            if (value == null && (!typeof(T).IsValueType || Nullable.GetUnderlyingType(typeof(T)) != null)) return default;
+            if (value is T typed) return typed;
+            if (typeof(T) == typeof(string))
+            { if (value is string text) return (T)(object)text; throw new ArgumentException(name); }
+            try { return (T)_invoker.ConvertValue(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), typeof(T)); }
+            catch { throw new ArgumentException(name); }
+        }
+        private async Task<string> ExecuteDurableAsync(Dictionary<string, object> arguments, CancellationToken ct, string route)
+        {
+            string guarded = GuardCached("execute_code", arguments, route, true);
+            if (guarded != null) return guarded;
+            object result;
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                string action = Argument(arguments, "action", "start")?.Trim().ToLowerInvariant();
+                int wait = Argument(arguments, "wait_seconds", 2);
+                if (TaskStatusService.ValidateWait(wait) is object badWait) return FunctionInvokerController.SerializeResult(badWait);
+                string code = Argument<string>(arguments, "code"), id = Argument<string>(arguments, "task_id");
+                bool confirm = Argument(arguments, "confirm_forget", false);
+                if (action != "start")
+                {
+                    if (code != null || arguments.ContainsKey("request_key")) return ToolResultFormatter.Error("INVALID_EXECUTION_CONTROL_ARGUMENTS");
+                    if (action == "forget" && MCPToolExportPolicy.Parse(_settings.MCPToolExportProfile) != MCPToolExportProfile.Full)
+                        return ToolResultFormatter.Error("EXECUTION_FORGET_REQUIRES_FULL", new { executed = false });
+                    result = ExecutionJobService.Control(action, id, confirm, AllowedCached);
+                }
+                else
+                {
+                    if (id != null || confirm) return ToolResultFormatter.Error("INVALID_EXECUTION_START_ARGUMENTS");
+                    string key = Argument<string>(arguments, "request_key");
+                    var options = new ExecutionOptions { Code = code, Key = key,
+                        PreferredNamespaces = Argument<string>(arguments, "preferred_namespaces"),
+                        Safety = Argument<bool?>(arguments, "safety_checks") ?? _settings.ExecuteCodeSafetyChecksEnabled,
+                        Strict = _settings.ExecuteCodeStrictFilesystemSafetyEnabled,
+                        InjectNamespaces = _settings.ExecuteCodeProjectNamespaceInjectionEnabled,
+                        SkipRefresh = Argument(arguments, "skip_refresh", false), TimeoutSeconds = Argument(arguments, "timeout_seconds", 300),
+                        // Unkeyed starts deliver their durable receipt before waiting across reloads.
+                        WaitSeconds = key == null ? 0 : wait, StillAllowed = () => AllowedCached("execute_code") };
+                    result = await ExecutionJobService.StartAsync(options, ct).ConfigureAwait(false);
+                    if (key == null && result is Newtonsoft.Json.Linq.JObject json && json["data"]?["task"] != null)
+                        json["data"]["task"]["wait_reason"] = "receipt_first";
+                }
+            }
+            catch (ArgumentException ex) { return ToolResultFormatter.Error("INVALID_PARAM", new { param = ex.Message, executed = false }); }
+            return LogCached("execute_code", FunctionInvokerController.SerializeResult(result, "execute_code"));
+        }
+
+        private async Task<string> ReadExecutionAsync(Dictionary<string, object> arguments, CancellationToken ct, string route)
+        {
+            string guarded = GuardCached("get_task", arguments, route, false); if (guarded != null) return guarded;
+            try
+            {
+                int seconds = Argument(arguments, "wait_seconds", 20);
+                var invalid = TaskStatusService.ValidateWait(seconds); if (invalid != null) return FunctionInvokerController.SerializeResult(invalid);
+                string id = Argument<string>(arguments, "task_id"), kind = Argument<string>(arguments, "kind"), key = Argument<string>(arguments, "request_key");
+                var error = TaskStatusService.Resolve(ref id, ref kind, key); if (error != null) return FunctionInvokerController.SerializeResult(error);
+                string after = Argument<string>(arguments, "after_revision"), format = Argument(arguments, "result_format", "summary"), path = Argument<string>(arguments, "result_path");
+                int offset = Argument(arguments, "offset", 0), limit = Argument(arguments, "limit", 100);
+                bool diagnostics = Argument(arguments, "include_diagnostics", false);
+                Newtonsoft.Json.Linq.JObject Read() => ExecutionJobService.Query(id, key, after, offset, limit, format, path, diagnostics, AllowedCached);
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                // Slow/contended local reads must not consume an unbounded response wait.
+                // These workers inspect stored DTOs only, never Unity objects or user code.
+                var initialText = await MCPTaskWaiter.InitialReadAsync(Task.Run(() => Read().ToString(Newtonsoft.Json.Formatting.None)), Math.Max(1000, seconds * 1000), ct, "execution_store").ConfigureAwait(false);
+                var initial = Newtonsoft.Json.Linq.JObject.Parse(initialText);
+                var result = await MCPTaskWaiter.WaitAsync(initial, Math.Max(0, seconds - watch.Elapsed.TotalSeconds), after, () => Task.Run(Read),
+                    () => watch.Elapsed.TotalSeconds, (ms, cancellation) => Task.Delay(ms, cancellation), ct).ConfigureAwait(false);
+                return LogCached("get_task", result.ToString(Newtonsoft.Json.Formatting.None));
+            }
+            catch (ArgumentException ex) { return ToolResultFormatter.Error("INVALID_PARAM", new { param = ex.Message }); }
+        }
+
+        private string LogCached(string tool, string result)
+        {
+            result = MCPProjectContext.Stamp(result);
+            var text = result;
+            var logging = _threadHelper.ExecuteOnEditorThreadAsync(() => _interactionLog?.Add(tool,
+                ToolResultFormatter.IsError(text) ? MCPToolCallStatus.Error : MCPToolCallStatus.Success,
+                VisualCoordinates.WithoutInlineImage(text)));
+            _ = logging.ContinueWith(t => { var ignored = t.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return text;
         }
 
         private string ConvertArgumentToString(object value)

@@ -25,7 +25,7 @@ namespace Funplay.Editor.MCP.Server
             => arguments.TryGetValue("wait_seconds", out var value) && int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out var seconds)
                 ? Math.Max(0, Math.Min(30, seconds)) : 20;
 
-        internal static async Task<string> InitialReadAsync(Task<string> read, int budgetMilliseconds, CancellationToken cancellation)
+        internal static async Task<string> InitialReadAsync(Task<string> read, int budgetMilliseconds, CancellationToken cancellation, string layer = "editor_queue")
         {
             if (read.IsCompleted) return await read.ConfigureAwait(false);
             using (var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
@@ -37,10 +37,10 @@ namespace Funplay.Editor.MCP.Server
                 if (finished == read || read.IsCompleted) return await read.ConfigureAwait(false);
                 _ = read.ContinueWith(t => { var ignored = t.Exception; }, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
-                return JsonConvert.SerializeObject(Response.Error("EDITOR_STATUS_UNAVAILABLE", new
+                return JsonConvert.SerializeObject(Response.Error(layer == "execution_store" ? "EXECUTION_STATUS_UNAVAILABLE" : "EDITOR_STATUS_UNAVAILABLE", new
                 {
-                    retry_after_ms = 5000,
-                    hint = "The initial read could not reach the Editor within the wait budget. Retry status with the same task ID/key; no task outcome was assumed and nothing was replayed."
+                    layer, retry_after_ms = 5000, underlying_operation_cancelled = false, execution_outcome = "unknown", retry_safe = false,
+                    hint = "The initial task snapshot could not be read within the response wait budget. Retry status with the same task ID/key; no outcome was assumed and nothing was replayed."
                 }));
             }
         }

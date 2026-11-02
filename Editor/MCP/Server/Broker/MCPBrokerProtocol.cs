@@ -14,7 +14,8 @@ namespace Funplay.Editor.MCP.Server
         // v4: an empty backend push acknowledges a notification with HTTP 202 and no
         //     body. Replaces older brokers that returned a JSON-RPC reply with id:null.
         // v5: project-scoped client endpoint identity survives broker dispatch/redelivery.
-        public const int Version = 5;
+        // v6: hold-deadline errors explicitly preserve unknown execution outcome/no-replay semantics.
+        public const int Version = 6;
         public const string Name = "funplay-unity-mcp-broker";
         public const string HealthPath = "/_funplay/broker/health";
         public const string AttachPath = "/_funplay/broker/attach";

@@ -16,10 +16,10 @@ using Newtonsoft.Json.Linq;
 namespace Funplay.Editor.State
 {
     // Adapts existing receipts; their IDs, journals, ownership and recovery stay with each service.
-    // All provider reads and the bounded observation cache are accessed on the Editor thread.
+    // Unity providers stay on the Editor thread; execution journal reads and observation are thread-safe.
     internal static class TaskStatusService
     {
-        internal static readonly string[] Kinds = { "editor", "ui_audit", "ui_preview", "recording", "recording_frames", "tests", "input", "verification" };
+        internal static readonly string[] Kinds = { "editor", "ui_audit", "ui_preview", "recording", "recording_frames", "tests", "input", "verification", "execution" };
         private sealed class Observation { internal string revision; internal double changedAt, seenAt; }
         private static readonly Dictionary<string, Observation> observations = new Dictionary<string, Observation>();
 
@@ -38,12 +38,13 @@ namespace Funplay.Editor.State
                 case "tests": return new[] { "run_tests", "get_test_job" };
                 case "input": return new[] { "simulate_mouse_click", "simulate_mouse_drag" };
                 case "verification": return new[] { "verification_scope" };
+                case "execution": return new[] { "execute_code", "replay_execute_code" };
                 default: return Array.Empty<string>();
             }
         }
 
         internal static bool CanRead(string kind, Func<string, bool> allowed) => AccessTools(kind).Any(allowed);
-        private static bool Allowed(string tool)
+        internal static bool Allowed(string tool)
         {
             var settings = RootScopeServices.Services?.GetService(typeof(ISettingsController)) as ISettingsController;
             return ToolRegistry.IsEnabled(tool) && MCPToolExportPolicy.IsToolAllowed(tool,
@@ -51,10 +52,14 @@ namespace Funplay.Editor.State
                 settings?.MCPCoreTools, settings?.MCPFullToolsConfigured ?? false, settings?.MCPFullTools);
         }
 
-        internal static JObject Query(string taskId, string kind, string key, string afterRevision, int offset, int limit)
+        internal static JObject Query(string taskId, string kind, string key, string afterRevision, int offset, int limit,
+            string resultFormat = "summary", string resultPath = null, bool diagnostics = false)
         {
             var problem = Resolve(ref taskId, ref kind, key);
             if (problem != null) return JObject.FromObject(problem);
+            if (kind == "execution") return ExecutionJobService.Query(taskId, key, afterRevision, offset, limit, resultFormat, resultPath, diagnostics, Allowed);
+            if (resultFormat != "summary" || resultPath != null) return JObject.FromObject(Response.Error("EXECUTION_RESULT_OPTIONS_REQUIRE_EXECUTION_KIND"));
+            if (diagnostics && kind != "input") return JObject.FromObject(Response.Error("DIAGNOSTICS_REQUIRE_EXECUTION_OR_INPUT_KIND"));
             if (afterRevision != null && (afterRevision.Length != 64 || afterRevision.Any(c => !"0123456789abcdef".Contains(c))))
                 return JObject.FromObject(Response.Error("INVALID_TASK_REVISION"));
             if (offset < 0 || limit < 1 || limit > 500) return JObject.FromObject(Response.Error("INVALID_PAGE"));
@@ -72,7 +77,7 @@ namespace Funplay.Editor.State
                 case "tests": receipt = TestRunnerFunctions.GetTestJob(taskId); break;
                 case "input":
                     if (!InputFrameJob.CanRead(taskId, key, Allowed)) return JObject.FromObject(Response.Error("TASK_KIND_NOT_EXPOSED"));
-                    receipt = InputFrameJob.Read(taskId, key); break;
+                    receipt = InputFrameJob.Read(taskId, key, diagnostics); break;
                 case "verification": receipt = VerificationScope.Read(taskId, key); break;
                 default: return JObject.FromObject(Response.Error("INVALID_TASK_KIND"));
             }
@@ -91,12 +96,16 @@ namespace Funplay.Editor.State
             if (!Kinds.Contains(kind)) return Response.Error("INVALID_TASK_KIND", new { accepted = Kinds });
             if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(key)) return Response.Error("TASK_ID_OR_REQUEST_KEY_REQUIRED");
             if (id != null && !Guid.TryParse(id, out _)) return Response.Error("INVALID_TASK_ID");
-            if (key != null && (key.Length > 128 || string.IsNullOrWhiteSpace(key) || kind != "editor" && kind != "ui_preview" && kind != "verification" && kind != "input"))
-                return Response.Error("INVALID_TASK_REQUEST_KEY", new { hint = "request_key lookup is supported only for editor, ui_preview, verification and input." });
+            if (key != null && (key.Length > 128 || string.IsNullOrWhiteSpace(key) || kind != "editor" && kind != "ui_preview" && kind != "verification" && kind != "input" && kind != "execution"))
+                return Response.Error("INVALID_TASK_REQUEST_KEY", new { hint = "request_key lookup is supported only for editor, ui_preview, verification, input and execution." });
             return null;
         }
 
         internal static JObject Observe(string kind, object receipt, string afterRevision = null)
+        {
+            lock (observations) return ObserveLocked(kind, receipt, afterRevision);
+        }
+        private static JObject ObserveLocked(string kind, object receipt, string afterRevision)
         {
             var result = Describe(kind, receipt, afterRevision);
             var task = result["data"]?["task"] as JObject;
@@ -138,10 +147,11 @@ namespace Funplay.Editor.State
         internal static JObject Describe(string kind, object receipt, string afterRevision = null)
         {
             var result = receipt is JObject json ? (JObject)json.DeepClone() : JObject.FromObject(receipt);
-            if (result.Value<bool?>("success") != true) return result;
+            if (result.Value<bool?>("success") != true && !(kind == "execution" && result["data"]?["job_id"] != null)) return result;
             var data = result["data"] as JObject;
             if (data == null) return result;
-            var state = kind == "editor" ? data["operation"] as JObject : kind == "ui_preview" ? data["session"] as JObject : data;
+            var state = kind == "editor" ? data["operation"] as JObject : kind == "ui_preview" ? data["session"] as JObject :
+                kind == "execution" && data["execution"] is JObject execution ? execution : data;
             if (state == null) return JObject.FromObject(Response.Error("TASK_NOT_FOUND"));
             // A preview also carries its nested Editor operation_id (which may be JSON null).
             // Never select the first ID-shaped field: it identifies a different owned task.
@@ -155,7 +165,8 @@ namespace Funplay.Editor.State
             // elapsed second or scanned object must not wake the model on every Editor update.
             var stable = new JObject { ["kind"] = kind, ["id"] = id, ["status"] = status, ["phase"] = phase };
             foreach (var name in new[] { "error", "error_code", "message", "compilation_errors", "complete", "ready", "stop_reason",
-                "scenes_restored", "view_restored", "selection_restored", "assets_cleaned", "warnings", "possiblyStuck", "cleanup_pending", "scene_unchanged" })
+                "scenes_restored", "view_restored", "selection_restored", "assets_cleaned", "warnings", "possiblyStuck", "cleanup_pending", "scene_unchanged",
+                "execution_status", "serialization_status", "cancel_requested", "result_deleted", "result_success" })
                 if (state[name] != null) stable[name] = state[name].DeepClone();
             if (data["current_editor"] is JObject editor)
             {

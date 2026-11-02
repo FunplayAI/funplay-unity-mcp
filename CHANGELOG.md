@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.7.5] - 2026-11-02
+
+### Fixed
+
+- Unity vectors, integer vectors, colors, quaternions, rects, bounds, rays, planes, poses and matrices retain explicit finite JSON fields inside nested command results. Unity object references become bounded identities instead of recursively traversed graphs. Cycles, non-finite nullable/JToken values, unsupported raw/JavaScript tokens, nesting over 64 and output over 8 MiB return honest `RESULT_SERIALIZATION_FAILED` / `RESULT_TOO_LARGE` errors; failed serialization never becomes a successful `ToString()` message. Execution identity, confirmed execution and bounded recovery evidence remain separate from result delivery.
+- Boolean parameters follow the same typed/case-insensitive parsing through the durable and legacy invocation paths. Direct C# execution/replay remains a privileged API; MCP admission and deferred execution preserve exposure and project-context checks.
+- A failed journal write closes new admission and leaves an honest terminal in-memory receipt, rather than a queued/running task that can never finish. Corrupt journals fail closed; cached-result cleanup verifies ownership and unchanged bytes before deletion.
+- The stdio proxy's configurable response deadline now covers the complete HTTP body, not only response headers. Proxy, direct HTTP, broker/client and stored-read errors identify their layer and preserve unknown execution outcome/no-automatic-retry semantics. Broker protocol v6 replaces older processes so hold-deadline errors carry the new diagnostics.
+
+### Added
+
+- Durable `execute_code` receipts persisted before scheduling main-thread Unity execution, using the existing `execution:<id>` / `get_task` surface. Keyed short jobs support bounded single-call completion; unkeyed MCP starts deliver their receipt first. A repeated identical request key returns the retained task, while changed code/effective settings/context conflicts. Domain/process recovery never schedules arbitrary code again: interrupted preparation, unknown body outcome and confirmed return are distinct states.
+- Project-local immutable JSON snapshots with SHA256, item pagination via JSON Pointer, exact text chunks with surrogate-safe `next_offset`, 16 KiB inline/page limits, 8 MiB per-result limit, 32 MiB payload quota, 128 receipts, 24-hour retention and 4096 protected keyed receipts/tombstones. Eviction and cleanup retain retry protection; read-only queries never expire/delete files or mutate Unity state. Changed/unclaimed files are preserved for explicit review.
+- Explicit `execute_code` cancel-before-body and terminal-result cleanup controls. Full-only `forget` additionally requires `confirm_forget=true`; it deliberately removes retry protection and is never automatic recovery. Cooperative preparation budgets, response waits and transport deadlines remain separate; synchronous Unity calls are not force-stopped or rolled back and can report a completed over-budget write.
+- Queue/refresh/compile/body/serialization/persistence timings and UTF-8 result byte counts, plus optional bounded stage/type/sanitized method diagnostics through `get_task(include_diagnostics=true)` for execution/input. Input failures keep stable codes, owned device identity and separate cleanup verification; no raw source paths/arguments/stack text are collected in diagnostics. Capability discovery describes the durable execution limits without enabling tools.
+
+### Skills and compatibility
+
+- Built-in `unity-mcp-workflow` v1.0.9 and `unity-ui-composition` v1.0.11 explain execution recovery, structured Unity values, paging, unknown outcomes, layered timeouts, cancellation and owned cleanup. Shared guidance and conditional references are synchronized across all six supported clients; existing prefab-first/design-fidelity/input/background/native-modal policies remain intact. Update installed Project Skills after upgrading.
+- No tool was added: Core remains 40, Full remains 185 across 43 modules. `get_task` stays read-only and respects the originating tool/custom exposure; it cannot cancel, clean or forget keys. A durable receipt is not a business transaction, global actor lock, side-effect rollback, security sandbox or exactly-once guarantee after storage loss.
+
+### Reports and scope
+
+- Implements the five approved priorities from the user's `MCP修改建议.md`: honest Unity-value serialization, recoverable/idempotent execution, bounded result storage/paging, layered timeouts/performance evidence and structured diagnostics. Adds the original long-numeric GUID mouse/touch samples to the existing synthetic-device regression tests. No numbered GitHub PR or issue is merged/closed by this release.
+- Frida/iOS/TypeTree resource/422 reports belong to the separate Reverse Hub backend and are not represented as fixes in this Unity package. Original report statuses are unchanged.
+
+### Validation
+
+- Final graphics-enabled full EditMode runs on macOS each passed **906 tests, zero failures, one environment skip** out of 907: Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.12f1 / Input System 1.19.0 / uGUI 2.0.0, both with dual input backends and TMP Resources. The skip requires an already-installed ffmpeg; no decoder was installed for testing. Coverage includes nested Unity values, invalid JSON extensions, real command writes followed by serialization failure, no-replay keys/conflicts, actual main-thread blocking, cancellation boundaries, journal corruption/write failure, retention/quota/key capacity, cache integrity and lossless Unicode paging.
+- A real 4+ MiB prefab fixture with 1026 transforms and 105 text components was saved through the execution path; repeating its key did not repeat the write. The fixture and temporary preview scene were removed without rebuilding or editing the project's authored UI.
+- Project-scoped HTTP MCP checks in the owned FunplayMcp Editor retained 40 Core tools, returned cached task state in about 1.3 ms while the Editor thread was blocked, recovered a deliberately abandoned client response, and reassembled a 374108-byte JSON snapshot with its exact SHA256. A real compile/domain reload retained the original interrupted-preparation ID with `executed=false`; repeating the key left the execution counter at zero. Owned source fixtures/counters/results were cleaned, and the owned Editor was closed. The project's Player settings and dependency manifests retained their original SHA256 hashes.
+- The v0.7.5 stdio wrapper built with zero warnings/errors and a headers-first/stalled-body HTTP fixture returned a one-second timeout in about 1.1 seconds without repeating the request. Generated Skills passed the skill-creator validator for all 10 SKILL.md documents plus checks for two Cursor rules, 30 conditional references and all local links across six clients. Unity 7/Windows were not independently live-tested in this release.
+
 ## [0.7.4] - 2026-11-02
 
 ### Fixed

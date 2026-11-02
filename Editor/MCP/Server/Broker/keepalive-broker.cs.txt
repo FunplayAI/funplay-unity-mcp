@@ -20,7 +20,7 @@ namespace Funplay.UnityMcp.Broker
     {
         // v4 acknowledges empty backend pushes with HTTP 202 and no body. Older brokers
         // are replaced on package upgrade. Keep in sync with MCPBrokerProtocol.Version.
-        private const int ProtocolVersion = 5;
+        private const int ProtocolVersion = 6;
         private const int PullTimeoutMs = 25000;
         private const long HoldDeadlineMs = 300000;
         private const int MaxHeaderBytes = 64 * 1024;
@@ -609,7 +609,7 @@ namespace Funplay.UnityMcp.Broker
                         try
                         {
                             WriteResponse(pending.Stream, 504, "Gateway Timeout", "application/json",
-                                null, "{\"error\":\"broker_hold_deadline_exceeded\"}");
+                                null, "{\"error\":\"broker_hold_deadline_exceeded\",\"layer\":\"broker_hold\",\"wait_budget_seconds\":300,\"underlying_operation_cancelled\":false,\"execution_outcome\":\"unknown\",\"retry_safe\":false,\"hint\":\"Recover the original task; a lost response is not proof that a write did not run.\"}");
                         }
                         catch
                         {
