@@ -7,7 +7,8 @@
   "unity": "2022.3",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1",
-    "com.unity.inputsystem": "1.7.0"
+    "com.unity.inputsystem": "1.7.0",
+    "com.unity.ugui": "1.0.0"
   },
   "keywords": ["mcp", "ai", "llm", "editor", "tools", "model-context-protocol"],
   "author": {
