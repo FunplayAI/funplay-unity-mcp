@@ -29,6 +29,34 @@ namespace Funplay.Editor.Tests
             AssertBlocked("var path = @\"C:\\Users\\Public\\test.txt\";", true, "Absolute");
         }
 
+        [TestCase(@"var normalized = path.Replace(""\\"", ""/"");")]
+        [TestCase(@"var normalized = path.Replace(""/"", ""\\"");")]
+        [TestCase(@"var separator = ""\\"";")]
+        [TestCase(@"var separators = ""\\\\"";")]
+        [TestCase(@"var separator = @""\"";")]
+        [TestCase(@"var separators = @""\\"";")]
+        [TestCase(@"var normalized = path.Replace('\\', '/');")]
+        [TestCase(@"var combined = string.Join(""\\"", parts);")]
+        public void StrictSafety_AllowsStandaloneSeparatorLiterals(string code)
+        {
+            AssertAllowed(code, true);
+        }
+
+        [TestCase(@"var path = ""C:\\Users\\Public\\test.txt"";", "Absolute")]
+        [TestCase(@"var path = @""C:\Users\Public\test.txt"";", "Absolute")]
+        [TestCase(@"var path = ""\\\\server\\share\\test.txt"";", "Absolute")]
+        [TestCase(@"var path = @""\\server\share\test.txt"";", "Absolute")]
+        [TestCase(@"var path = ""\\folder\\test.txt"";", "Absolute")]
+        [TestCase(@"var path = @""\\?\C:\folder\test.txt"";", "Absolute")]
+        [TestCase(@"var normalized = path.Replace(""\\"", ""/""); var path = ""/Users/xyz/.ssh/config"";", "Absolute")]
+        [TestCase(@"var separator = ""\\""; File.WriteAllText(""Assets/test.txt"", separator);", "File write")]
+        [TestCase(@"var separator = ""\\""; var path = ""..\\ProjectSettings\\ProjectSettings.asset"";", "Path traversal")]
+        [TestCase(@"var separator = ""\\""; var path = ""~\\config"";", "User home")]
+        public void StrictSafety_SeparatorLiteralsDoNotHideFilesystemViolations(string code, string expectedReason)
+        {
+            AssertBlocked(code, true, expectedReason);
+        }
+
         [Test]
         public void NonStrictSafety_DoesNotApplyStrictFilesystemRules()
         {

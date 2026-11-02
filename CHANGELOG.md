@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.4] - 2026-11-02
 
 ### Fixed
 
+- `execute_code` strict filesystem safety no longer classifies quoted backslash-only separator literals (such as `path.Replace("\\", "/")`) as absolute/UNC paths. Windows drive/rooted/UNC paths with actual path content, Unix system paths, home/config paths, traversal and filesystem-write checks remain enforced. The safety defaults and per-call overrides are unchanged; this remains a defensive heuristic, not a complete sandbox.
 - Declare the uGUI package dependency and reference `UnityEngine.UI` from the editor and test assemblies. Fresh package imports can now resolve UI and EventSystems types used by inspection, input simulation and UI tools (PR #62, issue #61).
 - `execute_code` works more than once per code reload on CoreCLR editors (Unity 7). Every snippet compiled to the same `Snippet` assembly name; Mono accepts duplicate names from `Assembly.Load(byte[])`, but Unity's collectible load context rejects them, so every call after the first failed with `COMPILATION_BACKEND_UNAVAILABLE`. Output assemblies now get a unique name.
 - The dotnet-hosted Roslyn path no longer waits ~20 s per compile. `/shared:false` is not a toggle: csc reads it as the pipe name of a compiler server called `false`, waits for it, then falls back to compiling in-process. csc compiles in-process by default, so the flag is dropped (24.5 s -> 0.55 s in a Unity 7 Editor).
@@ -23,7 +24,7 @@
 
 ### Validation
 
-- Maintainer integration checks on macOS (2026-11-02): graphics-enabled full EditMode runs each passed **836 tests, zero failures, one skipped** in Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.12f1 / Input System 1.19.0 / uGUI 2.0.0, both with dual input backends and TMP Resources. The only skip requires an already-installed ffmpeg; native decoder pixel/timestamp tests passed. A clean Unity 6 package import with no direct uGUI dependency resolved uGUI transitively and compiled without the UI/EventSystems errors; a separate legacy-input/no-TMP run passed 827 tests with zero failures and three explicit environment skips. The actual FunplayMcp project's Player settings and dependency manifests retained their original SHA256 hashes.
+- Maintainer release checks on macOS (2026-11-02), including the strict-filesystem separator fix: graphics-enabled full EditMode runs each passed **855 tests, zero failures, one skipped** out of 856 in Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.12f1 / Input System 1.19.0 / uGUI 2.0.0, both with dual input backends and TMP Resources. The only skip requires an already-installed ffmpeg; native decoder pixel/timestamp tests passed. A clean Unity 6 package import with no direct uGUI dependency resolved uGUI transitively and compiled without the UI/EventSystems errors; an earlier PR-integration legacy-input/no-TMP run passed 827 tests with zero failures and three explicit environment skips. The actual FunplayMcp project's Player settings and dependency manifests retained their original SHA256 hashes.
 - A standalone macOS inherited-socket harness kept an intentionally leaked listener alive without broker cleanup and released it with the fix while the broker remained healthy. The four deterministic synthetic-device name regressions failed before the suffix fix and passed in both final full suites. Unity 7 and Windows were not independently live-tested by the maintainer; the reported Windows Script Updater crash still needs confirmation on that exact Editor/platform.
 - Contributor-reported validation from PR #60, before maintainer integration: macOS, same source referenced by two projects, Unity 6000.3.13f1 (legacy Input Manager, no TMP resources imported) and Unity 7000.0.0a12 (Input System, ugui 7.0). Full `Funplay.Editor.Tests` EditMode runs:
 

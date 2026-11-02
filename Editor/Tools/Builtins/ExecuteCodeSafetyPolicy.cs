@@ -30,7 +30,9 @@ namespace Funplay.Editor.Tools.Builtins
             new SafetyRule(@"(?<![\w.])(?:System\.IO\.)?StreamWriter\s*\(", "Raw StreamWriter construction blocked by strict filesystem safety"),
             new SafetyRule(@"(?<![\w.])(?:System\.IO\.)?StreamReader\s*\(", "Raw StreamReader construction blocked by strict filesystem safety"),
             new SafetyRule("\"(?:~|%USERPROFILE%|%APPDATA%|%LOCALAPPDATA%|\\$HOME)(?:/|\\\\|\\\\\\\\|\"|$)", "User home/config path blocked by strict filesystem safety"),
-            new SafetyRule("\"(?:[A-Za-z]:\\\\|\\\\\\\\|/Users/|/home/|/root/|/System/|/Library/|/Applications/|/bin/|/sbin/|/usr/|/etc/|/var/|/private/|/tmp/)", "Absolute or system path blocked by strict filesystem safety"),
+            // A quoted run of backslashes can be a separator literal, e.g. Replace("\\", "/").
+            // Require path content after this prefix; keep rooted folders/UNC servers blocked.
+            new SafetyRule(@"""(?:[A-Za-z]:\\|\\\\(?!\\*"")|/Users/|/home/|/root/|/System/|/Library/|/Applications/|/bin/|/sbin/|/usr/|/etc/|/var/|/private/|/tmp/)", "Absolute or system path blocked by strict filesystem safety"),
             new SafetyRule("\"[^\"]*(?:\\.\\./|\\.\\.\\\\)[^\"]*\"", "Path traversal blocked by strict filesystem safety"),
         };
 

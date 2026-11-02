@@ -124,6 +124,28 @@ public class AmbiguousRandomSyntax
         }
 
         [UnityTest]
+        public IEnumerator ExecuteCode_SeparatorNormalizationRunsWithSafetyChecksEnabled()
+        {
+            const string code = @"public static class SeparatorNormalizationSmoke
+{
+    public static string Run()
+    {
+        return @""Assets\UI\Card.prefab"".Replace(""\\"", ""/"");
+    }
+}";
+            Assert.IsFalse(ExecuteCodeSafetyPolicy.TryFindViolation(code, true, out _, out var reason), reason);
+            var task = ScriptExecutionFunctions.ExecuteCode(code, safety_checks: true, skip_refresh: true);
+            while (!task.IsCompleted)
+                yield return null;
+            if (task.Exception != null)
+                throw task.Exception;
+            AssertSuccess(task.Result);
+            var data = GetProperty<object>(task.Result, "data");
+            Assert.AreEqual("Assets/UI/Card.prefab", GetProperty<string>(data, "result"));
+            Assert.AreEqual("Roslyn", GetProperty<string>(data, "compiler"));
+        }
+
+        [UnityTest]
         public IEnumerator ExecuteCode_TargetTypedNew_RunsWithRoslyn()
         {
             return ExecuteCodeAndAssert(
