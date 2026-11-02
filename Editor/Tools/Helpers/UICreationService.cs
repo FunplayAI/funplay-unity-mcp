@@ -213,25 +213,47 @@ namespace Funplay.Editor.Tools.Helpers
             if (!MatchesFont(font, policy)) throw new UIConfigurationException("FONT_ASSET_REQUIRED", "Choose a valid " + (policy == "tmp" ? "TMP Font Asset" : "Unity Font") + " for the selected text component.");
             return font;
         }
-        // Before com.unity.ugui 7, TMP only works once TMP Essential Resources put "TMP Settings" under
-        // Resources. ugui 7+ ships a built-in TMP Settings asset in the package and uses it when the
-        // project has none, so look it up the way TMP does instead of requiring an import. Avoid
-        // TMP_Settings.instance: older TMP versions may open the import window from it.
+        // Do not touch TMP_Settings.instance: older TMP versions may open the import window.
+        // Newer packages provide a side-effect-free editor resolver which also knows their built-in
+        // settings. Match that resolver rather than taking an arbitrary asset ahead of project settings.
         internal static UnityEngine.Object FindTmpSettings()
         {
             var settingsType = ProjectTypeCatalog.Candidates("TMPro.TMP_Settings").SingleOrDefault();
             if (settingsType == null)
                 return null;
 
-            var imported = Resources.Load("TMP Settings", settingsType);
+            return FindTmpSettings(settingsType, Resources.Load("TMP Settings", settingsType));
+        }
+
+        internal static UnityEngine.Object FindTmpSettings(Type settingsType, UnityEngine.Object imported)
+        {
+            if (settingsType == null)
+                return null;
+
+            var editorResolver = settingsType.GetMethod("FindSettingsInEditor",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,
+                null, new[] { typeof(System.Collections.Generic.List<>).MakeGenericType(settingsType).MakeByRefType(),
+                    settingsType.MakeByRefType(), typeof(bool) }, null);
+            if (editorResolver != null)
+                return editorResolver.Invoke(null, new object[] { null, null, false }) as UnityEngine.Object;
+
             if (imported != null)
                 return imported;
+
+            // Early ugui 7 builds expose the built-in marker but not the editor resolver. Older TMP
+            // packages only load Resources: an unrelated settings asset must not bypass that guard.
+            var builtInFlag = settingsType.GetProperty("isBuiltInSettings",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            if (builtInFlag == null || builtInFlag.PropertyType != typeof(bool))
+                return null;
 
             return AssetDatabase.FindAssets("t:TMP_Settings")
                 .Select(AssetDatabase.GUIDToAssetPath)
                 .OrderBy(path => path, StringComparer.Ordinal)
                 .Select(path => AssetDatabase.LoadAssetAtPath(path, settingsType))
-                .FirstOrDefault(settings => settings != null);
+                .Where(settings => settings != null)
+                .OrderBy(settings => (bool)builtInFlag.GetValue(settings))
+                .FirstOrDefault();
         }
         internal static bool MatchesFont(UnityEngine.Object font, string policy) => font != null && (policy == "legacy" ? font is Font : font.GetType().FullName == "TMPro.TMP_FontAsset");
         internal static void ValidateTmpMaterial(UnityEngine.Object font, Material material)

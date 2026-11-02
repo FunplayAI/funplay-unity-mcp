@@ -14,17 +14,25 @@
 - The Edit Mode video decoder is found on Unity 6+. `UnityEditorInternal.Media.MediaDecoder` moved from `UnityEditor.CoreModule` to `UnityEditor.MediaModule`, so frame extraction reported `VIDEO_DECODER_UNAVAILABLE` on Unity 6 and 7. The decoder is now looked up next to `MediaTime`, falling back to the old assembly.
 - Camera `clearFlags` reports `SolidColor` on every runtime. `CameraClearFlags.Color` and `SolidColor` share a value, and `Enum.ToString` picks a different alias on Mono (`SolidColor`) and CoreCLR (`Color`).
 - Tests: the TMP material fixture reads `TMP_Asset.material` as a field or a property (it is a property in com.unity.ugui 2.0+) and skips when TMP settings are unavailable instead of when no font asset exists (ugui ships font assets in the package); the exported Core tool count accounts for the two Input System-only tools in projects using the legacy Input Manager.
+- Integration follow-ups preserve TMP's actual project-over-built-in settings selection through its side-effect-free editor resolver; older TMP packages still require imported Resources rather than accepting an unrelated settings asset. The compiler toolchain assertion permits a CoreCLR-only SDK, and object lookup recognizes valid `index:version` identifiers while retaining id-first/name-fallback behavior for numeric and colon-containing names. Regression cases include uncached numeric EntityId parsing on Unity 7, serialized component references, TMP resolver selection and native media-module decoder discovery.
+- Synthetic mouse/touch device names end in a non-numeric suffix. Input System's unique-name helper otherwise parses a random GUID's trailing digits as an Int32 and can throw an overflow before a click/drag starts. Four deterministic mouse/touch regressions retain another device so headless tests cannot bypass the unique-name path; ownership-prefix checks and cleanup remain unchanged.
+
+### Pull requests and issues
+
+- PR #62 fixes the missing uGUI dependency/assembly references reported in issue #61. PR #60 adds Unity 7/CoreCLR compatibility, inherited-socket cleanup, TMP/decoder discovery and stable camera flag names; the integration includes the follow-up fixes above.
 
 ### Validation
 
-- macOS, same source referenced by two projects: Unity 6000.3.13f1 (legacy Input Manager, no TMP resources imported) and Unity 7000.0.0a12 (Input System, ugui 7.0). Full `Funplay.Editor.Tests` EditMode runs:
+- Maintainer integration checks on macOS (2026-11-02): graphics-enabled full EditMode runs each passed **836 tests, zero failures, one skipped** in Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.12f1 / Input System 1.19.0 / uGUI 2.0.0, both with dual input backends and TMP Resources. The only skip requires an already-installed ffmpeg; native decoder pixel/timestamp tests passed. A clean Unity 6 package import with no direct uGUI dependency resolved uGUI transitively and compiled without the UI/EventSystems errors; a separate legacy-input/no-TMP run passed 827 tests with zero failures and three explicit environment skips. The actual FunplayMcp project's Player settings and dependency manifests retained their original SHA256 hashes.
+- A standalone macOS inherited-socket harness kept an intentionally leaked listener alive without broker cleanup and released it with the fix while the broker remained healthy. The four deterministic synthetic-device name regressions failed before the suffix fix and passed in both final full suites. Unity 7 and Windows were not independently live-tested by the maintainer; the reported Windows Script Updater crash still needs confirmation on that exact Editor/platform.
+- Contributor-reported validation from PR #60, before maintainer integration: macOS, same source referenced by two projects, Unity 6000.3.13f1 (legacy Input Manager, no TMP resources imported) and Unity 7000.0.0a12 (Input System, ugui 7.0). Full `Funplay.Editor.Tests` EditMode runs:
 
   | | unmodified v0.7.3 | this change |
   |---|---|---|
   | Unity 6000.3.13f1 | 788 passed / 2 failed | **800 passed / 0 failed** / 23 skipped |
   | Unity 7000.0.0a12 | 772 passed / 26 failed | **801 passed / 0 failed** / 25 skipped |
 
-- Live checks on both editors: repeated `execute_code`, dotnet-hosted compile, and broker survival across domain reloads with zero failed requests. On Unity 7, TMP text creation was also exercised for real through the built-in settings rather than skipped.
+- Contributor-reported live checks on both editors: repeated `execute_code`, dotnet-hosted compile, and broker survival across domain reloads with zero failed requests. On Unity 7, TMP text creation was also exercised for real through the built-in settings rather than skipped.
 - The Windows ShellExecute change is based on the .NET 10 / Mono / Wine sources and has **not** been run on Windows.
 
 ## [0.7.3] - 2026-10-28

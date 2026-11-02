@@ -89,6 +89,29 @@ namespace Funplay.Editor.Tests
         }
 
 #if ENABLE_INPUT_SYSTEM
+        [TestCase("c7f1f5f9d7b9435eba6de82753512796", "mouse")]
+        [TestCase("c7f1f5f9d7b9435eba6de82753512796", "touch")]
+        [TestCase("11111111111111111111111111111111", "mouse")]
+        [TestCase("11111111111111111111111111111111", "touch")]
+        public void OwnedPointerDeviceNamesDoNotParseNumericGuidSuffixes(string id, string pointer)
+        {
+            InputDevice owned = null, guard = null;
+            try
+            {
+                // Empty headless Editors otherwise bypass Input System's unique-name helper.
+                guard = InputSystem.AddDevice<Mouse>("FunplayMcp-NameRegressionGuard");
+                var name = InputFrameJob.OwnedDeviceName(id);
+                owned = pointer == "mouse" ? (InputDevice)InputSystem.AddDevice<Mouse>(name) : InputSystem.AddDevice<Touchscreen>(name);
+                Assert.IsTrue(owned.added);
+                StringAssert.StartsWith("FunplayMcp-" + id, owned.name);
+            }
+            finally
+            {
+                if (owned != null && owned.added) InputSystem.RemoveDevice(owned);
+                if (guard != null && guard.added) InputSystem.RemoveDevice(guard);
+            }
+        }
+
         internal sealed class OwnedInputSettings : IDisposable
         {
             private readonly InputSettings original = InputSystem.settings;

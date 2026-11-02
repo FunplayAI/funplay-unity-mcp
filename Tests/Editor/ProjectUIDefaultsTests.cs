@@ -111,6 +111,43 @@ namespace Funplay.Editor.Tests
             CollectionAssert.Contains(new[] { "TMP_RESOURCES_NOT_IMPORTED", "TMP_NOT_AVAILABLE" }, (string)result["code"]);
             Assert.AreEqual(count, root.transform.childCount);
         }
+
+        [Test] public void TmpSettingsLegacyMissingResourcesStayMissing()
+        {
+            Assert.IsNull(UICreationService.FindTmpSettings(typeof(LegacyTmpSettingsFixture), null));
+            Assert.AreSame(root, UICreationService.FindTmpSettings(typeof(LegacyTmpSettingsFixture), root));
+        }
+
+        [Test] public void TmpSettingsEditorResolverWinsWithoutLoggingOrSingletonAccess()
+        {
+            TmpEditorResolverFixture.Expected = root.transform;
+            TmpEditorResolverFixture.Calls = 0;
+            try
+            {
+                Assert.AreSame(root.transform, UICreationService.FindTmpSettings(typeof(TmpEditorResolverFixture), root));
+                Assert.AreEqual(1, TmpEditorResolverFixture.Calls);
+                Assert.IsFalse(TmpEditorResolverFixture.LogErrors);
+            }
+            finally { TmpEditorResolverFixture.Expected = null; }
+        }
+
+        private sealed class LegacyTmpSettingsFixture
+        {
+            public static Object instance => throw new InvalidOperationException("The singleton could open an import dialog.");
+        }
+        private sealed class TmpEditorResolverFixture
+        {
+            internal static Object Expected;
+            internal static int Calls;
+            internal static bool LogErrors;
+            public static Object instance => throw new InvalidOperationException("The singleton must not be accessed.");
+            internal static Object FindSettingsInEditor(out System.Collections.Generic.List<TmpEditorResolverFixture> user,
+                out TmpEditorResolverFixture builtIn, bool logErrors)
+            {
+                user = null; builtIn = null; LogErrors = logErrors; Calls++;
+                return Expected;
+            }
+        }
         [Test] public void PrefabTemplateRetainsLayoutReferencesAndTypography()
         {
             var path = MakeTemplate();

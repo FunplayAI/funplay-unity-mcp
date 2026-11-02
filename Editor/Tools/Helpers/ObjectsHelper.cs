@@ -72,7 +72,7 @@ namespace Funplay.Editor.Tools.Helpers
             // and falls back to a name lookup when nothing resolves by id.
             if (string.IsNullOrEmpty(searchMethod))
             {
-                if (long.TryParse(target, out _) || ulong.TryParse(target, out _))
+                if (ObjectIdHelper.LooksLikeId(target))
                     searchMethod = MethodByIdOrNameOrPath;
                 else if (target.Contains('/'))
                     searchMethod = MethodByPath;

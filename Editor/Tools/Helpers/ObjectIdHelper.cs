@@ -102,6 +102,19 @@ namespace Funplay.Editor.Tools.Helpers
 #endif
         }
 
+        internal static bool LooksLikeId(string value)
+        {
+            if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+                ulong.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                return true;
+#if UNITY_6000_4_OR_NEWER
+            // Also accept the editor's index:version form without treating every colon in a name as an id.
+            return value != null && value.IndexOf(':') >= 0 && TryParseEntityId(value, out _);
+#else
+            return false;
+#endif
+        }
+
 #if UNITY_6000_4_OR_NEWER
         // Unity 7 formats EntityId.ToString() as "index:version", which breaks the numeric id
         // contract clients and the by-id/by-name auto-detection rely on. Its public ULong round

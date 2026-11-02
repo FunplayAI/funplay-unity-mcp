@@ -36,7 +36,10 @@ public class AmbiguousRandomSyntax
             Assert.IsTrue(compilerHostPath.EndsWith("mono") || compilerHostPath.EndsWith("mono.exe") ||
                           compilerHostPath.EndsWith("dotnet") || compilerHostPath.EndsWith("dotnet.exe"), compilerHostPath);
             Assert.IsTrue(cscPath.EndsWith("csc.exe") || cscPath.EndsWith("csc.dll"), cscPath);
-            StringAssert.Contains("MonoBleedingEdge", monoLibRoot);
+            if (compilerHostPath.EndsWith("mono") || compilerHostPath.EndsWith("mono.exe"))
+                StringAssert.Contains("MonoBleedingEdge", monoLibRoot);
+            else if (!string.IsNullOrEmpty(monoLibRoot))
+                Assert.IsTrue(System.IO.Directory.Exists(monoLibRoot), monoLibRoot);
         }
 
         [Test]

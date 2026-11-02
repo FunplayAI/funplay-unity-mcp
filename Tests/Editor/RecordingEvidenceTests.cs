@@ -95,6 +95,13 @@ namespace Funplay.Editor.Tests
         }
         [UnityTest] public IEnumerator NativeDecoderReturnsActualTimesAndImagePixels() => DecodeFrames(false);
         [UnityTest] public IEnumerator InstalledDecoderReturnsActualTimesAndImagePixels() => DecodeFrames(true);
+        [Test] public void NativeDecoderDiscoveryIncludesMediaModule()
+        {
+            const string name = "UnityEditorInternal.Media.MediaDecoder";
+            var type = typeof(MediaTime).Assembly.GetType(name) ?? typeof(EditorWindow).Assembly.GetType(name);
+            var method = type?.GetMethod("GetNextFrame", new[] { typeof(Texture2D), typeof(MediaTime).MakeByRefType() });
+            Assert.AreEqual(method != null, RecordingEvidenceService.NativeDecoderAvailable);
+        }
         private IEnumerator DecodeFrames(bool external)
         {
             if (external && InstalledVideoDecoder.Resolve() == null) Assert.Ignore("Already-installed ffmpeg required; tests never install it.");

@@ -110,6 +110,9 @@ namespace Funplay.Editor.State
         }
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
         private static bool ValidButton(string button) => button == "left" || button == "right" || button == "middle";
+        // Input System interprets trailing digits as an Int32 unique-name counter. A GUID can
+        // end in a longer decimal run, so keep a non-numeric suffix on every owned pointer.
+        internal static string OwnedDeviceName(string jobId) => "FunplayMcp-" + jobId + "-pointer";
         internal static object StartDrag(Vector2 start, Vector2 end, float duration, string button, VisualGeometry geometry,
             string pointerDevice, float pressHold, float endHold, string verificationId, string requestKey)
         {
@@ -152,7 +155,7 @@ namespace Funplay.Editor.State
             Save(); // Journal ownership before creating or pressing an input device.
             try
             {
-                device = job.pointer_device == "touch" ? (InputDevice)InputSystem.AddDevice<Touchscreen>("FunplayMcp-" + active.job_id) : InputSystem.AddDevice<Mouse>("FunplayMcp-" + active.job_id);
+                device = job.pointer_device == "touch" ? (InputDevice)InputSystem.AddDevice<Touchscreen>(OwnedDeviceName(active.job_id)) : InputSystem.AddDevice<Mouse>(OwnedDeviceName(active.job_id));
                 active.device_id = device.deviceId; active.device_name = device.name; Save();
                 control = device is Touchscreen touch ? touch.primaryTouch.press : job.button == "right" ? ((Mouse)device).rightButton : job.button == "middle" ? ((Mouse)device).middleButton : ((Mouse)device).leftButton;
                 downFrame = targetFrame = releaseFrame = -1; releaseQueued = targetQueued = false;

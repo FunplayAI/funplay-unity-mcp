@@ -83,7 +83,7 @@ namespace Funplay.Editor.Tests
         {
             var idTarget = CreateObject("IdTarget");
             var id = ObjectIdHelper.GetSerializableId(idTarget);
-            Assert.That(long.TryParse(id, out _), Is.True, "Unity object IDs must stay numeric.");
+            Assert.That(long.TryParse(id, out _) || ulong.TryParse(id, out _), Is.True, "Unity object IDs must stay numeric.");
 
             var sameNamedObject = CreateObject(id);
             Assert.That(ObjectIdHelper.GetSerializableId(sameNamedObject), Is.Not.EqualTo(id));
@@ -107,6 +107,51 @@ namespace Funplay.Editor.Tests
             _objects.Add(gameObject);
             return gameObject;
         }
+
+        [TestCase("Card:Title")]
+        [TestCase("123:invalid")]
+        [TestCase("18446744073709551615")]
+        public void AutoDetect_UnresolvedIdLikeNamesStillResolveByName(string name)
+        {
+            var named = CreateObject(name);
+            Assert.That(ObjectsHelper.FindObject(name, searchInactive: true), Is.SameAs(named));
+        }
+
+        [Test]
+        public void ObjectId_RoundTripsSerializedComponentReference()
+        {
+            var target = CreateObject("SerializedIdTarget");
+            using (var serialized = new UnityEditor.SerializedObject(target))
+            {
+                var reference = serialized.FindProperty("m_Component.Array.data[0].component");
+                Assert.That(reference, Is.Not.Null);
+                var id = ObjectIdHelper.GetSerializedReferenceId(reference);
+                Assert.That(ObjectIdHelper.ToObject(id), Is.SameAs(target.transform));
+                Assert.That(ObjectIdHelper.GetSerializableId(target.transform), Is.EqualTo(id));
+            }
+        }
+
+#if UNITY_7000_0_OR_NEWER
+        [Test]
+        public void ObjectId_Unity7RawNumericIdResolvesWithoutCache()
+        {
+            var target = CreateObject("UncachedEntityIdTarget");
+            var raw = EntityId.ToULong(target.GetEntityId()).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // No GetSerializableId call before resolution: exercise parsing, not the weak cache.
+            Assert.That(ObjectIdHelper.ToObject(raw), Is.SameAs(target));
+            Assert.That(ObjectIdHelper.GetSerializableId(target), Is.EqualTo(raw));
+        }
+
+        [Test]
+        public void AutoDetect_Unity7FormattedEntityIdWinsOverSameName()
+        {
+            var target = CreateObject("FormattedEntityIdTarget");
+            var formatted = target.GetEntityId().ToString();
+            var named = CreateObject(formatted);
+            Assert.That(ObjectsHelper.FindObject(formatted, searchInactive: true), Is.SameAs(target));
+            Assert.That(ObjectsHelper.FindObject(formatted, ObjectsHelper.MethodByName, searchInactive: true), Is.SameAs(named));
+        }
+#endif
 
         private static string FindUnresolvedNumericGameObjectId()
         {
