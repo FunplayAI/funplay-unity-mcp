@@ -52,19 +52,23 @@ namespace Funplay.Editor.Tools.Builtins
                      "Invocations reaching validation are recorded in session history; replay is an explicit NEW operation, not recovery.")]
         [SceneEditingTool]
         public static async Task<object> ExecuteCode(
-            [ToolParam("C# code for action=start. Omit it for explicit cancel/cleanup/forget controls.", Required = false)] string code = null,
+            [ToolParam("C# code for action=start. Omit it for cancel/cleanup/forget or Full-only recover_journal controls.", Required = false)] string code = null,
             [ToolParam("If true, reject the call before compile when the code contains obviously dangerous patterns. If omitted, uses the MCP Settings window default.", Required = false)] bool? safety_checks = null,
             [ToolParam("If true, skip the pre-compile AssetDatabase.Refresh + wait-for-ready. Use only when the editor is already up to date -- e.g. a read-only inspection snippet, or during a live Play Mode session you must not disturb. The default refresh can trigger an import/domain reload (from your own OR another actor's pending changes in a shared editor) that wipes Play Mode runtime state. When skipped, external file edits made since the last compile are NOT picked up.", Required = false)] bool skip_refresh = false,
             [ToolParam("Optional namespaces for one CS0104 using-alias compile retry; cannot resolve CS0433.", Required = false)] string preferred_namespaces = null,
             [ToolParam("Unique recovery/idempotency key for this logical execution; repeated identical keys never replay retained or expired executions. Use a new key for a genuinely new operation.", Required = false)] string request_key = null,
             [ToolParam("Bounded response wait, 0..30 seconds, default 2. Waiting or disconnecting never cancels user code.", Required = false)] int wait_seconds = 2,
-            [ToolParam("start (default), cancel before user code begins, cleanup a terminal result, or forget an idempotency key with explicit confirmation. Reads/pagination use get_task.", Required = false)] string action = "start",
+            [ToolParam("start, cancel before user code, cleanup a terminal result, confirmed forget, or Full-only recover_journal after resolving storage errors (no task_id; preserves keys and never replays code). Reads/pagination use get_task.", Required = false)] string action = "start",
             [ToolParam("execution:<id> for a control action", Required = false)] string task_id = null,
             [ToolParam("Cooperative preparation budget, 5..900 seconds. A synchronous Unity/user call cannot be force-stopped and may return after this budget.", Required = false)] int timeout_seconds = 300,
             [ToolParam("Required true only for action=forget. Removes retry protection: that key could execute again. Cleanup alone never forgets keys.", Required = false)] bool confirm_forget = false)
         {
             action = action?.Trim().ToLowerInvariant();
-            if (action != "start") return ExecutionJobService.Control(action, task_id, confirm_forget, _ => true);
+            if (action != "start")
+            {
+                if (code != null || request_key != null) return Response.Error("INVALID_EXECUTION_CONTROL_ARGUMENTS");
+                return ExecutionJobService.Control(action, task_id, confirm_forget, _ => true);
+            }
             if (task_id != null || confirm_forget) return Response.Error("INVALID_EXECUTION_START_ARGUMENTS");
             return await ExecutionJobService.StartAsync(new ExecutionOptions { Code = code, Safety = ResolveSafetyChecks(safety_checks),
                 Strict = ResolveStrictFilesystemSafety(), InjectNamespaces = ResolveProjectNamespaceInjection(),

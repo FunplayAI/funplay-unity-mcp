@@ -211,8 +211,8 @@ namespace Funplay.Editor.MCP.Server
                 if (action != "start")
                 {
                     if (code != null || arguments.ContainsKey("request_key")) return ToolResultFormatter.Error("INVALID_EXECUTION_CONTROL_ARGUMENTS");
-                    if (action == "forget" && MCPToolExportPolicy.Parse(_settings.MCPToolExportProfile) != MCPToolExportProfile.Full)
-                        return ToolResultFormatter.Error("EXECUTION_FORGET_REQUIRES_FULL", new { executed = false });
+                    if ((action == "forget" || action == "recover_journal") && MCPToolExportPolicy.Parse(_settings.MCPToolExportProfile) != MCPToolExportProfile.Full)
+                        return ToolResultFormatter.Error(action == "forget" ? "EXECUTION_FORGET_REQUIRES_FULL" : "EXECUTION_JOURNAL_RECOVERY_REQUIRES_FULL", new { executed = false });
                     result = ExecutionJobService.Control(action, id, confirm, AllowedCached);
                 }
                 else

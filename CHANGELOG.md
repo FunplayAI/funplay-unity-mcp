@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.6] - 2026-11-12
+
+### Fixed
+
+- Issue #63: isolate execution-journal writing/reading/copying, idempotency request signatures and serialization-error envelopes from project-wide `JsonConvert.DefaultSettings`. Global type metadata, naming conventions or converters no longer alter this private persistence contract. Existing valid schema-v1 `jobs`/`keys` `$type/$values` wrappers are read without type instantiation; the first canonical save preserves the exact original backup, task IDs, result files and protected keys. Invalid/ambiguous formats still fail closed.
+- Journal I/O diagnostics disclose the storage stage, atomic operation/file role, HRESULT and bounded attempt count without leaking raw paths/messages. Read handles allow atomic replacement on Windows; only explicit sharing/lock violations retry the file operation, at most three attempts. There is no delete-before-replace fallback. This hardens and diagnoses the separate `File.Replace` report; its original Windows/Tuanjie cause is not claimed reproduced or universally fixed.
+
+### Changed
+
+- Full-only `execute_code(action=recover_journal)` explicitly verifies/persists retained history after the actual storage problem is resolved. It refuses active work, changed/deleted history and unsafe formats; it preserves failed-admission receipts/keys and never replays commands or clears unknown outcomes. No new tool or default-exposure change is introduced.
+- Built-in `unity-mcp-workflow` v1.0.10 adds conditional journal-recovery guidance. Status reads remain non-mutating; neither Skills nor error hints advise deleting Library/history, changing project JSON defaults or repeating a write.
+
+### Validation
+
+- The three initial isolated regressions failed on v0.7.5: global array metadata changed the persisted container shape, legacy wrapped lists could not be reloaded, and persistence consulted a throwing project-default-settings delegate. The repaired path passes those cases plus global metadata/naming variants, exact legacy backups (including UTF-8 BOM), invalid/ambiguous journal refusal, request-signature stability and no-replay key retention.
+- Final graphics-enabled full EditMode runs on macOS each passed **935 tests, zero failures, one environment skip** out of 936 in Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.12f1 / Input System 1.19.0 / uGUI 2.0.0. The skip requires an already-installed ffmpeg. The fresh Unity 6 fixture imported its own version's TMP Essential Resources before the final run; no actual project dependencies or Player settings were changed.
+- Fault injection covers bounded sharing/lock retries, permission/disk-full failures, preserved destinations, failed-admission recovery, replacement committed before an exception, no replay of uncertain work, active-execution refusal and externally changed/deleted/emptied history. Windows/Tuanjie was not live-tested; the original `File.Replace` cause remains unconfirmed.
+- Real project-scoped HTTP calls in an explicitly owned FunplayMcp Editor succeeded while global `TypeNameHandling.Arrays` was enabled: vectors/arrays stayed structured, journal containers remained arrays, task recovery by key worked, a duplicate request executed only once, and Core denied journal-management recovery. Temporary globals/counters/results were restored/cleaned and the owned Editor closed. Six-platform Skills validation covered ten SKILL.md documents, two Cursor rules, thirty references and all local links. The original Player settings and package manifest/lockfile SHA256 hashes remained unchanged.
+
 ## [0.7.5] - 2026-11-02
 
 ### Fixed

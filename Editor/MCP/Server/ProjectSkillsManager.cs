@@ -39,7 +39,7 @@ namespace Funplay.Editor.MCP.Server
         {
             new SkillDefinition(
                 "unity-mcp-workflow",
-                "1.0.9",
+                "1.0.10",
                 "Unity MCP Workflow",
                 "Efficient workflow for using Unity MCP to edit, import, compile, inspect, and test Unity projects, including screenshot and Game View recording verification.",
                 true,

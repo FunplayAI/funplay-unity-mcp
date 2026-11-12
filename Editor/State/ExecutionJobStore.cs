@@ -49,17 +49,24 @@ namespace Funplay.Editor.State
         private readonly object gate = new object();
         private readonly string root, journalPath;
         private readonly Func<long> now;
+        private readonly Action<string, string> replaceFile;
         private ExecutionJournal journal;
+        private bool journalLoaded;
+        private string persistedHash, attemptedHash, legacyText, legacyHash, failedLoadHash;
+        internal JObject JournalDiagnostic { get; private set; }
+        internal string LegacyBackup { get; private set; }
         internal string Error { get; private set; }
 
-        internal ExecutionJobStore(string root, Func<long> clock = null)
+        internal ExecutionJobStore(string root, Func<long> clock = null, Action<string, string> replace = null)
         {
             this.root = Path.GetFullPath(root); journalPath = Path.Combine(this.root, "journal.json");
             now = clock ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            replaceFile = replace;
             try
             {
                 Directory.CreateDirectory(this.root);
                 journal = File.Exists(journalPath) ? ReadJournal() : new ExecutionJournal();
+                journalLoaded = true;
                 // A previous domain/process cannot continue arbitrary user code. Preserve the ID,
                 // key and last known phase, but never enqueue/replay anything during recovery.
                 bool changed = false;
@@ -75,11 +82,13 @@ namespace Funplay.Editor.State
                 }
                 if (changed) Save();
             }
-            catch (Exception ex) { journal = new ExecutionJournal(); Error = ex.GetType().Name; }
+            catch (Exception ex) { if (!journalLoaded) journal = new ExecutionJournal(); RecordFailure("load_journal", ex); }
         }
 
         internal static string Hash(string value)
-        { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""))).Replace("-", "").ToLowerInvariant(); }
+        { return HashBytes(Encoding.UTF8.GetBytes(value ?? "")); }
+        internal static string HashBytes(byte[] bytes)
+        { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant(); }
         private static bool Id(string id) => Guid.TryParseExact(id, "N", out _);
         private static bool Digest(string value) => value?.Length == 64 && value.All(c => "0123456789abcdef".Contains(c));
         private static bool Source(string value) => value == "execute_code" || value == "replay_execute_code";
@@ -88,10 +97,14 @@ namespace Funplay.Editor.State
 
         private ExecutionJournal ReadJournal()
         {
-            var info = new FileInfo(journalPath);
-            if (info.Length > 8 * 1024 * 1024) throw new InvalidDataException("Oversized journal");
-            var value = JsonConvert.DeserializeObject<ExecutionJournal>(File.ReadAllText(journalPath), new JsonSerializerSettings {
-                TypeNameHandling = TypeNameHandling.None, MetadataPropertyHandling = MetadataPropertyHandling.Ignore, MaxDepth = ToolResultSerializer.MaxDepth });
+            var bytes = ExecutionAtomicFile.Read(journalPath);
+            if (!journalLoaded && failedLoadHash == null) failedLoadHash = HashBytes(bytes);
+            var text = new UTF8Encoding(false, true).GetString(bytes);
+            var token = ExecutionJson.Parse(text.TrimStart('\ufeff'));
+            if (token["schema_version"]?.Type != JTokenType.Integer || token.Value<int>("schema_version") != 1)
+                throw new InvalidDataException("Unsupported execution journal schema.");
+            bool wrapped = NormalizeList(token, "jobs", "ExecutionJobRecord") | NormalizeList(token, "keys", "ExecutionKeyRecord");
+            var value = token.ToObject<ExecutionJournal>(ExecutionJson.Serializer());
             if (value == null || value.schema_version != 1 || value.jobs == null || value.keys == null ||
                 value.jobs.Count > MaxRecords || value.keys.Count > MaxKeys ||
                 value.jobs.Any(x => x == null || !Id(x.job_id) || x.context == null || !Digest(x.context.project_id) ||
@@ -105,11 +118,33 @@ namespace Funplay.Editor.State
                 value.jobs.Select(x => x.job_id).Distinct().Count() != value.jobs.Count ||
                 value.keys.Select(x => x.key_hash).Distinct().Count() != value.keys.Count)
                 throw new InvalidDataException("Invalid execution journal; nothing was replayed");
+            foreach (var key in value.keys)
+            {
+                var job = value.jobs.FirstOrDefault(x => x.job_id == key.job_id);
+                if (job != null && (job.key_hash != key.key_hash || job.request_hash != key.request_hash || job.source_tool != key.source_tool || job.context.instance_id != key.instance_id))
+                    throw new InvalidDataException("Inconsistent execution key; nothing was replayed.");
+            }
+            persistedHash = HashBytes(bytes);
+            if (wrapped) { legacyText = text; legacyHash = persistedHash; }
             return value;
         }
 
+        private static bool NormalizeList(JObject root, string name, string element)
+        {
+            if (root[name] is JArray) return false;
+            if (!(root[name] is JObject wrapper) || wrapper.Properties().Any(x => x.Name != "$type" && x.Name != "$values") ||
+                !(wrapper["$values"] is JArray values) || wrapper["$type"]?.Type != JTokenType.String)
+                throw new InvalidDataException("Invalid execution list container.");
+            string type = wrapper.Value<string>("$type");
+            if (type.Length > 512 || !type.StartsWith("System.Collections.Generic.List`1[[Funplay.Editor.State." + element + ", Funplay.Editor", StringComparison.Ordinal))
+                throw new InvalidDataException("Unrecognized execution list container.");
+            // Only these two known list envelopes are unwrapped. Never resolve $type, follow
+            // $ref or recursively reinterpret opaque diagnostic/recovery/business JSON.
+            root[name] = values.DeepClone(); return true;
+        }
+
         private static ExecutionJobRecord Copy(ExecutionJobRecord record) => record == null ? null :
-            JsonConvert.DeserializeObject<ExecutionJobRecord>(JsonConvert.SerializeObject(record));
+            ExecutionJson.Copy(record);
         internal ExecutionJobRecord Find(string id, string key = null)
         {
             lock (gate)
@@ -132,7 +167,7 @@ namespace Funplay.Editor.State
             lock (gate)
             {
                 admitted = null; existing = false;
-                if (Error != null) return Response.Error("EXECUTION_JOURNAL_UNAVAILABLE", new { detail = Error, executed = false });
+                if (Error != null) return Unavailable(false);
                 if (!Digest(requestHash) || !Source(sourceTool) || context == null || !Digest(context.project_id))
                     return Response.Error("INVALID_EXECUTION_ADMISSION", new { executed = false });
                 if (timeout < 5 || timeout > 900) return Response.Error("INVALID_EXECUTION_TIMEOUT");
@@ -168,15 +203,14 @@ namespace Funplay.Editor.State
                 }
                 catch (Exception ex)
                 {
-                    Error = ex.GetType().Name;
+                    RecordFailure("admit_journal", ex);
                     var failed = journal.jobs.LastOrDefault(x => !x.Terminal && x.request_hash == requestHash && x.key_hash == keyHash);
                     if (failed != null)
                     {
                         failed.status = "failed"; failed.phase = "admission_persistence_failed";
                         failed.error_code = "EXECUTION_JOURNAL_UNAVAILABLE"; failed.executed = false; failed.finished_ms = now(); failed.revision++;
                     }
-                    return Response.Error("EXECUTION_JOURNAL_UNAVAILABLE", new { executed = false, detail = Error,
-                        task_id = failed == null ? null : "execution:" + failed.job_id, journal_available = false });
+                    return Unavailable(false, failed?.job_id);
                 }
             }
         }
@@ -187,7 +221,7 @@ namespace Funplay.Editor.State
             {
                 var job = journal.jobs.Single(x => x.job_id == id);
                 update(job); job.revision++;
-                try { Save(); } catch (Exception ex) { Error = ex.GetType().Name; throw; }
+                Save();
             }
         }
 
@@ -195,7 +229,7 @@ namespace Funplay.Editor.State
         {
             lock (gate)
             {
-                Error = exception.GetType().Name;
+                RecordFailure("journal_unavailable", exception);
                 var job = journal.jobs.FirstOrDefault(x => x.job_id == id);
                 if (job == null) return;
                 job.status = "failed"; job.phase = "journal_unavailable"; job.result_success = false;
@@ -216,14 +250,14 @@ namespace Funplay.Editor.State
                 var job = journal.jobs.Single(x => x.job_id == id);
                 if (job.Terminal) return;
                 job.executed = trace.Executed;
-                job.recovery = trace.Recovery == null ? null : JObject.FromObject(trace.Recovery);
+                job.recovery = trace.Recovery == null ? null : ExecutionJson.Object(trace.Recovery);
                 job.diagnostic = trace.Diagnostic == null ? null : (JObject)trace.Diagnostic.DeepClone();
                 job.exception_type = job.diagnostic?.Value<string>("exception_type");
                 job.phase = "persisting"; job.revision++; Save();
                 try
                 {
                     Maintain(bytes.Length, id);
-                    AtomicWrite(PayloadPath(id), json);
+                    ExecutionAtomicFile.Write(PayloadPath(id), json, "result", job.result_sha256, replaceFile);
                     job.result_bytes = bytes.Length; job.result_sha256 = Hash(json);
                     job.result_success = payload.Value<bool?>("success") == true;
                     job.result_code = payload.Value<string>("code"); job.result_message = ToolResultSerializer.Short(payload.Value<string>("message"), 512);
@@ -239,7 +273,8 @@ namespace Funplay.Editor.State
                     job.result_success = false;
                     job.execution_status = trace.Executed ? "returned" : "not_executed";
                     job.exception_type = ex.GetType().FullName; job.finished_ms = now(); job.revision++;
-                    try { Save(); } catch { Error = ex.GetType().Name; }
+                    job.diagnostic = OperationDiagnostic.Capture("persist_result", ex);
+                    try { Save(); } catch { /* Save retains the journal diagnostic and closes admission. */ }
                 }
             }
         }
@@ -296,17 +331,17 @@ namespace Funplay.Editor.State
                 var job = Find(id, key);
                 if (job == null)
                 {
-                    if (Error != null) return JObject.FromObject(Response.Error("EXECUTION_JOURNAL_UNAVAILABLE", new { retry_safe = false, journal_available = false }));
+                    if (Error != null) return Unavailable(null, diagnostics: diagnostics);
                     bool expired = key != null && journal.keys.Any(x => x.key_hash == Hash(key));
-                    return JObject.FromObject(Response.Error(expired ? "EXECUTION_RECEIPT_EXPIRED" : "EXECUTION_NOT_FOUND", new { retry_safe = false }));
+                    return ExecutionJson.Object(Response.Error(expired ? "EXECUTION_RECEIPT_EXPIRED" : "EXECUTION_NOT_FOUND", new { retry_safe = false }));
                 }
-                if (format != "summary" && format != "items" && format != "text") return JObject.FromObject(Response.Error("INVALID_RESULT_FORMAT"));
-                if (offset < 0 || limit < 1 || limit > (format == "text" ? 16384 : 500)) return JObject.FromObject(Response.Error("INVALID_PAGE"));
+                if (format != "summary" && format != "items" && format != "text") return ExecutionJson.Object(Response.Error("INVALID_RESULT_FORMAT"));
+                if (offset < 0 || limit < 1 || limit > (format == "text" ? 16384 : 500)) return ExecutionJson.Object(Response.Error("INVALID_PAGE"));
                 bool retained = job.result_sha256 != null && !job.result_deleted && now() < job.expires_ms;
                 bool intactSize = false;
                 try { var file = new FileInfo(PayloadPath(job.job_id)); intactSize = file.Exists && file.Length == job.result_bytes; } catch (IOException) { }
                 bool available = retained && intactSize;
-                var data = JObject.FromObject(job); data.Remove("key_hash"); data.Remove("request_hash"); data.Remove("diagnostic");
+                var data = ExecutionJson.Object(job); data.Remove("key_hash"); data.Remove("request_hash"); data.Remove("diagnostic");
                 data["budget_exceeded"] = (job.finished_ms > 0 ? job.finished_ms : now()) - job.created_ms > job.timeout_seconds * 1000L;
                 data["cancel_supported"] = !job.Terminal && job.phase != "executing" && job.phase != "serializing" && job.phase != "persisting";
                 data["result"] = new JObject { ["available"] = available, ["bytes"] = job.result_bytes,
@@ -314,28 +349,31 @@ namespace Funplay.Editor.State
                     ["storage"] = "project_library", ["integrity_status"] = retained && !intactSize ? "missing_or_changed" : available ? "hash_not_checked_this_read" : "unavailable",
                     ["raw_result_recoverable"] = job.serialization_status != "failed" && available };
                 data["journal_available"] = Error == null;
+                data["journal_format"] = legacyText == null ? "plain_v1" : "legacy_list_wrappers_v1";
+                if (LegacyBackup != null) data["legacy_journal_backup"] = LegacyBackup;
+                if (Error != null) data["journal_diagnostic"] = Diagnostic(diagnostics);
                 if (diagnostics && job.diagnostic != null) data["diagnostic"] = job.diagnostic.DeepClone();
                 JObject payload = null;
                 if (retained && !intactSize && format != "summary")
-                    return JObject.FromObject(Response.Error("EXECUTION_RESULT_MISSING_OR_CHANGED", new { task_id = "execution:" + job.job_id, executed = job.executed, retry_safe = false }));
+                    return ExecutionJson.Object(Response.Error("EXECUTION_RESULT_MISSING_OR_CHANGED", new { task_id = "execution:" + job.job_id, executed = job.executed, retry_safe = false }));
                 if (available && (format != "summary" || job.result_bytes <= InlineBytes))
                 {
                     try
                     {
                         var file = new FileInfo(PayloadPath(job.job_id));
                         if (!file.Exists || file.Length != job.result_bytes || file.Length > ToolResultSerializer.MaxBytes)
-                            return JObject.FromObject(Response.Error("EXECUTION_RESULT_MISSING_OR_CHANGED", new { task_id = "execution:" + job.job_id, executed = job.executed, retry_safe = false }));
+                            return ExecutionJson.Object(Response.Error("EXECUTION_RESULT_MISSING_OR_CHANGED", new { task_id = "execution:" + job.job_id, executed = job.executed, retry_safe = false }));
                         var text = File.ReadAllText(file.FullName);
-                        if (Hash(text) != job.result_sha256) return JObject.FromObject(Response.Error("EXECUTION_RESULT_MISSING_OR_CHANGED", new { executed = job.executed, retry_safe = false }));
+                        if (Hash(text) != job.result_sha256) return ExecutionJson.Object(Response.Error("EXECUTION_RESULT_MISSING_OR_CHANGED", new { executed = job.executed, retry_safe = false }));
                         data["result"]["integrity_status"] = "sha256_verified";
                         if (format == "text")
                         {
-                            if (path != null) return JObject.FromObject(Response.Error("TEXT_RESULT_PATH_UNSUPPORTED"));
+                            if (path != null) return ExecutionJson.Object(Response.Error("TEXT_RESULT_PATH_UNSUPPORTED"));
                             if (offset > text.Length || offset > 0 && offset < text.Length && char.IsLowSurrogate(text[offset]) && char.IsHighSurrogate(text[offset - 1]))
-                                return JObject.FromObject(Response.Error("INVALID_TEXT_OFFSET"));
+                                return ExecutionJson.Object(Response.Error("INVALID_TEXT_OFFSET"));
                             int end = Math.Min(text.Length, offset + limit);
                             while (end > offset && (end < text.Length && char.IsLowSurrogate(text[end]) && char.IsHighSurrogate(text[end - 1]) || Encoding.UTF8.GetByteCount(text.Substring(offset, end - offset)) > PageBytes)) end--;
-                            if (end == offset && offset < text.Length) return JObject.FromObject(Response.Error("TEXT_PAGE_LIMIT_TOO_SMALL"));
+                            if (end == offset && offset < text.Length) return ExecutionJson.Object(Response.Error("TEXT_PAGE_LIMIT_TOO_SMALL"));
                             data["result_page"] = new JObject { ["format"] = "text", ["offset"] = offset, ["next_offset"] = end,
                                 ["total_characters"] = text.Length, ["offset_units"] = "UTF-16 code units; use next_offset", ["complete"] = end == text.Length,
                                 ["text"] = text.Substring(offset, end - offset), ["sha256"] = job.result_sha256 };
@@ -347,10 +385,10 @@ namespace Funplay.Editor.State
                             else if (job.result_bytes <= InlineBytes) data["output"] = payload["data"]?.DeepClone();
                         }
                     }
-                    catch (ArgumentException) { return JObject.FromObject(Response.Error("INVALID_RESULT_PATH_OR_OFFSET", new { executed = job.executed, retry_safe = false })); }
-                    catch (Exception ex) { return JObject.FromObject(Response.Error("EXECUTION_RESULT_READ_FAILED", new { exception_type = ex.GetType().FullName, executed = job.executed, retry_safe = false })); }
+                    catch (ArgumentException) { return ExecutionJson.Object(Response.Error("INVALID_RESULT_PATH_OR_OFFSET", new { executed = job.executed, retry_safe = false })); }
+                    catch (Exception ex) { return ExecutionJson.Object(Response.Error("EXECUTION_RESULT_READ_FAILED", new { exception_type = ex.GetType().FullName, executed = job.executed, retry_safe = false })); }
                 }
-                if (format != "summary" && !available) return JObject.FromObject(Response.Error(job.Terminal ? "EXECUTION_RESULT_UNAVAILABLE" : "EXECUTION_RESULT_NOT_READY", new { task_id = "execution:" + job.job_id, executed = job.executed, retry_safe = false }));
+                if (format != "summary" && !available) return ExecutionJson.Object(Response.Error(job.Terminal ? "EXECUTION_RESULT_UNAVAILABLE" : "EXECUTION_RESULT_NOT_READY", new { task_id = "execution:" + job.job_id, executed = job.executed, retry_safe = false }));
                 if (originalResult && payload != null && job.result_bytes <= InlineBytes)
                 {
                     data.Remove("output");
@@ -361,7 +399,7 @@ namespace Funplay.Editor.State
                     { payload["success"] = false; payload["code"] = job.error_code; payload["error"] = job.error_code; }
                     return payload;
                 }
-                var receipt = JObject.FromObject(Response.Success("Execution task: " + job.status + ". Inspect result_success and execution_status; a status query does not replay or cancel it.", data));
+                var receipt = ExecutionJson.Object(Response.Success("Execution task: " + job.status + ". Inspect result_success and execution_status; a status query does not replay or cancel it.", data));
                 if (originalResult && job.Terminal) { receipt["success"] = job.result_success; if (!job.result_success) { receipt["code"] = job.error_code ?? "EXECUTION_FAILED"; receipt["error"] = receipt["code"].DeepClone(); } }
                 return receipt;
             }
@@ -429,21 +467,87 @@ namespace Funplay.Editor.State
         }
         private void Save()
         {
-            try { AtomicWrite(journalPath, JsonConvert.SerializeObject(journal)); }
-            catch (Exception ex) { Error = ex.GetType().Name; throw; }
-        }
-        private static void AtomicWrite(string path, string text)
-        {
-            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                ExecutionAtomicFile.Check(journalPath, persistedHash);
+                if (legacyText != null)
                 {
-                    var bytes = new UTF8Encoding(false).GetBytes(text); stream.Write(bytes, 0, bytes.Length); stream.Flush(true);
+                    // The validated source is retained byte-for-byte before its first canonical
+                    // save. No result file or idempotency record is deleted during migration.
+                    string backupName = "journal.legacy-list-wrappers." + legacyHash + ".json";
+                    string backup = Path.Combine(root, backupName);
+                    if (File.Exists(backup)) ExecutionAtomicFile.Check(backup, legacyHash);
+                    else ExecutionAtomicFile.Write(backup, legacyText, "legacy_journal_backup", null);
+                    LegacyBackup = backupName;
                 }
-                if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
+                var text = ExecutionJson.Serialize(journal); attemptedHash = Hash(text);
+                ExecutionAtomicFile.Write(journalPath, text, "journal", persistedHash, replaceFile);
+                persistedHash = attemptedHash; attemptedHash = null; legacyText = null; legacyHash = null;
             }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (Exception ex) { RecordFailure("save_journal", ex); throw; }
+        }
+
+        private void RecordFailure(string stage, Exception exception)
+        {
+            var cause = exception is ExecutionStorageException storage ? storage.InnerException : exception;
+            Error = cause.GetType().Name;
+            JournalDiagnostic = OperationDiagnostic.Capture(stage, exception);
+            JournalDiagnostic["failure_code"] = cause is JsonException ? "JOURNAL_JSON_INVALID" :
+                cause is DecoderFallbackException ? "JOURNAL_ENCODING_INVALID" :
+                cause is InvalidDataException ? "JOURNAL_FORMAT_OR_INTEGRITY_INVALID" :
+                cause is UnauthorizedAccessException ? "JOURNAL_ACCESS_DENIED" : "JOURNAL_STORAGE_FAILED";
+        }
+        private JObject Diagnostic(bool full)
+        {
+            var copy = JournalDiagnostic == null ? new JObject() : (JObject)JournalDiagnostic.DeepClone();
+            if (!full) copy.Remove("stack_methods");
+            return copy;
+        }
+        private JObject Unavailable(bool? executed, string id = null, bool diagnostics = false) => ExecutionJson.Object(
+            Response.Error("EXECUTION_JOURNAL_UNAVAILABLE", new { detail = Error, executed,
+                task_id = id == null ? null : "execution:" + id, journal_available = false, retry_safe = false,
+                journal_diagnostic = Diagnostic(diagnostics), recovery = new { tool = "execute_code", action = "recover_journal", requires_profile = "full",
+                    hint = "After resolving the reported storage problem, explicitly recover_journal or restart the Editor. This preserves keys and never replays commands. Do not delete the journal or change project JSON defaults." } }));
+
+        internal object RecoverJournal()
+        {
+            lock (gate)
+            {
+                if (journal.jobs.Any(x => !x.Terminal)) return Response.Error("EXECUTION_STILL_RUNNING");
+                if (Error == null) return Response.Success("Execution journal is already available; no commands were replayed.", new { journal_available = true, commands_replayed = 0 });
+                try
+                {
+                    if (!journalLoaded)
+                    {
+                        // A missing unreadable journal is not an empty history. Never create a
+                        // replacement that silently drops unknown original retry protection.
+                        if (failedLoadHash != null) ExecutionAtomicFile.Check(journalPath, failedLoadHash);
+                        journal = ReadJournal(); journalLoaded = true;
+                        foreach (var job in journal.jobs.Where(x => !x.Terminal))
+                        {
+                            bool returned = job.execution_status == "returned";
+                            bool unknown = returned || job.phase == "executing" || job.phase == "serializing" || job.phase == "persisting";
+                            job.status = unknown ? "outcome_unknown" : "interrupted";
+                            job.executed = returned ? job.executed : unknown ? (bool?)null : false;
+                            job.execution_status = returned ? "returned" : unknown ? "outcome_unknown" : "not_executed";
+                            job.error_code = "EXECUTION_INTERRUPTED"; job.phase = "recovered_without_replay"; job.finished_ms = now(); job.revision++;
+                        }
+                    }
+                    else
+                    {
+                        string actual = File.Exists(journalPath) ? HashBytes(ExecutionAtomicFile.Read(journalPath)) : null;
+                        if (actual != persistedHash && (attemptedHash == null || actual != attemptedHash))
+                            throw new InvalidDataException("Journal changed externally; no recovery write was made.");
+                        persistedHash = actual; // Also recognizes a replacement that committed before an I/O error.
+                    }
+                    Save(); ExecutionAtomicFile.Check(journalPath, persistedHash);
+                    Error = null; JournalDiagnostic = null;
+                    return Response.Success("Execution journal verified and persisted. History/keys were retained; no commands were replayed.",
+                        new { journal_available = true, records = journal.jobs.Count, protected_keys = journal.keys.Count,
+                            commands_replayed = 0, legacy_journal_backup = LegacyBackup });
+                }
+                catch (Exception ex) { RecordFailure("recover_journal", ex); return Unavailable(null); }
+            }
         }
     }
 }

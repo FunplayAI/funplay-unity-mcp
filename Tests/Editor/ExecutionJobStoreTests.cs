@@ -170,7 +170,8 @@ namespace Funplay.Editor.Tests
         {
             var first = Admit("disk-failed"); var trace = new ScriptExecutionTrace { Id = first.job_id, Executed = true, Phase = "serializing" };
             var path = Path.Combine(root, "journal.json"); File.Delete(path); Directory.CreateDirectory(path);
-            Assert.Throws<IOException>(() => store.Update(first.job_id, x => x.phase = "serializing"));
+            Assert.Throws<InvalidDataException>(() => store.Update(first.job_id, x => x.phase = "serializing"));
+            Assert.IsTrue(Directory.Exists(path), "A replaced/deleted journal must not be silently recreated.");
             store.FailInMemory(first.job_id, trace, new IOException("private path must not appear"));
             var receipt = store.Read(first.job_id, null, diagnostics: true);
             Assert.IsTrue((bool)receipt["success"]); Assert.AreEqual("failed", (string)receipt["data"]["status"]);

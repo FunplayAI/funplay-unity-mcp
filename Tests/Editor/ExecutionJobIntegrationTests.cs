@@ -138,8 +138,16 @@ namespace Funplay.Editor.Tests
             Assert.AreEqual("PROJECT_CONTEXT_MISMATCH", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", args, default, new string('b', 64)).Result)["code"]);
             var forget = new Dictionary<string, object> { ["action"] = "forget", ["task_id"] = "execution:" + Guid.NewGuid().ToString("N"), ["confirm_forget"] = true };
             Assert.AreEqual("EXECUTION_FORGET_REQUIRES_FULL", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", forget, default, MCPProjectContext.Current.project_id).Result)["code"]);
+            var recovery = new Dictionary<string, object> { ["action"] = "recover_journal" };
+            Assert.AreEqual("EXECUTION_JOURNAL_RECOVERY_REQUIRES_FULL", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", recovery, default, MCPProjectContext.Current.project_id).Result)["code"]);
             settings.MCPCoreTools = new[] { "get_task" };
             Assert.AreEqual("TOOL_NOT_EXPOSED", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", args, default, MCPProjectContext.Current.project_id).Result)["code"]);
+            settings.MCPToolExportProfile = "full"; settings.MCPFullTools = new[] { "get_task" };
+            Assert.AreEqual("TOOL_NOT_EXPOSED", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", recovery, default, MCPProjectContext.Current.project_id).Result)["code"]);
+            settings.MCPFullTools = new[] { "get_task", "execute_code" };
+            Assert.AreEqual("PROJECT_CONTEXT_REQUIRED", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", recovery, default).Result)["code"]);
+            recovery["task_id"] = "execution:" + Guid.NewGuid().ToString("N");
+            Assert.AreEqual("INVALID_EXECUTION_CONTROL_ARGUMENTS", (string)JObject.Parse(bridge.ExecuteToolAsync("execute_code", recovery, default, MCPProjectContext.Current.project_id).Result)["code"]);
             Assert.AreEqual(0, helper.NativeQueueCalls);
         }
 

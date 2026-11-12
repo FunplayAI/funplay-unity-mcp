@@ -21,7 +21,7 @@ namespace Funplay.Editor.State
         internal bool Safety, Strict, InjectNamespaces, SkipRefresh;
         internal int WaitSeconds = 2, TimeoutSeconds = 300;
         internal Func<bool> StillAllowed = () => true;
-        internal string Signature => ExecutionJobStore.Hash(JsonConvert.SerializeObject(new {
+        internal string Signature => ExecutionJobStore.Hash(ExecutionJson.Serialize(new {
             code = ExecutionJobStore.Hash(Code), Key, PreferredNamespaces, SourceTool, Safety, Strict, InjectNamespaces, SkipRefresh, TimeoutSeconds,
             MCPProjectContext.Current.project_id, MCPProjectContext.Current.instance_id }));
     }
@@ -91,22 +91,32 @@ namespace Funplay.Editor.State
             if (id?.StartsWith("execution:", StringComparison.Ordinal) == true) id = id.Substring(10);
             string kind = "execution";
             var invalid = TaskStatusService.Resolve(ref id, ref kind, key);
-            if (invalid != null) return JObject.FromObject(invalid);
+            if (invalid != null) return ExecutionJson.Object(invalid);
             if (after != null && (after.Length != 64 || after.Any(c => !"0123456789abcdef".Contains(c))))
-                return JObject.FromObject(Response.Error("INVALID_TASK_REVISION"));
+                return ExecutionJson.Object(Response.Error("INVALID_TASK_REVISION"));
             var owner = Store.Owner(id, key);
-            if (!TaskStatusService.CanRead("execution", allowed)) return JObject.FromObject(Response.Error("TASK_KIND_NOT_EXPOSED"));
-            if (owner != null && !allowed(owner)) return JObject.FromObject(Response.Error("TASK_KIND_NOT_EXPOSED"));
+            if (!TaskStatusService.CanRead("execution", allowed)) return ExecutionJson.Object(Response.Error("TASK_KIND_NOT_EXPOSED"));
+            if (owner != null && !allowed(owner)) return ExecutionJson.Object(Response.Error("TASK_KIND_NOT_EXPOSED"));
             var found = Store.Find(id, key);
             if (found != null && key != null && found.key_hash != ExecutionJobStore.Hash(key))
-                return JObject.FromObject(Response.Error("EXECUTION_TASK_KEY_MISMATCH"));
+                return ExecutionJson.Object(Response.Error("EXECUTION_TASK_KEY_MISMATCH"));
             if (found != null && found.context.project_id != MCPProjectContext.Current.project_id)
-                return JObject.FromObject(Response.Error("PROJECT_CONTEXT_MISMATCH"));
+                return ExecutionJson.Object(Response.Error("PROJECT_CONTEXT_MISMATCH"));
             return TaskStatusService.Observe("execution", Store.Read(id, key, format, path, offset, limit, diagnostics), after);
         }
 
         internal static object Control(string action, string id, bool confirmForget, Func<string, bool> allowed)
         {
+            if (action == "recover_journal")
+            {
+                if (id != null || confirmForget) return Response.Error("INVALID_EXECUTION_CONTROL_ARGUMENTS");
+                if (!allowed("execute_code")) return Response.Error("TASK_KIND_NOT_EXPOSED");
+                lock (Gate)
+                {
+                    if (running || Pending.Count > 0) return Response.Error("EXECUTION_STILL_RUNNING");
+                    return Store.RecoverJournal();
+                }
+            }
             if (id?.StartsWith("execution:", StringComparison.Ordinal) == true) id = id.Substring(10);
             if (!Guid.TryParseExact(id, "N", out _)) return Response.Error("INVALID_EXECUTION_ID");
             var owner = Store.Owner(id);
@@ -130,16 +140,16 @@ namespace Funplay.Editor.State
 
         private static void Tick()
         {
-            if (running) return;
             KeyValuePair<string, ExecutionOptions> next;
             lock (Gate)
             {
-                if (Pending.Count == 0) return;
+                if (running || Pending.Count == 0) return;
                 next = Pending.First(); Pending.Remove(next.Key);
+                var state = Store.Find(next.Key);
+                if (state == null || state.Terminal) return;
+                running = true;
             }
             var job = Store.Find(next.Key);
-            if (job == null || job.Terminal) return;
-            running = true;
             _ = RunAsync(job, next.Value);
         }
 
@@ -196,7 +206,7 @@ namespace Funplay.Editor.State
                 }
                 catch (Exception storageError) { Store.FailInMemory(job.job_id, trace, storageError); }
             }
-            finally { running = false; }
+            finally { lock (Gate) running = false; }
         }
 
         private static void Interrupt()

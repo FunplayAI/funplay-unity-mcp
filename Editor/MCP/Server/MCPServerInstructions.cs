@@ -37,6 +37,7 @@ namespace Funplay.Editor.MCP.Server
 - Editor readiness is not PlayerLoop progress, input fidelity, rendered correctness or business acceptance. Read actual frame/clock evidence; encoded frames and UI/physics dispatch do not prove legacy Input polling edges. Explicit input routes never silently fall back. Full verification scopes own only enrolled jobs/temporary settings; end them explicitly and inspect cleanup_pending. For unresolved-reference risk use an exposed selective transaction with exact preconditions and untouched PPtr comparison, not ordinary setter success alone.
 - `get_console_logs` accepts `group_duplicates=true` to collapse spammy repeated logs and `filter_text` to narrow them.
 - Large screenshot results automatically fall back to a project-local file. Prefer `save_to_file` when the client can read local files, and use explicit width/height when only a small inline preview is needed.
-- Save only the assets you intentionally changed, then read them back to confirm the exact values.";
+- Save only the assets you intentionally changed, then read them back to confirm the exact values.
+- On EXECUTION_JOURNAL_UNAVAILABLE preserve journal/results and keys; inspect journal_diagnostic. A journal write during serializing is not necessarily return-value serialization failure. After the actual storage problem is resolved, authorized Full-only execute_code(action=recover_journal) verifies retained history without replay; it cannot recreate missing/changed history or delete protection. Otherwise report the blocker. Never clear Library or repeat a write to recover.";
     }
 }

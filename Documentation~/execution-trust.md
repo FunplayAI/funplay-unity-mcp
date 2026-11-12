@@ -123,6 +123,55 @@ security sandbox or exactly-once guarantee across storage loss/power failure. Do
 journal/Library files to bypass key protection. User code remains responsible for targeted
 saves, Undo registration, business invariants and exception-safe owned-resource cleanup.
 
+### Journal compatibility and storage recovery (issue #63)
+
+Journal writing, reading, DTO copying, request signatures and serialization-error envelopes
+use independent Json.NET serializers, never the project's `JsonConvert.DefaultSettings`.
+Do not change/remove a project's UnityConverters or global JSON settings as a workaround.
+The reader accepts the old schema-v1 `jobs`/`keys` list wrappers containing only `$type` and
+`$values`; the type names are never resolved or instantiated. Unsupported/ambiguous wrappers,
+duplicate properties, missing containers, invalid records and mismatched retained keys fail
+closed. Opaque recovery/business JSON is not recursively reinterpreted.
+
+Reading a terminal legacy journal does not rewrite it. Before the first canonical save,
+the validated original bytes are preserved as
+`journal.legacy-list-wrappers.<original-sha256>.json` beside the journal. Results, IDs and
+idempotency keys are retained; an existing different backup is not overwritten. An
+interrupted legacy task is classified without replay, as for a plain journal.
+
+`EXECUTION_JOURNAL_UNAVAILABLE` includes a `journal_diagnostic`: stage, exception type and,
+for I/O failures, HRESULT plus a native error code only when encoded as a Win32 HRESULT.
+Atomic writes additionally identify `file_role`, `io_operation` and `io_attempts`.
+No raw exception message, private path, source code or unsanitized stack is returned.
+`get_task(include_diagnostics=true)` can include retained bounded method identities. A phase
+named `serializing` can also contain a journal write; it does not by itself prove failure to
+serialize the business return value. Confirmed execution remains separate from delivery.
+
+Atomic replacement retains the old destination on failure and cleans only its own temporary
+file. Only explicit Win32 sharing/lock violations (32/33) retry that file operation, at most
+three attempts with 20/40 ms delays; permission, disk-full and unknown I/O failures do not
+enter a generic retry loop. Reads use delete-sharing so they do not themselves prevent a
+Windows atomic replacement. There is no delete-then-move fallback, automatic permission
+change, or attempt to kill the process suspected of holding a lock. The original reported
+`File.Replace` failure still requires diagnosis on its actual Windows/Tuanjie environment.
+
+After resolving the actual storage problem, a deliberately exposed Full operator can call:
+
+```json
+{"action":"recover_journal"}
+```
+
+This uses the existing mutating `execute_code` tool and verified project/context guard; omit
+code, task_id and request_key. It refuses an active/pending execution, verifies retained
+history, writes it atomically and clears the admission fault only after persistence readback.
+It preserves in-memory failed-admission receipts/keys and recognizes an attempted atomic
+replacement that committed before throwing. It never runs a command or marks unknown
+business outcomes successful. Unexpectedly changed/deleted journals, unsafe formats and
+unresolved I/O remain blocked. A full Editor restart after fixing the storage issue is an
+alternative; restarting only HTTP does not reconstruct the Store. Status reads never recover
+it. If recovery fails, retain the evidence and report the blocker instead of repeatedly
+retrying, deleting history, forgetting keys or silently enabling Full.
+
 ## Readiness is layered
 
 `current_editor.ready` retains its existing import/compile/mode meaning. It does not certify

@@ -66,7 +66,7 @@ namespace Funplay.Editor.Tools.Helpers
                 string code = exception is ResultSizeException ? "RESULT_TOO_LARGE" : "RESULT_SERIALIZATION_FAILED";
                 // Only fixed primitive metadata is used in this fallback; never call the failed
                 // object's ToString(), traverse it again, or silently omit a problematic property.
-                return JsonConvert.SerializeObject(Response.Error(code, new
+                return Funplay.Editor.State.ExecutionJson.Serialize(Response.Error(code, new
                 {
                     tool, executed = execution == null ? (bool?)null : execution.executed,
                     execution_id = execution?.execution_id, invocation_returned = true,
