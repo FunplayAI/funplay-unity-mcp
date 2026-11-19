@@ -33,7 +33,8 @@ namespace Funplay.Editor.MCP.Server
         private const string CodexManagedNotice = "This section is managed by Funplay MCP for Unity. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
         private const string ClaudeManagedNotice = "This section is managed by Funplay MCP for Unity for Claude Code. Everything between the begin and end markers is regenerated on each sync; edit outside this block.";
 
-        private static readonly string[] SupportedPlatforms = { "codex", "claude", "cursor", "opencode", "dsh", "antigravity" };
+        private static readonly string[] SupportedPlatforms =
+            { "codex", "claude", "cursor", "opencode", "dsh", "antigravity", "pi", "vscode", "trae", "kiro", "kimi" };
 
         private static readonly SkillDefinition[] SkillCatalog =
         {
@@ -86,7 +87,7 @@ namespace Funplay.Editor.MCP.Server
                 }),
             new SkillDefinition(
                 "unity-ui-composition",
-                "1.0.11",
+                "1.0.12",
                 "Unity UI Composition",
                 "Build and revise Unity UI, primarily uGUI mobile page prefabs, with framework-aware routing, Sprite import safety, text effects, localization and visual verification.",
                 true,
@@ -153,6 +154,18 @@ namespace Funplay.Editor.MCP.Server
                     return "dsh";
                 case "antigravity":
                     return "antigravity";
+                case "pi":
+                    return "pi";
+                case "vs code":
+                case "vs code / copilot":
+                    return "vscode";
+                case "trae":
+                    return "trae";
+                case "kiro":
+                    return "kiro";
+                case "kimi":
+                case "kimi code":
+                    return "kimi";
                 default:
                     return null;
             }
@@ -265,6 +278,23 @@ namespace Funplay.Editor.MCP.Server
             return Path.Combine(FunplayMCPClientConfigPanel.GetAntigravityWorkspaceRoot(projectRoot), "AGENTS.md");
         }
 
+        internal static string GetAdditionalSkillsRoot(string projectRoot, string platform)
+        {
+            switch (platform)
+            {
+                case "pi": return GetAntigravitySkillsRoot(projectRoot);
+                case "vscode": return Path.Combine(projectRoot, ".github", "skills");
+                case "trae": return Path.Combine(projectRoot, ".trae", "skills");
+                case "kiro": return Path.Combine(projectRoot, ".kiro", "skills");
+                case "kimi": return Path.Combine(projectRoot, ".kimi-code", "skills");
+                default: throw new ArgumentException("Unsupported additional skills platform.", nameof(platform));
+            }
+        }
+
+        private static bool UsesSharedAgentSkills(ProjectSkillsManifest manifest) =>
+            manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase) ||
+            manifest.platforms.Contains("pi", StringComparer.OrdinalIgnoreCase);
+
         internal static void ApplyConfiguration(string projectRoot, IEnumerable<string> selectedPlatforms, IEnumerable<string> selectedOptionalSkills)
         {
             var previousManifest = LoadManifest(projectRoot);
@@ -276,9 +306,7 @@ namespace Funplay.Editor.MCP.Server
 
             var normalized = NormalizeManifest(manifest);
             ValidateReferenceDestinations(projectRoot, normalized.platforms);
-            var syncAntigravity =
-                normalized.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase) ||
-                previousManifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
+            var syncAntigravity = UsesSharedAgentSkills(normalized) || UsesSharedAgentSkills(previousManifest);
             if (syncAntigravity)
             {
                 var workspaceAgents = GetAntigravityAgentsPath(projectRoot);
@@ -286,7 +314,7 @@ namespace Funplay.Editor.MCP.Server
                     IsManagedFile(workspaceAgents) && !AgentsBlockBelongsToProject(workspaceAgents, projectRoot))
                     throw new InvalidOperationException(
                         $"'{workspaceAgents}' already contains Funplay guidance for another Unity project. " +
-                        "Resolve the workspace's shared guidance before applying Antigravity skills.");
+                        "Resolve the workspace's shared guidance before applying Antigravity/Pi skills.");
             }
 
             SaveManifest(projectRoot, normalized);
@@ -298,6 +326,18 @@ namespace Funplay.Editor.MCP.Server
             SyncDsh(projectRoot, normalized);
             if (syncAntigravity)
                 SyncAntigravity(projectRoot, normalized);
+            foreach (var platform in new[] { "vscode", "trae", "kiro", "kimi" })
+            {
+                var skillsRoot = GetAdditionalSkillsRoot(projectRoot, platform);
+                if (normalized.platforms.Contains(platform, StringComparer.OrdinalIgnoreCase))
+                {
+                    Directory.CreateDirectory(skillsRoot);
+                    WriteManagedSkillDirectories(skillsRoot, normalized,
+                        (SkillPlatform)Enum.Parse(typeof(SkillPlatform), platform, true));
+                }
+                else if (previousManifest.platforms.Contains(platform, StringComparer.OrdinalIgnoreCase))
+                    DeleteManagedSkillDirectories(skillsRoot);
+            }
         }
 
         internal static bool IsPlatformConfigured(string projectRoot, string platformId)
@@ -451,8 +491,15 @@ namespace Funplay.Editor.MCP.Server
                     paths.Add(GetDshSkillsRoot(projectRoot));
                     break;
                 case "antigravity":
+                case "pi":
                     paths.Add(GetAntigravityAgentsPath(projectRoot));
                     paths.Add(GetAntigravitySkillsRoot(projectRoot));
+                    break;
+                case "vscode":
+                case "trae":
+                case "kiro":
+                case "kimi":
+                    paths.Add(GetAdditionalSkillsRoot(projectRoot, platformId.Trim().ToLowerInvariant()));
                     break;
             }
 
@@ -464,7 +511,7 @@ namespace Funplay.Editor.MCP.Server
         private static void SyncAgentsInstructions(
             string projectRoot, ProjectSkillsManifest manifest, bool syncAntigravity)
         {
-            var antigravityEnabled = manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
+            var antigravityEnabled = UsesSharedAgentSkills(manifest);
             var agentsPath = GetCodexAgentsPath(projectRoot);
             var antigravityPath = GetAntigravityAgentsPath(projectRoot);
             var sharedPath = string.Equals(Path.GetFullPath(agentsPath), antigravityPath, StringComparison.Ordinal);
@@ -598,7 +645,7 @@ namespace Funplay.Editor.MCP.Server
 
         private static void SyncAntigravity(string projectRoot, ProjectSkillsManifest manifest)
         {
-            var enabled = manifest.platforms.Contains("antigravity", StringComparer.OrdinalIgnoreCase);
+            var enabled = UsesSharedAgentSkills(manifest);
             var skillsRoot = GetAntigravitySkillsRoot(projectRoot);
 
             if (!enabled)
@@ -608,7 +655,7 @@ namespace Funplay.Editor.MCP.Server
             }
 
             Directory.CreateDirectory(skillsRoot);
-            WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.Antigravity);
+            WriteManagedSkillDirectories(skillsRoot, manifest, SkillPlatform.Agents);
         }
 
         private static void WriteManagedSkillDirectories(string skillsRoot, ProjectSkillsManifest manifest, SkillPlatform platform)
@@ -949,6 +996,7 @@ namespace Funplay.Editor.MCP.Server
                     }
                     break;
                 case "antigravity":
+                case "pi":
                     AddProjectVersionFile(result, GetAntigravityAgentsPath(projectRoot), skills);
                     foreach (var skill in skills)
                     {
@@ -958,6 +1006,16 @@ namespace Funplay.Editor.MCP.Server
                             skill.Version,
                             BuildSkillVersionMarker(skill)));
                     }
+                    break;
+                case "vscode":
+                case "trae":
+                case "kiro":
+                case "kimi":
+                    foreach (var skill in skills)
+                        result.Add(new ExpectedSkillVersionFile(
+                            Path.Combine(GetAdditionalSkillsRoot(projectRoot, platformId.Trim().ToLowerInvariant()),
+                                $"funplay-{skill.Id}", "SKILL.md"),
+                            skill.Id, skill.Version, BuildSkillVersionMarker(skill)));
                     break;
             }
 
@@ -1444,6 +1502,7 @@ Read only the references needed for the current task:
 - For unfamiliar or mixed UI frameworks and Editor windows: [UI framework selection](references/unity-ui-composition/ui-frameworks.md).
 - Before changing Sprite borders, pivots or slicing: [Sprite importer safety](references/unity-ui-composition/sprite-importers.md).
 - For font assets, text effects, missing glyphs or requested localization: [TMP and localization](references/unity-ui-composition/text-localization.md).
+- When a supplied design image defines a page or several states: [Design image to editable prefab](references/unity-ui-composition/image-to-prefab.md). Map independent parts, reuse assets and compare actual captures region by region.
 
 These are original Funplay adaptations informed by the pinned Unity official plugin 0.1.8-beta. They supplement, not replace, the MCP-first, prefab-preservation and design-fidelity rules here.
 
@@ -2009,7 +2068,12 @@ $@"
             Cursor,
             OpenCode,
             Dsh,
-            Antigravity
+            Antigravity,
+            Agents,
+            Vscode,
+            Trae,
+            Kiro,
+            Kimi
         }
 
         [Serializable]

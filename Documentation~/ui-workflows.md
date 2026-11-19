@@ -13,7 +13,28 @@ work. Consider computer use only for a confirmed capability gap or an explicit u
 explain the gap, limit the fallback to that step and resume MCP readback when possible. Do not
 bypass custom allowlists. Ordinary source edits and viewing reference/captured media still use
 appropriate file and media tools. The server initialization instructions and both built-in
-skills share this routing policy across all six supported client targets.
+skills share this routing policy across all supported client targets.
+
+## From design images to editable page prefabs
+
+Built-in `unity-ui-composition` v1.0.12 routes design-image tasks to its managed
+`references/unity-ui-composition/image-to-prefab.md`. It adapts the useful Cocos v0.7.3
+workflow to Unity rather than adding another tool or inlining a long procedure into every task:
+
+- Match reference viewport, page/state, locale, counters and scroll position; map significant
+  regions to independent assets, controls and prefab nodes. Ask when a consequential detail is
+  unclear instead of hiding it behind a placeholder.
+- Save editable native UI: reuse existing prefabs, fonts and Sprites; separate navigation icons,
+  labels, selection surfaces and dividers; use prepared row prefabs for repeated lists. Do not
+  render a flattened reference page as a substitute for actual controls.
+- Compare fresh captures of the saved Unity page at the same viewport/state and one common scale.
+  Inspect regions independently so a matching background does not mask a missing control.
+  Geometry, rendered pixels, adaptation and real interaction are separate acceptance checks.
+
+Project baselines, prefab preservation, TMP-native effects, verified Sprite borders and the
+existing safe-area policy remain unchanged. Image generation is optional for missing artwork,
+not a required dependency. No new computer-use exception is introduced. Update Project Skills
+after upgrading to receive the new reference on every configured platform.
 
 ## Preparing the Editor
 

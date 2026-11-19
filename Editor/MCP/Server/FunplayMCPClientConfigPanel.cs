@@ -10,6 +10,8 @@ using Funplay.Editor.Settings;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Funplay.Editor.MCP.Server
 {
@@ -103,7 +105,7 @@ namespace Funplay.Editor.MCP.Server
 
             var skillsHint = new Label(skillsSupported
                 ? "Configure + Skills also installs the project MCP workflow skill."
-                : "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, DeepSeek Harness, and Antigravity.");
+                : "Project skills are available for every listed coding client except LM Studio.");
             skillsHint.style.fontSize = 10;
             skillsHint.style.color = new Color(0.6f, 0.6f, 0.6f);
             skillsHint.style.marginBottom = 4;
@@ -187,13 +189,14 @@ namespace Funplay.Editor.MCP.Server
             }
 
             bool exists = File.Exists(target.ConfigPath);
-            _configStatusLabel.text = exists ? "Status: Configured" : "Status: Not configured";
-            _configStatusLabel.style.color = exists
+            var resolvedKey = ResolveServerKeyForTarget(target);
+            var configured = IsTargetConfigured(target, resolvedKey, GetServerUrl(), GetProjectScopeKeyPath());
+            _configStatusLabel.text = configured ? "Status: Configured" : "Status: Not configured for this project";
+            _configStatusLabel.style.color = configured
                 ? new Color(0.4f, 1f, 0.4f)
                 : new Color(1f, 0.6f, 0.4f);
             // Name and URL together are what a user needs to check or hand-write an entry, and both
             // are project-specific now.
-            var resolvedKey = ResolveServerKeyForTarget(target);
             var details = $"{target.ConfigPath}\nEntry: {resolvedKey} -> {GetServerUrl()}";
 
             if (target.Name == "Antigravity")
@@ -236,6 +239,8 @@ namespace Funplay.Editor.MCP.Server
             }
 
             _configPathLabel.text = details;
+            if (!string.IsNullOrEmpty(target.ActivationHint))
+                _configPathLabel.text += "\n" + target.ActivationHint;
             ApplyConnectionNoticeStatus(connectionNotice);
         }
 
@@ -363,12 +368,12 @@ namespace Funplay.Editor.MCP.Server
             if (content.IndexOf(FunplayMCPServerKey.LegacyKey, StringComparison.Ordinal) < 0)
                 return names;
 
-            var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
-            var servers = parsed != null ? FindNestedDictionary(parsed, GetRootKey(target)) : null;
+            var parsed = new MCPConfigJson(content, target.IsJsonc).Object;
+            var servers = parsed[GetRootKey(target)] as JObject;
             if (servers == null)
                 return names;
 
-            foreach (var key in servers.Keys)
+            foreach (var key in servers.Properties().Select(p => p.Name))
             {
                 if (FunplayMCPServerKey.IsFunplayKey(key))
                     names.Add(key);
@@ -437,20 +442,16 @@ namespace Funplay.Editor.MCP.Server
                 return names;
             }
 
-            var parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
-            if (parsed == null)
-                return names;
-
-            var servers = target.UseProjectScope
-                ? FindProjectScopedServers(parsed, GetRootKey(target))
-                : FindNestedDictionary(parsed, GetRootKey(target));
+            var parsed = new MCPConfigJson(content, target.IsJsonc).Object;
+            var servers = GetJsonServers(parsed, target, GetProjectScopeKeyPath(), false);
             if (servers == null)
                 return names;
 
-            foreach (var key in servers.Keys)
+            foreach (var key in servers.Properties().Select(p => p.Name))
             {
-                if (FunplayMCPServerKey.IsFunplayKey(key))
-                    names.Add(key);
+                var normalized = target.IsPi ? key.Replace('_', '-') : key;
+                if (FunplayMCPServerKey.IsFunplayKey(normalized))
+                    names.Add(normalized);
             }
 
             return names;
@@ -518,12 +519,14 @@ namespace Funplay.Editor.MCP.Server
                     Name = "VS Code",
                     ConfigPath = GetVSCodeConfigPath(homePath),
                     IncludeTypeField = true,
-                    RootKey = "servers"
+                    RootKey = "servers",
+                    IsJsonc = true
                 },
                 new MCPConfigTarget
                 {
                     Name = "Trae",
-                    ConfigPath = Path.Combine(homePath, ".trae", "mcp.json"),
+                    ConfigPath = GetTraeConfigPath(GetProjectRootPath()),
+                    ActivationHint = "Enable Project MCP in Trae for this Unity project, then reload its MCP servers."
                 },
                 new MCPConfigTarget
                 {
@@ -535,7 +538,7 @@ namespace Funplay.Editor.MCP.Server
                 new MCPConfigTarget
                 {
                     Name = "Codex",
-                    ConfigPath = Path.Combine(homePath, ".codex", "config.toml"),
+                    ConfigPath = GetCodexConfigPath(homePath, Environment.GetEnvironmentVariable("CODEX_HOME")),
                     IsToml = true,
                 },
                 new MCPConfigTarget
@@ -545,7 +548,8 @@ namespace Funplay.Editor.MCP.Server
                     RootKey = "mcp",
                     IncludeTypeField = true,
                     TypeFieldValue = "remote",
-                    IncludeEnabledField = true
+                    IncludeEnabledField = true,
+                    IsJsonc = true
                 },
                 new MCPConfigTarget
                 {
@@ -554,6 +558,7 @@ namespace Funplay.Editor.MCP.Server
                     IsDeepSeekHarness = true,
                 },
                 CreateAntigravityTarget(GetProjectRootPath()),
+                CreatePiTarget(GetProjectRootPath()),
             };
         }
 
@@ -597,7 +602,7 @@ namespace Funplay.Editor.MCP.Server
                     EditorUtility.DisplayDialog(
                         "MCP Configuration",
                         configSummary + "\n\n" +
-                        "Project skills are currently available for Claude Code, Cursor, Codex, OpenCode, DeepSeek Harness, and Antigravity.",
+                        "Project skills are available for every listed coding client except LM Studio.",
                         "OK");
 
                     _rebuildWindow?.Invoke();
@@ -918,71 +923,133 @@ namespace Funplay.Editor.MCP.Server
             MCPConfigTarget target, string serverName, string previousServerName,
             Dictionary<string, object> entry)
         {
-            var rootKey = GetRootKey(target);
+            var original = MCPClientConfigFile.Read(target.ConfigPath);
+            var document = new MCPConfigJson(original, target.IsJsonc);
+            var root = document.Object;
+            var servers = GetJsonServers(root, target, GetProjectScopeKeyPath(), true);
+            serverName = ResolveJsonServerName(servers, target, serverName);
+            var desired = JObject.FromObject(entry, JsonSerializer.Create());
+            var urlField = GetUrlFieldName(target.UrlFieldName);
+            var newUrl = (string)desired[urlField];
+            if (servers.TryGetValue(serverName, out var existing))
+            {
+                if (!(existing is JObject current) || current["command"] != null || current["args"] != null ||
+                    current["enabled"]?.Type == JTokenType.Boolean && !(bool)current["enabled"] ||
+                    current["disabled"]?.Type == JTokenType.Boolean && (bool)current["disabled"])
+                    throw new InvalidOperationException("The existing MCP entry is disabled, local-command or not an object; review it before configuring. File was left unchanged.");
+                foreach (var flag in new[] { "enabled", "disabled" })
+                    if (current[flag] != null && current[flag].Type != JTokenType.Boolean)
+                        throw new InvalidOperationException("An MCP enabled/disabled flag is not a boolean; file was left unchanged.");
+                var oldUrl = current[urlField]?.Type == JTokenType.String ? (string)current[urlField] : null;
+                if (!CanUpdateEndpoint(oldUrl, newUrl))
+                    throw new InvalidOperationException("The existing MCP endpoint was manually repointed or cannot be verified; file was left unchanged.");
+                var transport = current["type"]?.Type == JTokenType.String ? (string)current["type"] : null;
+                if (current["type"] != null && transport == null ||
+                    transport != null && !new[] { "http", "streamable-http", "remote", "sse", "stdio" }.Contains(transport))
+                    throw new InvalidOperationException("The existing MCP transport needs review; file was left unchanged.");
+                var merged = (JObject)current.DeepClone();
+                foreach (var property in desired.Properties()) merged[property.Name] = property.Value.DeepClone();
+                if (!target.IncludeTypeField && transport != null && transport != "http" && transport != "streamable-http")
+                    merged.Remove("type"); // URL-only clients must not retain an obsolete SSE/stdio selector.
+                servers[serverName] = merged;
+            }
+            else servers[serverName] = desired;
 
-            Dictionary<string, object> root = null;
-            if (File.Exists(target.ConfigPath))
-                root = ParseRewritableConfig(target, serverName, entry);
-            root = root ?? new Dictionary<string, object>();
-
-            var servers = target.UseProjectScope
-                ? GetOrCreateProjectScopedServers(root, rootKey)
-                : GetOrCreateNestedDictionary(root, rootKey);
-
-            servers[serverName] = entry;
-            RemoveSupersededFunplayEntries(
-                servers, serverName, previousServerName, target.UrlFieldName);
-
-            var directory = Path.GetDirectoryName(target.ConfigPath);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-            File.WriteAllText(target.ConfigPath, SimpleJsonHelper.Serialize(root));
+            var previous = ResolveJsonServerName(servers, target, previousServerName);
+            if (!string.IsNullOrEmpty(previous) && previous != serverName &&
+                FunplayMCPServerKey.IsFunplayKey(previous.Replace('_', '-')) &&
+                servers[previous] is JObject old && old["command"] == null &&
+                old["enabled"]?.Value<bool>() != false && old["disabled"]?.Value<bool>() != true &&
+                CanUpdateEndpoint(old[urlField]?.Type == JTokenType.String ? (string)old[urlField] : null, newUrl))
+                servers.Remove(previous);
+            MCPClientConfigFile.Write(target.ConfigPath, original, document.Update(root));
         }
 
-        /// <summary>
-        /// Reads an existing config file, but only when its full contents survive a
-        /// <see cref="SimpleJsonHelper"/> round-trip. The whole file is rewritten from what the parse
-        /// returns, and that parser is strict-JSON only: a config carrying JSONC comments (legal in
-        /// OpenCode's <c>opencode.json</c> and VS Code's <c>mcp.json</c>, both of which are read with
-        /// real JSONC parsers) stops the key scan dead at the comment, so writing the parse result
-        /// back would silently delete every key past it -- providers, models, keybinds, agents. Rather
-        /// than clobber a file it cannot represent, this reports what to add by hand and changes
-        /// nothing, the same "stop instead of destroy" stance <c>WriteManagedBlock</c> takes for a
-        /// legacy AGENTS.md. Returns null for an empty file (nothing to preserve).
-        /// </summary>
-        private static Dictionary<string, object> ParseRewritableConfig(
-            MCPConfigTarget target, string serverName, Dictionary<string, object> entry)
+        internal static bool CanUpdateEndpoint(string existing, string desired)
         {
-            var content = File.ReadAllText(target.ConfigPath);
-            if (string.IsNullOrWhiteSpace(content))
-                return null;
+            if (string.IsNullOrWhiteSpace(existing) || string.IsNullOrWhiteSpace(desired)) return false;
+            if (string.Equals(existing, desired, StringComparison.Ordinal)) return true;
+            if (!Uri.TryCreate(existing, UriKind.Absolute, out var old) ||
+                !Uri.TryCreate(desired, UriKind.Absolute, out var next) || !old.IsLoopback || !next.IsLoopback ||
+                old.Scheme != "http" || next.Scheme != "http" || old.Query.Length != 0 || old.Fragment.Length != 0)
+                return false;
+            // An explicit project route remains bound to the same project when its port changes.
+            if (old.AbsolutePath.StartsWith("/mcp/project/", StringComparison.Ordinal) &&
+                old.AbsolutePath == next.AbsolutePath) return true;
+            return MCPClientConnectionMigration.IsLegacyEndpoint(existing) && old.Port == next.Port;
+        }
 
-            string problem = null;
-            Dictionary<string, object> parsed = null;
+        internal static string ResolveJsonServerName(JObject servers, MCPConfigTarget target, string name)
+        {
+            if (!target.IsPi || string.IsNullOrEmpty(name)) return name;
+            var normalized = name.Replace('-', '_');
+            var matches = servers.Properties().Where(p => p.Name.Replace('-', '_') == normalized).ToArray();
+            if (matches.Length > 1)
+                throw new InvalidOperationException("Pi MCP server names collide after hyphen/underscore normalization; file was left unchanged.");
+            return matches.Length == 1 ? matches[0].Name : name;
+        }
 
-            if (ContainsJsonComment(content))
-                problem = "it contains JSON comments, which Funplay's strict-JSON writer cannot preserve";
-            else
+        internal static JObject GetJsonServers(JObject root, MCPConfigTarget target, string scope, bool create)
+        {
+            var parent = root;
+            if (target.UseProjectScope)
             {
-                parsed = SimpleJsonHelper.Deserialize(content) as Dictionary<string, object>;
-                if (parsed == null)
-                    problem = "it could not be read as a JSON object";
+                scope = scope.Replace('\\', '/');
+                var projects = JsonObjectChild(root, "projects", create);
+                if (projects == null) return null;
+                if (Application.platform == RuntimePlatform.WindowsEditor)
+                    scope = projects.Properties().Select(p => p.Name)
+                        .FirstOrDefault(key => string.Equals(key, scope, StringComparison.OrdinalIgnoreCase)) ?? scope;
+                parent = JsonObjectChild(projects, scope, create);
+                if (parent == null) return null;
             }
+            return JsonObjectChild(parent, GetRootKey(target), create);
+        }
 
-            if (problem == null)
-                return parsed;
+        private static JObject JsonObjectChild(JObject parent, string key, bool create)
+        {
+            if (parent.TryGetValue(key, out var value))
+                return value as JObject ?? throw new InvalidOperationException(
+                    "An MCP configuration container is not an object; file was left unchanged.");
+            if (!create) return null;
+            var child = new JObject();
+            parent[key] = child;
+            return child;
+        }
 
-            throw new InvalidOperationException(
-                $"'{target.ConfigPath}' was left unchanged because {problem}. " +
-                $"Add this entry by hand under \"{GetRootKey(target)}\" instead:\n\n" +
-                $"\"{serverName}\": {SimpleJsonHelper.Serialize(entry)}");
+        internal static bool IsTargetConfigured(MCPConfigTarget target, string name, string url, string scope)
+        {
+            try
+            {
+                var text = MCPClientConfigFile.Read(target.ConfigPath);
+                if (text == null) return false;
+                if (target.IsToml)
+                {
+                    if (!TryFindTomlSection(text, name, out var start, out var end)) return false;
+                    var block = text.Substring(start, end - start);
+                    if (Regex.IsMatch(block, @"(?m)^\s*(command\s*=|enabled\s*=\s*false\b)")) return false;
+                    return ConfigEntryPointsAtUrl(text, true, null, name, url);
+                }
+                var root = new MCPConfigJson(text, target.IsJsonc).Object;
+                var servers = GetJsonServers(root, target, scope, false);
+                if (servers == null) return false;
+                var actual = ResolveJsonServerName(servers, target, name);
+                if (!(servers[actual] is JObject entry) || entry["command"] != null || entry["args"] != null ||
+                    entry["enabled"]?.Value<bool>() == false || entry["disabled"]?.Value<bool>() == true)
+                    return false;
+                var transport = (string)entry["type"];
+                var expectedType = string.IsNullOrEmpty(target.TypeFieldValue) ? "http" : target.TypeFieldValue;
+                if (transport != null && transport != expectedType && transport != "streamable-http") return false;
+                return entry[GetUrlFieldName(target.UrlFieldName)]?.Type == JTokenType.String &&
+                       string.Equals((string)entry[GetUrlFieldName(target.UrlFieldName)], url, StringComparison.Ordinal);
+            }
+            catch { return false; }
         }
 
         /// <summary>
         /// True if <paramref name="content"/> has a <c>//</c> or <c>/*</c> comment outside a string
-        /// literal. Deliberately only detects them -- rewriting a commented file correctly would take
-        /// a real JSONC parser, and the point here is to refuse, not to reformat.
-        /// Internal so the scan can be exercised in EditMode tests without a config file.
+        /// literal. The unattended legacy Claude migration stays strict-JSON only; interactive JSONC
+        /// targets instead use MCPConfigJson's source-preserving editor.
         /// </summary>
         internal static bool ContainsJsonComment(string content)
         {
@@ -1007,38 +1074,6 @@ namespace Funplay.Editor.MCP.Server
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Gets (or creates) the server-name -> entry dictionary at <paramref name="root"/>[<paramref
-        /// name="key"/>], replacing whatever is there if it is not already a dictionary (a malformed
-        /// or foreign value under that key).
-        /// </summary>
-        private static Dictionary<string, object> GetOrCreateNestedDictionary(
-            Dictionary<string, object> root, string key)
-        {
-            object existing;
-            if (root.TryGetValue(key, out existing) && existing is Dictionary<string, object> servers)
-                return servers;
-
-            servers = new Dictionary<string, object>();
-            root[key] = servers;
-            return servers;
-        }
-
-        /// <summary>
-        /// Claude Code applies <c>projects["&lt;path&gt;"]</c> only to sessions opened at that exact
-        /// path. Writing Funplay's entry there -- instead of at the config's top level, which every
-        /// session on the machine sees regardless of which project it is in -- is what keeps one
-        /// project's Funplay tools from being usable (and mistaken for the right project's) from an
-        /// unrelated project's session. See docs/funplay-mcp-enhancement-backlog.md §I.
-        /// </summary>
-        private static Dictionary<string, object> GetOrCreateProjectScopedServers(
-            Dictionary<string, object> root, string rootKey)
-        {
-            var projects = GetOrCreateNestedDictionary(root, "projects");
-            var projectEntry = GetOrCreateNestedDictionary(projects, GetProjectScopeKeyPath());
-            return GetOrCreateNestedDictionary(projectEntry, rootKey);
         }
 
         private const string ProjectScopeMigrationSessionStateKey =
@@ -1126,15 +1161,9 @@ namespace Funplay.Editor.MCP.Server
 
             var originalContent = File.ReadAllText(configPath);
 
-            // Same "stop instead of destroy" guard ConfigureJsonTarget applies through
-            // ParseRewritableConfig: the file is rewritten from a strict-JSON parse, so one carrying
-            // JSONC comments would lose every key past the first comment. This path runs
-            // unattended at editor startup and has no way to ask, so it migrates nothing rather
-            // than truncate a config it cannot reproduce; clicking Configure reports the entry to
-            // add by hand. Claude Code writes ~/.claude.json itself and does not put comments in
-            // it, so this is a guard against a hand-edited file, not an expected shape.
-            if (ContainsJsonComment(originalContent))
-                return false;
+            // This unattended migration remains strict and never guesses at a hand-edited file.
+            try { _ = new MCPConfigJson(originalContent); }
+            catch (InvalidOperationException) { return false; }
 
             var root = SimpleJsonHelper.Deserialize(originalContent) as Dictionary<string, object>;
             if (root == null)
@@ -1367,7 +1396,9 @@ namespace Funplay.Editor.MCP.Server
         {
             var serverKey = ResolveServerKeyForTarget(target);
             var tomlSection = CreateTomlSection(target, serverKey);
-            var content = File.Exists(target.ConfigPath) ? File.ReadAllText(target.ConfigPath) : string.Empty;
+            var originalContent = MCPClientConfigFile.Read(target.ConfigPath);
+            var hasBom = originalContent != null && originalContent.StartsWith("\uFEFF", StringComparison.Ordinal);
+            var content = hasBom ? originalContent.Substring(1) : originalContent ?? string.Empty;
 
             content = RemoveSupersededTomlSection(
                 content, serverKey, _settings.GetLastClientConfigKey(target.Name));
@@ -1385,7 +1416,7 @@ namespace Funplay.Editor.MCP.Server
                 content += "\n" + tomlSection;
             }
 
-            File.WriteAllText(target.ConfigPath, content);
+            MCPClientConfigFile.Write(target.ConfigPath, originalContent, (hasBom ? "\uFEFF" : "") + content);
             return serverKey;
         }
 
@@ -1689,7 +1720,8 @@ namespace Funplay.Editor.MCP.Server
         {
             return ResolveServerKey(
                 _settings.GetLastClientConfigKey(target.Name),
-                ReadFunplayEntryNames(target));
+                ReadFunplayEntryNames(target),
+                IsTargetConfigured(target, GetPreferredServerKey(), GetServerUrl(), GetProjectScopeKeyPath()));
         }
 
         private string ResolveServerKey(
@@ -1905,6 +1937,25 @@ namespace Funplay.Editor.MCP.Server
             };
         }
 
+        internal static MCPConfigTarget CreatePiTarget(string projectRoot)
+        {
+            var workspace = GetAntigravityWorkspaceRoot(projectRoot);
+            return new MCPConfigTarget
+            {
+                Name = "Pi",
+                ConfigPath = Path.Combine(workspace, ".pi", "mcp.json"),
+                IsPi = true,
+                ActivationHint = "Requires Pi 1.0+ with built-in MCP support. Start Pi in this workspace, grant project trust, then run /reload:\n" + workspace
+            };
+        }
+
+        internal static string GetTraeConfigPath(string projectRoot) =>
+            Path.Combine(projectRoot, ".trae", "mcp.json");
+
+        internal static string GetCodexConfigPath(string homePath, string configuredHome) =>
+            Path.Combine(string.IsNullOrWhiteSpace(configuredHome) ? Path.Combine(homePath, ".codex") :
+                configuredHome.Trim(), "config.toml");
+
         // Older previews wrote a global entry. Merely finding a matching name is not proof that
         // it belongs to this project, so report existing entries without rewriting either file.
         internal static string GetAntigravityGlobalConfigNotice(string homePath)
@@ -1998,29 +2049,32 @@ namespace Funplay.Editor.MCP.Server
             yield return Path.Combine(homePath, ".cache", "lm-studio", "mcp.json");
         }
 
-        private static string GetVSCodeConfigPath(string homePath)
+        private static string GetVSCodeConfigPath(string homePath) => GetVSCodeConfigPath(
+            homePath, Application.platform, Environment.GetEnvironmentVariable);
+
+        internal static string GetVSCodeConfigPath(
+            string homePath, RuntimePlatform platform, Func<string, string> environment)
         {
-            switch (Application.platform)
+            var portable = environment("VSCODE_PORTABLE");
+            if (!string.IsNullOrWhiteSpace(portable))
+                return Path.Combine(portable, "user-data", "User", "mcp.json");
+            var customAppData = environment("VSCODE_APPDATA");
+            if (!string.IsNullOrWhiteSpace(customAppData))
+                return Path.Combine(customAppData, "Code", "User", "mcp.json");
+            switch (platform)
             {
                 case RuntimePlatform.WindowsEditor:
-                    var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                    if (!string.IsNullOrEmpty(appData))
-                        return Path.Combine(appData, "Code", "User", "mcp.json");
-                    break;
+                    var appData = environment("APPDATA");
+                    return Path.Combine(string.IsNullOrWhiteSpace(appData)
+                        ? Path.Combine(homePath, "AppData", "Roaming") : appData, "Code", "User", "mcp.json");
 
                 case RuntimePlatform.OSXEditor:
-                    var macPrimaryPath = Path.Combine(homePath, "Library", "Application Support", "Code", "User", "mcp.json");
-                    var macPrimaryDirectory = Path.GetDirectoryName(macPrimaryPath);
-                    if (File.Exists(macPrimaryPath) ||
-                        (!string.IsNullOrEmpty(macPrimaryDirectory) && Directory.Exists(macPrimaryDirectory)))
-                    {
-                        return macPrimaryPath;
-                    }
-
-                    return Path.Combine(homePath, ".vscode", "mcp.json");
+                    return Path.Combine(homePath, "Library", "Application Support", "Code", "User", "mcp.json");
 
                 case RuntimePlatform.LinuxEditor:
-                    return Path.Combine(homePath, ".config", "Code", "User", "mcp.json");
+                    var xdg = environment("XDG_CONFIG_HOME");
+                    return Path.Combine(string.IsNullOrWhiteSpace(xdg) ? Path.Combine(homePath, ".config") : xdg,
+                        "Code", "User", "mcp.json");
             }
 
             return Path.Combine(homePath, ".vscode", "mcp.json");
@@ -2035,6 +2089,8 @@ namespace Funplay.Editor.MCP.Server
             public bool IsToml;
             public bool IncludeTypeField;
             public bool IsLMStudio;
+            public bool IsJsonc;
+            public bool IsPi;
 
             /// <summary>
             /// True only for DeepSeek Harness. Its entry lives in one or more profile patch files

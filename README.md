@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.6"
+    "com.gamebooom.unity.mcp": "0.7.7"
   }
 }
 ```
@@ -105,13 +105,17 @@ Use the built-in **One-Click MCP Configuration** in the `Funplay > MCP Server` w
 
 Select your target client, click **Configure**, and the package writes the recommended MCP config entry for you.
 
-For Claude Code, Cursor, Codex, OpenCode, and DeepSeek Harness, click **Configure + Skills** to also install both built-in project skills.
+For Claude Code, Cursor, Kimi Code, VS Code / Copilot, Trae, Kiro, Codex, OpenCode, DeepSeek Harness, Antigravity and Pi, click **Configure + Skills** to also install both built-in project skills. Pi and Antigravity share their workspace's `.agents/skills`; disabling only one does not remove the other's managed copies. Other clients retain their existing Skills locations.
 
-If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms and install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills. The UI skill covers responsive portrait and landscape uGUI work.
+VS Code and OpenCode JSONC updates retain comments, trailing commas and unrelated source text. Strict JSON clients reject comments/trailing commas; both formats reject duplicate keys, malformed roots and non-object server containers. Remote-entry updates preserve custom options; disabled, command-based or manually repointed entries require review. JSON writes use a temporary file and best-effort unchanged-content checks before atomic replacement, not a cross-process transaction. Read-only and symlinked config files are left for manual review. Viewing the panel does not change real client configuration.
+
+If you want project-specific AI guidance for the current Unity project, open **Funplay → Project Skills** to choose supported platforms and install the built-in `unity-mcp-workflow` and `unity-ui-composition` skills. The UI skill covers responsive portrait and landscape uGUI work. Additional client Skills locations are `.github/skills` (VS Code / Copilot), `.trae/skills`, `.kiro/skills` and `.kimi-code/skills`.
 
 Version 0.7.0 keeps these two built-in skills and adds four task-specific references, informed by the [official Unity plugin 0.1.8-beta](https://github.com/Unity-Technologies/unity-agent-plugin/tree/cf6b2da24e424b0a60d560a57f39f676cb6f79f3): UI framework selection, safe Sprite importer edits, TMP/localization verification, and package readiness. Agents read only the references relevant to their task; no default tools or extra skills are added. MCP-first operation, project conventions, prefab preservation and design fidelity remain authoritative. Update existing installations through **Project Skills**; missing or outdated references also trigger the skills-update notice. User-owned reference files are protected from overwrite.
 
 Version 0.7.1 adds execution-trust guidance to both built-ins, including project identity, actual frame progress, strict input routes, owned verification cleanup and conditional handling of blocking native Unity dialogs. The shared blue setup card reports MCP and Skills issues with one **Reconfigure MCP + Skills** action; resolving one issue preserves the other. See [execution trust and migration](Documentation~/execution-trust.md).
+
+Built-in UI Skill v1.0.12 adds an on-demand design-image-to-prefab reference: map independent assets/controls/states, author reusable saved pages and compare actual Unity captures at a common scale region by region. Existing prefab structure, project baselines, TMP conventions and safe-area policy remain authoritative; image generation is optional, and unresolved design details require clarification. No MCP tool is added.
 
 If you prefer to edit config files manually, use the examples below as fallback references. Replace `<project>` with this project's entry name, `<port>` with its port and `<project-id>` with the ID in its full bound URL -- copy these from the MCP Server window, not from a different Editor:
 
@@ -166,6 +170,8 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 <details>
 <summary>VS Code</summary>
 
+One-click setup uses the canonical user-profile `Code/User/mcp.json` path on each OS, honoring `VSCODE_PORTABLE`, `VSCODE_APPDATA` and Linux `XDG_CONFIG_HOME`. macOS does not fall back to a guessed `~/.vscode/mcp.json` when the profile directory is absent. Project Skills use the Unity project's `.github/skills`.
+
 ```json
 {
   "servers": {
@@ -181,6 +187,8 @@ LM Studio's `mcp.json` location can vary by version and platform. Prefer **Progr
 
 <details>
 <summary>Trae</summary>
+
+One-click setup writes the Unity project's `.trae/mcp.json`, not a guessed global file. Enable **Project MCP** in Trae and reload its MCP servers. Configure + Skills also writes `.trae/skills`. Existing global entries are not migrated or removed automatically; review them separately to avoid duplicate connections.
 
 ```json
 {
@@ -229,6 +237,8 @@ Current Kimi Code releases load project-level MCP servers from `.kimi-code/mcp.j
 
 <details>
 <summary>Codex</summary>
+
+One-click setup honors `CODEX_HOME`; otherwise it uses `~/.codex/config.toml`. This does not migrate existing project Skills locations or introduce a full TOML parser.
 
 ```toml
 [mcp_servers.funplay-<project>]
@@ -304,6 +314,23 @@ Use the same JSON structure as Cursor unless your local Windsurf version require
 
 </details>
 
+<details>
+<summary>Pi</summary>
+
+Requires Pi 1.0+ with built-in MCP support. One-click setup writes Streamable HTTP to `.pi/mcp.json` at the nearest Git/worktree root, or the Unity project outside Git. Start Pi from that displayed workspace, grant project trust, then `/reload` and inspect `/mcp`. Configure + Skills uses the same root's `.agents/skills` and managed `AGENTS.md` block, shared with Antigravity. Unrelated user-level Pi entries remain unchanged. Names differing only by hyphens/underscores share one Pi namespace: setup reuses a single existing spelling and refuses ambiguous duplicates. See [Pi MCP](https://docs.pi.dev/latest/mcp) and [Skills](https://docs.pi.dev/latest/skills).
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
+    }
+  }
+}
+```
+
+</details>
+
 ### 4. Verify the Connection
 
 Open your AI client and try a few safe requests first:
@@ -348,7 +375,7 @@ Open your AI client and try: *"Create a 3D platformer level with 5 floating plat
 - **Resources & Prompts** — Live project context, scene/selection/error resources, resource templates, and reusable workflow prompts
 - **Input Simulation + Screenshots** — Drive play mode with keyboard/mouse simulation and verify results with game/scene captures. v0.7.2 adds real-frame continuous mouse/single-touch dragging, bounded waiting and owned cleanup; see [timing and backend limits](Documentation~/execution-trust.md#continuous-dragging-and-single-touch-gestures).
 - **Built-in Updating** — Check for updates from the Unity menu and either re-pull the Git package or auto-import the latest `unitypackage`
-- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, Antigravity, and similar clients directly from the Unity window
+- **One-Click Client Configuration** — Generate MCP config entries for Claude Code, Cursor, Kimi, LM Studio, VS Code, Kiro, Trae, Codex, OpenCode, DeepSeek Harness, Antigravity and Pi directly from the Unity window
 - **Tool Exposure Control** — Edit the exact tools exposed by `core` and `full`
 - **Project Skills Manager** — Configure project-level skills for supported AI clients, with built-in `unity-mcp-workflow` and `unity-ui-composition` guidance
 - **MCP Settings** — Adjust `execute_code` safety defaults and enable verbose plugin debug logging when troubleshooting MCP connections or tool execution
@@ -447,7 +474,7 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Version 0.7.6 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for journal compatibility/recovery, recoverable execution tasks, bounded JSON snapshots, identity migration, strict input, owned cleanup, reference preservation and evidence reuse.
+Version 0.7.7 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for journal compatibility/recovery, recoverable execution tasks, bounded JSON snapshots, identity migration, strict input, owned cleanup, reference preservation and evidence reuse.
 
 Project-specific `execute_code` calls now journal a task before running. Use a unique `request_key` and recover lost responses through `get_task(kind=execution)`; serialization failures and transport timeouts do not mean a write was rolled back. Large JSON results use hashed item/text pages instead of truncation or re-execution. Update the built-in Project Skills after upgrading.
 

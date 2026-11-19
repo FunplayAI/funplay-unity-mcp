@@ -16,6 +16,12 @@ namespace Funplay.Editor.Tests
         [TestCase("Cursor", "cursor")]
         [TestCase("OpenCode", "opencode")]
         [TestCase("DeepSeek Harness", "dsh")]
+        [TestCase("Antigravity", "antigravity")]
+        [TestCase("Pi", "pi")]
+        [TestCase("VS Code", "vscode")]
+        [TestCase("Trae", "trae")]
+        [TestCase("Kiro", "kiro")]
+        [TestCase("Kimi", "kimi")]
         public void ConfigTargetMapping_ReturnsSupportedPlatform(string targetName, string expectedPlatformId)
         {
             Assert.AreEqual(expectedPlatformId, ProjectSkillsManager.GetPlatformIdForConfigTarget(targetName));
@@ -23,8 +29,8 @@ namespace Funplay.Editor.Tests
 
         [TestCase(null)]
         [TestCase("")]
-        [TestCase("Kimi")]
-        [TestCase("VS Code")]
+        [TestCase("LM Studio")]
+        [TestCase("Unknown client")]
         public void Evaluate_HidesNoticeForUnsupportedTarget(string targetName)
         {
             var projectRoot = CreateTempProjectPath();
@@ -41,18 +47,23 @@ namespace Funplay.Editor.Tests
             }
         }
 
-        [Test]
-        public void Evaluate_ShowsNotInstalledForSupportedUnconfiguredTarget()
+        [TestCase("Codex", "codex")]
+        [TestCase("Pi", "pi")]
+        [TestCase("Kimi", "kimi")]
+        [TestCase("VS Code", "vscode")]
+        [TestCase("Trae", "trae")]
+        [TestCase("Kiro", "kiro")]
+        public void Evaluate_ShowsNotInstalledForSupportedUnconfiguredTarget(string target, string platform)
         {
             var projectRoot = CreateTempProjectPath();
 
             try
             {
-                var state = FunplayMCPProjectSkillsNoticePanel.Evaluate(projectRoot, "Codex");
+                var state = FunplayMCPProjectSkillsNoticePanel.Evaluate(projectRoot, target);
 
                 Assert.AreEqual(FunplayMCPProjectSkillsNoticePanel.NoticeKind.NotInstalled, state.Kind);
-                Assert.AreEqual("Codex", state.TargetDisplayName);
-                Assert.AreEqual("codex", state.PlatformId);
+                Assert.AreEqual(target, state.TargetDisplayName);
+                Assert.AreEqual(platform, state.PlatformId);
             }
             finally
             {
@@ -212,11 +223,11 @@ namespace Funplay.Editor.Tests
             var root = new VisualElement();
             var panel = new FunplayMCPProjectSkillsNoticePanel(null, () => { });
             panel.AddTo(root);
-            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "Kimi");
+            panel.ApplyConnectionState(FunplayMCPClientConfigPanel.ConnectionNoticeKind.LegacyEndpoint, "LM Studio");
             panel.ApplyState(FunplayMCPProjectSkillsNoticePanel.NoticeState.None);
 
             Assert.AreEqual(DisplayStyle.Flex, root.Q<VisualElement>("project-skills-notice").style.display.value);
-            StringAssert.Contains("needs updating for Kimi", root.Q<Label>("project-skills-notice-text").text);
+            StringAssert.Contains("needs updating for LM Studio", root.Q<Label>("project-skills-notice-text").text);
             Assert.AreEqual(1, root.Query<Button>().ToList().Count);
             var action = root.Q<Button>("project-skills-notice-button");
             Assert.AreEqual("Reconfigure MCP", action.text);

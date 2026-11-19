@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.7.7] - 2026-11-19
+
+### Added
+
+- Pi 1.0+ one-click Streamable HTTP setup at the resolved workspace's `.pi/mcp.json`, with project-trust/reload guidance and project-bound URLs. Configure + Skills shares the same workspace's `.agents/skills` and managed AGENTS block with Antigravity. A single existing hyphen/underscore namespace spelling is reused; ambiguous duplicates are refused. Disabling one shared client retains the other's files.
+- Project Skills support for the existing Kimi Code, VS Code / Copilot, Trae and Kiro targets, including managed references, version status, conflict checks and updates through the existing manager. Skills locations follow each client; no MCP tool or default exposure is added.
+- Built-in `unity-ui-composition` v1.0.12 adds an on-demand design-image-to-editable-prefab workflow adapted from Funplay Cocos v0.7.3: source/state/region mapping, asset reuse, separate navigation layers, reusable list rows and same-scale, same-state region-by-region comparison of actual Unity captures. Existing prefab structure, project resolution, TMP effects, Sprite borders, MCP-first operation and no-proactive-safe-area policies remain intact. Missing artwork and ambiguous details are disclosed; image generation is optional.
+
+### Fixed
+
+- VS Code/OpenCode JSONC configuration uses source-preserving edits for comments, trailing commas, unrelated values and custom remote-entry options. Strict JSON remains strict; both paths reject duplicate keys, invalid documents, non-object containers, disabled/local-command entries and unverifiable endpoint changes. Configuration serialization is isolated from project JSON defaults. JSON writes use private temporaries, bounded reads, best-effort unchanged-content checks and atomic replacement; detected races, read-only files and symlinked destinations are refused without overwriting them. These checks do not claim cross-process transactions.
+- Trae setup writes the Unity project's `.trae/mcp.json` with visible Project MCP guidance, leaving historical global entries untouched. VS Code uses its canonical macOS profile even before the directory exists and honors portable/appdata/XDG overrides. Codex setup honors `CODEX_HOME`; its existing Skills location and conservative TOML surface are not migrated. TOML writes also receive unchanged-content checks and retain a UTF-8 BOM.
+- The client panel checks the selected project's actual remote entry, enabled state and transport rather than treating any existing file as configured. An exact current endpoint can be reused after a lost local name record instead of creating another hash-suffixed entry.
+
+### Pull requests, issues and credits
+
+- No numbered Unity MCP pull requests or issues are included or closed by this release. Thanks to the [Funplay Cocos MCP project](https://github.com/FunplayAI/funplay-cocos-mcp) for the reference implementations and guidance: [v0.7.2 client setup](https://github.com/FunplayAI/funplay-cocos-mcp/releases/tag/v0.7.2), [v0.7.3 prefab workflow](https://github.com/FunplayAI/funplay-cocos-mcp/releases/tag/v0.7.3) and [v0.7.6 Pi integration](https://github.com/FunplayAI/funplay-cocos-mcp/releases/tag/v0.7.6).
+
+### Validation
+
+- Final graphics-enabled full EditMode suites on macOS each passed **1022 tests, zero failures, one environment skip** out of 1023 in Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.12f1 / Input System 1.19.0 / uGUI 2.0.0. The sole skip requires an already-installed ffmpeg. The Unity 6 scratch fixture imported its own version's TMP Essential Resources and saved a baseline scene before the final run. Final runs used explicitly owned graphical sessions, not batch mode's skipped or unsuitable interactive/media fixtures. Unsupported-client assertions now exercise genuinely unsupported clients, with new cases for the newly supported targets.
+- Regression coverage includes strict JSON/JSONC grammar and duplicate keys, lossless comments/number spelling/Unicode, all property-removal combinations, preserved remote options, disabled/repointed/command-entry refusal, detected concurrent changes, read-only/symlink refusal, bounded/deep configs, isolated JSON defaults, platform paths and Pi namespace/shared-Skills behavior. Eleven-platform export produced eighteen valid SKILL.md documents, two Cursor rules and sixty managed references with valid local links. These are configuration-generation and Unity tests, not live end-to-end sessions in every external AI client; Windows/Linux were not live-tested.
+- The actual FunplayMcp Player settings and package manifest/lockfile retained their original SHA256 hashes; unrelated projects were not changed. No numbered issue/PR was closed or merged by this work.
+
 ## [0.7.6] - 2026-11-12
 
 ### Fixed

@@ -20,7 +20,7 @@ namespace Funplay.Editor.Tests
             if (!string.IsNullOrEmpty(export))
             {
                 Directory.CreateDirectory(Path.Combine(export, ".git"));
-                ProjectSkillsManager.ApplyConfiguration(export, new[] { "codex", "claude", "cursor", "opencode", "dsh", "antigravity" }, Array.Empty<string>());
+                ProjectSkillsManager.ApplyConfiguration(export, ProjectSkillsManager.GetSupportedPlatforms(), Array.Empty<string>());
             }
         }
     }

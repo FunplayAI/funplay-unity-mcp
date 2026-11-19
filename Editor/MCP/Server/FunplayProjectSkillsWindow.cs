@@ -102,7 +102,7 @@ namespace Funplay.Editor.MCP.Server
             var section = CreateSection();
             section.Add(CreateSectionHeader("Current Platform"));
 
-            _platformTargets = new[] { "Claude Code", "Cursor", "VS Code", "Trae", "Kiro", "Codex", "OpenCode", "DeepSeek Harness", "Antigravity" };
+            _platformTargets = new[] { "Claude Code", "Cursor", "Kimi", "VS Code", "Trae", "Kiro", "Codex", "OpenCode", "DeepSeek Harness", "Antigravity", "Pi" };
             _selectedTargetIndex = Mathf.Clamp(_selectedTargetIndex, 0, _platformTargets.Length - 1);
             var persistedTargetName = _settingsController.MCPSelectedConfigTarget;
             if (!string.IsNullOrWhiteSpace(persistedTargetName))
@@ -136,7 +136,7 @@ namespace Funplay.Editor.MCP.Server
 
             if (!currentPlatformSupported)
             {
-                section.Add(CreateHint("Project skills integration is not available for this platform yet. Supported platforms: Codex, Claude Code, Cursor, OpenCode, DeepSeek Harness, Antigravity.", new Color(1f, 0.75f, 0.45f)));
+                section.Add(CreateHint("Project skills integration is not available for this platform yet. Select a supported coding client.", new Color(1f, 0.75f, 0.45f)));
             }
 
             _mainContainer.Add(section);
@@ -331,7 +331,7 @@ namespace Funplay.Editor.MCP.Server
                 {
                     EditorUtility.DisplayDialog(
                         "Project Skills Configuration",
-                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select Codex, Claude Code, Cursor, OpenCode, DeepSeek Harness, or Antigravity.",
+                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select a supported coding client.",
                         "OK");
                     return;
                 }
@@ -389,7 +389,7 @@ namespace Funplay.Editor.MCP.Server
                 {
                     EditorUtility.DisplayDialog(
                         "Project Skills Upgrade",
-                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select Codex, Claude Code, Cursor, OpenCode, DeepSeek Harness, or Antigravity.",
+                        "Project skills are not supported for the currently selected platform yet.\n\nPlease select a supported coding client.",
                         "OK");
                     return;
                 }

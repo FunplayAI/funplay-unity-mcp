@@ -12,7 +12,7 @@ namespace Funplay.Editor.Tests
     public sealed class ProjectSkillReferencesTests
     {
         private static readonly string[] Platforms =
-            { "codex", "claude", "cursor", "opencode", "dsh", "antigravity" };
+            { "codex", "claude", "cursor", "opencode", "dsh", "antigravity", "pi", "vscode", "trae", "kiro", "kimi" };
         private string projectRoot;
 
         [SetUp]
@@ -56,7 +56,7 @@ namespace Funplay.Editor.Tests
                     referenceCount++;
                 }
             }
-            Assert.AreEqual(5, referenceCount);
+            Assert.AreEqual(6, referenceCount);
             Assert.IsFalse(Current(platform).HasUpdates);
         }
 
@@ -69,7 +69,7 @@ namespace Funplay.Editor.Tests
             var paths = Directory.GetFiles(projectRoot, "*.md", SearchOption.AllDirectories)
                 .Where(path => path.Contains(Path.DirectorySeparatorChar + "references" + Path.DirectorySeparatorChar))
                 .ToArray();
-            Assert.AreEqual(30, paths.Length);
+            Assert.AreEqual(60, paths.Length, "Pi and Antigravity share one managed .agents/skills directory.");
         }
 
         [TestCaseSource(nameof(Platforms))]

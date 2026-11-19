@@ -49,13 +49,11 @@ namespace Funplay.Editor.MCP.Server
             }
             else
             {
-                var root = JObject.Parse(content);
+                var root = new MCPConfigJson(content, target.IsJsonc).Object;
                 var rootKey = string.IsNullOrEmpty(target.RootKey) ? "mcpServers" : target.RootKey;
                 var globalServers = root[rootKey] as JObject;
                 var projectServers = target.UseProjectScope && !string.IsNullOrEmpty(projectScopeKey)
-                    ? (root["projects"] as JObject)?[projectScopeKey] as JObject
-                    : null;
-                projectServers = projectServers?[rootKey] as JObject;
+                    ? FunplayMCPClientConfigPanel.GetJsonServers(root, target, projectScopeKey, false) : null;
 
                 foreach (var key in keys)
                 {
@@ -63,7 +61,10 @@ namespace Funplay.Editor.MCP.Server
                         continue;
 
                     // Project entries take precedence; other projects' sections are never inspected.
-                    var entry = projectServers?[key] ?? globalServers?[key];
+                    var servers = projectServers ?? globalServers;
+                    var resolved = servers == null ? key :
+                        FunplayMCPClientConfigPanel.ResolveJsonServerName(servers, target, key);
+                    var entry = projectServers?[resolved] ?? globalServers?[resolved];
                     var field = string.IsNullOrEmpty(target.UrlFieldName) ? "url" : target.UrlFieldName;
                     if (entry is JObject map)
                         urls[key] = map[field]?.Type == JTokenType.String ? (string)map[field] : null;

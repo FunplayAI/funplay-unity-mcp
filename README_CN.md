@@ -76,7 +76,7 @@ openupm add com.gamebooom.unity.mcp
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.6"
+    "com.gamebooom.unity.mcp": "0.7.7"
   }
 }
 ```
@@ -105,13 +105,17 @@ openupm add com.gamebooom.unity.mcp
 
 选择目标客户端后点击 **Configure**，插件会直接帮你写入推荐的 MCP 配置项。
 
-对于 Claude Code、Cursor、Codex、OpenCode 和 DeepSeek Harness，也可以点击 **Configure + Skills**，同时安装两个内置项目 skills。
+对于 Claude Code、Cursor、Kimi Code、VS Code / Copilot、Trae、Kiro、Codex、OpenCode、DeepSeek Harness、Antigravity 和 Pi，可以点击 **Configure + Skills**，同时安装两个内置项目 skills。Pi 与 Antigravity 共用工作区的 `.agents/skills`，只关闭其中一个不会删除另一个的托管副本；其他客户端沿用现有 Skills 位置。
 
-如果你希望为当前 Unity 项目配置项目级 AI 指引，可以打开 **Funplay → Project Skills**，为支持的平台安装内置的 `unity-mcp-workflow` 和 `unity-ui-composition` skills，其中 UI skill 用于竖屏、横屏响应式 uGUI 工作。
+VS Code、OpenCode 的 JSONC 更新保留注释、尾逗号及无关原文。严格 JSON 客户端不接受注释或尾逗号；两种格式都会拒绝重复键、损坏的根对象和非对象服务器容器。远程条目更新保留自定义选项；禁用、本地命令或手动改指其他地址的条目需要人工检查。JSON 写入通过临时文件及提交前的尽力式原文比较进行原子替换，不代表跨进程事务。只读、软链接配置文件保留原样并提示手动处理。仅查看面板不会修改实际客户端配置。
+
+如果你希望为当前 Unity 项目配置项目级 AI 指引，可以打开 **Funplay → Project Skills**，为支持的平台安装内置的 `unity-mcp-workflow` 和 `unity-ui-composition` skills，其中 UI skill 用于竖屏、横屏响应式 uGUI 工作。新增客户端的目录分别是 `.github/skills`（VS Code / Copilot）、`.trae/skills`、`.kiro/skills` 和 `.kimi-code/skills`。
 
 v0.7.0 保留这两个内置 skills，参考 [Unity 官方插件 0.1.8-beta](https://github.com/Unity-Technologies/unity-agent-plugin/tree/cf6b2da24e424b0a60d560a57f39f676cb6f79f3) 融合四份按需说明：UI 框架识别、Sprite 导入安全、TMP/本地化验证、包安装就绪判定。AI 只需读取当前任务相关的说明，不增加默认工具或技能数量；MCP 优先、沿用项目习惯、保护预制体及设计图还原规则保持有效。已有安装请通过 **Project Skills** 更新；参考文件缺失或过旧也会触发更新提示，用户自有的参考文件不会被覆盖。
 
 v0.7.1 为两个内置技能补充执行可信度指引，包括工程身份、实际帧推进、严格输入路径、验证环境清理和 Unity 原生阻塞弹窗的有限处理。连接与 Skills 问题统一显示在原有蓝色卡片中，右侧只有一个 **Reconfigure MCP + Skills** 操作；只解决其中一项不会掩盖另一项。详见[执行可信度与迁移](Documentation~/execution-trust.md)。
+
+内置 UI Skill v1.0.12 新增按需加载的“设计图到页面预制体”说明：映射独立资源、控件和状态，制作可复用的已保存页面，并在统一比例下逐区域比较真实 Unity 截图。沿用现有预制体结构、工程基准、TMP 习惯和安全区策略；图片生成不是前提，不明确的设计细节应主动澄清。不增加 MCP 工具。
 
 如果需要手动配置，把 `<project>` 替换为工程条目名、`<port>` 替换为工程端口、`<project-id>` 替换为完整绑定地址中的工程 ID；请从目标工程的 MCP Server 窗口复制，不要使用其他编辑器的地址：
 
@@ -166,6 +170,8 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 <details>
 <summary>VS Code</summary>
 
+一键配置按系统使用标准用户配置目录下的 `Code/User/mcp.json`，遵循 `VSCODE_PORTABLE`、`VSCODE_APPDATA` 及 Linux 的 `XDG_CONFIG_HOME`。macOS 即使尚未创建配置目录，也不会猜测 `~/.vscode/mcp.json`。Project Skills 安装在 Unity 工程的 `.github/skills`。
+
 ```json
 {
   "servers": {
@@ -181,6 +187,8 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 
 <details>
 <summary>Trae</summary>
+
+一键配置写入 Unity 工程的 `.trae/mcp.json`，不猜测全局路径。请在 Trae 中启用 **Project MCP** 并重载 MCP 服务器；Configure + Skills 同时写入 `.trae/skills`。已有全局条目不会自动迁移或删除，请另行检查，避免重复连接。
 
 ```json
 {
@@ -229,6 +237,8 @@ LM Studio 的 `mcp.json` 路径会随版本和平台变化。建议优先在 LM 
 
 <details>
 <summary>Codex</summary>
+
+一键配置遵循 `CODEX_HOME`，未设置时使用 `~/.codex/config.toml`。此处不迁移现有项目 Skills 目录，也不引入完整 TOML 解析器。
 
 ```toml
 [mcp_servers.funplay-<project>]
@@ -304,6 +314,23 @@ url = "http://127.0.0.1:<port>/mcp/project/<project-id>/"
 
 </details>
 
+<details>
+<summary>Pi</summary>
+
+需要内置 MCP 支持的 Pi 1.0+。一键配置在最近的 Git／worktree 根目录（不在 Git 中则为 Unity 工程）写入 `.pi/mcp.json`，使用 Streamable HTTP。从面板显示的工作区启动 Pi、信任项目后，执行 `/reload` 并用 `/mcp` 查看连接。Configure + Skills 将 `.agents/skills` 和 `AGENTS.md` 托管块放在同一根目录，与 Antigravity 共用；不修改无关的 Pi 用户级条目。Pi 将仅连字符／下划线不同的名称视为同一命名空间：配置会沿用唯一的已有拼写，存在重复时拒绝覆盖。详见 [Pi MCP](https://docs.pi.dev/latest/mcp) 和 [Skills](https://docs.pi.dev/latest/skills)。
+
+```json
+{
+  "mcpServers": {
+    "funplay-<project>": {
+      "url": "http://127.0.0.1:<port>/mcp/project/<project-id>/"
+    }
+  }
+}
+```
+
+</details>
+
 ### 4. 验证连接
 
 先在 AI 客户端里试几个安全请求：
@@ -325,7 +352,7 @@ url = "http://127.0.0.1:<port>/mcp/project/<project-id>/"
 - 这是一个 **仅限 Editor** 的包，不会向最终构建产物添加运行时代码。
 - MCP Server 端口对**新工程**按工程派生（20000-29999 区间）；从旧版本升级的工程会保留原端口并记为 pin，手填的端口同样是 pin。MCP Server 窗口会显示端口来源与当前实际地址。客户端配置里的条目名按**工程目录名**命名（例如 `funplay-love-town`，只保留 ASCII 字母数字），多个工程不再互相覆盖同一个 `funplay` 条目。两个工程目录名相同时会解析出同一个条目名，此时后配置的那个会**自动追加工程哈希**，既不会覆盖对方，也不需要用户去开任何开关。
 - 本地 MCP Server 配置保存在 `UserSettings/FunplayMcpSettings.json`。
-- v0.7.6 默认 `core` 精选 40 个工具，覆盖结构化检查与修改、UI 巡检和创建、可恢复的编译准备、统一任务查询、视觉证据、输入和日志。短任务可一次返回结果，`get_task` 支持有限等待、状态变化后返回和退避提示；`execute_code` 保留为项目特定逻辑的兜底，并支持持久化任务回执与结果分页。`full` 保留全部 185 个工具，包括原有状态、编译与 Play 接口，以及配置、预览管理和专项诊断。已有自定义暴露列表不会被覆盖，可用 `get_tool_capabilities` 区分“已实现”和“已暴露”。升级后请通过 Project Skills 更新已安装的内置技能。
+- v0.7.7 默认 `core` 精选 40 个工具，覆盖结构化检查与修改、UI 巡检和创建、可恢复的编译准备、统一任务查询、视觉证据、输入和日志。短任务可一次返回结果，`get_task` 支持有限等待、状态变化后返回和退避提示；`execute_code` 保留为项目特定逻辑的兜底，并支持持久化任务回执与结果分页。`full` 保留全部 185 个工具，包括原有状态、编译与 Play 接口，以及配置、预览管理和专项诊断。已有自定义暴露列表不会被覆盖，可用 `get_tool_capabilities` 区分“已实现”和“已暴露”。升级后请通过 Project Skills 更新已安装的内置技能。
 - `execute_code` safety checks 和更严格的文件系统 guard 现在可在 **Funplay > MCP Settings** 设置默认值，默认开启；它会阻止明显破坏性片段、宽泛的 `System.IO` 写入、原始文件流、绝对路径、用户/系统目录路径和 `../` 穿越路径，但它不是完整沙箱。客户端仍可在单次调用中用可选 `safety_checks` 参数显式覆盖。
 - 插件 debug 日志默认关闭，也可在 **Funplay > MCP Settings** 中开启；Warning 和 Error 始终会输出到 Unity Console。
 - 所有已暴露的 MCP 工具都会直接执行，不再提供额外的 approval 开关。
@@ -448,7 +475,7 @@ Prompt 名称和参数名必须匹配 `[a-z][a-z0-9_-]{0,63}`。`prompts/get` �
 
 ## 内置工具
 
-v0.7.6 提供 **185 个工具函数**，覆盖 43 个模块，默认暴露其中 40 个高频工具。
+v0.7.7 提供 **185 个工具函数**，覆盖 43 个模块，默认暴露其中 40 个高频工具。
 
 项目特定的 `execute_code` 会先记录任务再执行。每次逻辑操作使用唯一 `request_key`，丢失响应时通过 `get_task(kind=execution)` 找回；序列化失败或网络超时不代表写入被回滚。大型 JSON 结果通过带 SHA256 的条目/文本分页读取，不应靠重复执行恢复数据。升级后请同步更新内置 Project Skills。
 
