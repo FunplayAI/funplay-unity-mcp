@@ -76,7 +76,7 @@ Or add the scoped registry manually in `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "com.gamebooom.unity.mcp": "0.7.7"
+    "com.gamebooom.unity.mcp": "0.7.8"
   }
 }
 ```
@@ -474,11 +474,13 @@ Names and argument names must match `[a-z][a-z0-9_-]{0,63}`. Required, unknown, 
 
 ## Built-in Tools
 
-Version 0.7.7 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for journal compatibility/recovery, recoverable execution tasks, bounded JSON snapshots, identity migration, strict input, owned cleanup, reference preservation and evidence reuse.
+Version 0.7.8 includes **185 tool functions** across 43 modules, with 40 high-frequency tools exposed by default. See [execution trust and verification](Documentation~/execution-trust.md) for journal compatibility/recovery, recoverable execution tasks, bounded JSON snapshots, identity migration, strict input, owned cleanup, reference preservation and evidence reuse.
 
 Project-specific `execute_code` calls now journal a task before running. Use a unique `request_key` and recover lost responses through `get_task(kind=execution)`; serialization failures and transport timeouts do not mean a write was rolled back. Large JSON results use hashed item/text pages instead of truncation or re-execution. Update the built-in Project Skills after upgrading.
 
 Version 0.7.6 fixes execution journals affected by project-wide Json.NET settings (issue #63). Existing valid wrapped lists are read safely, with an exact backup before the first canonical save; task history and idempotency keys are preserved. Inspect storage diagnostics and use authorized Full-only `execute_code(action=recover_journal)` after resolving an I/O problem. Never delete the journal or replay a write to unblock it.
+
+Version 0.7.8 handles transient Windows replacement error 1175 ([#64](https://github.com/FunplayAI/funplay-unity-mcp/issues/64)) with bounded file-only retries in the `execute_code` and `prepare_editor` journals. It verifies the original and staged bytes, never replays a command or Editor action, and stops on unconfirmed storage state.
 
 | Category | Tools |
 |----------|-------|

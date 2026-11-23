@@ -1,6 +1,7 @@
 // Copyright (C) Funplay. Licensed under MIT.
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Funplay.Editor.State;
 using Newtonsoft.Json;
 using NUnit.Framework;
@@ -136,9 +137,134 @@ namespace Funplay.Editor.Tests
         }
         [Test] public void PersistenceFailurePreventsAction()
         {
-            coordinator.Start("play", true, 30, null, 100);
-            var failing = new EditorOperationCoordinator(records, "session", () => throw new System.IO.IOException("disk full"), 100);
-            Assert.Throws<System.IO.IOException>(() => failing.Tick(state, 101));
+            var op = coordinator.Start("play", true, 30, null, 100);
+            var failing = new EditorOperationCoordinator(records, "session", () => throw new IOException("disk full"), 100);
+            Assert.Throws<IOException>(() => failing.Tick(state, 101));
+            Assert.IsTrue(op.Terminal);
+            Assert.AreEqual("OPERATION_JOURNAL_UNAVAILABLE", op.error_code);
+            Assert.AreEqual(EditorOperationAction.None, failing.Tick(state, 102));
+        }
+
+        [Test]
+        public void FailedAdmissionCannotDispatchAnEditorAction()
+        {
+            var failing = new EditorOperationCoordinator(records, "session", () => throw new IOException("disk full"), 100);
+            Assert.Throws<IOException>(() => failing.Start("edit", true, 30, "persist-first", 100));
+            Assert.AreEqual("failed", records[0].status);
+            Assert.AreEqual("OPERATION_JOURNAL_UNAVAILABLE", records[0].error_code);
+            Assert.AreEqual(EditorOperationAction.None, failing.Tick(state, 101));
+        }
+
+        [Test]
+        public void FailedFinalSaveDoesNotExposeAnUndurableReadyState()
+        {
+            var withFailure = new EditorOperationCoordinator(records, "session", () =>
+            {
+                if (records[0].status == "ready") throw new IOException("disk full");
+            }, 100);
+            var op = withFailure.Start("edit", false, 30, "finish", 100);
+            withFailure.Tick(state, 101);
+            withFailure.Tick(state, 102);
+            Assert.Throws<IOException>(() => withFailure.Tick(state, 103));
+            Assert.AreEqual("failed", op.status);
+            Assert.AreEqual("OPERATION_JOURNAL_UNAVAILABLE", op.error_code);
+        }
+
+        private sealed class ReplaceError : IOException
+        {
+            internal ReplaceError() { HResult = unchecked((int)0x80070497); }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void PrepareUsesGuardedReplacementBeforeDispatchingEachAction(bool persistentFailure)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "FunplayOperationJournal_" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(root, "editor-operations.json");
+            try
+            {
+                int attempts = 0;
+                string oldText = null;
+                var journal = new EditorOperationJournal(path, (temporary, target) =>
+                {
+                    if (oldText != null)
+                    {
+                        Assert.AreEqual(oldText, File.ReadAllText(target));
+                        if (++attempts <= 2 || persistentFailure) throw new ReplaceError();
+                    }
+                    File.Replace(temporary, target, null);
+                });
+                var saved = journal.Load();
+                var machine = new EditorOperationCoordinator(saved, "session", () => journal.Save(saved), 100);
+                var op = machine.Start("edit", true, 30, "prepare-once", 100);
+                oldText = File.ReadAllText(path);
+                state.is_playing = true;
+                if (persistentFailure)
+                {
+                    var error = Assert.Throws<ExecutionStorageException>(() => machine.Tick(state, 101));
+                    Assert.AreEqual("editor_operation_journal", error.Role);
+                    Assert.AreEqual("replace_existing", error.Operation);
+                    Assert.AreEqual(unchecked((int)0x80070497), error.HResult);
+                    Assert.AreEqual(3, error.Attempts);
+                    Assert.AreEqual(oldText, File.ReadAllText(path));
+                    Assert.AreEqual("OPERATION_JOURNAL_UNAVAILABLE", op.error_code);
+                    Assert.AreEqual(EditorOperationAction.None, machine.Tick(state, 102));
+                }
+                else
+                {
+                    Assert.AreEqual(EditorOperationAction.ExitPlay, machine.Tick(state, 101));
+                    Assert.AreEqual(EditorOperationAction.None, machine.Tick(state, 102), "No second ExitPlay action.");
+                    Assert.AreSame(op, machine.Start("edit", true, 30, "prepare-once", 102));
+                    var persisted = new EditorOperationJournal(path).Load()[0];
+                    Assert.AreEqual(op.operation_id, persisted.operation_id);
+                    Assert.AreEqual("exiting_play", persisted.phase);
+                }
+                Assert.AreEqual(3, attempts);
+                Assert.IsEmpty(Directory.GetFiles(root, "*.tmp"));
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void OperationJournalNeverOverwritesAnExternalChangeOrMissingHistory(bool deleted)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "FunplayOperationJournal_" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(root, "editor-operations.json");
+            try
+            {
+                var journal = new EditorOperationJournal(path);
+                var loaded = journal.Load();
+                var machine = new EditorOperationCoordinator(loaded, "session", () => journal.Save(loaded), 100);
+                machine.Start("play", true, 30, "no-rewrite", 100);
+                if (deleted) File.Delete(path);
+                else File.WriteAllText(path, "external");
+                var error = Assert.Throws<ExecutionStorageException>(() => machine.Tick(state, 101));
+                Assert.IsInstanceOf<InvalidDataException>(error.InnerException);
+                Assert.AreEqual(0, error.Attempts);
+                Assert.AreEqual(deleted ? null : "external", File.Exists(path) ? File.ReadAllText(path) : null);
+                Assert.AreEqual(EditorOperationAction.None, machine.Tick(state, 102));
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Test]
+        public void CorruptOperationJournalCannotBeReplacedByAnEmptyHistory()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "FunplayOperationJournal_" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(root, "editor-operations.json");
+            Directory.CreateDirectory(root);
+            try
+            {
+                const string invalid = "[null]";
+                File.WriteAllText(path, invalid);
+                var journal = new EditorOperationJournal(path);
+                Assert.Throws<InvalidDataException>(() => journal.Load());
+                Assert.Throws<InvalidDataException>(() => journal.Save(new List<EditorOperation>()));
+                Assert.AreEqual(invalid, File.ReadAllText(path));
+                Assert.IsEmpty(Directory.GetFiles(root, "*.tmp"));
+            }
+            finally { Directory.Delete(root, true); }
         }
         [Test] public void ReadinessIsCurrentNotHistorical()
         {

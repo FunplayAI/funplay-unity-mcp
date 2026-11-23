@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.8] - 2026-11-23
+
+### Fixed
+
+- [Issue #64](https://github.com/FunplayAI/funplay-unity-mcp/issues/64): execution-journal replacement now retries exact Win32 `ERROR_UNABLE_TO_REMOVE_REPLACED` (1175, `0x80070497`), alongside sharing/lock violations (32/33). At most three file attempts total (20/40 ms delays) recheck both destination and staged bytes before replacing again. This does not retry user code, repeat a request or disable idempotency. Exhausted retries, different or missing files, permission failures and unknown I/O still fail closed.
+- When replacement throws an I/O error after consuming the staged file, exact destination-byte readback can confirm persistence without another replace. Partial native replacement errors (1176/1177) are not retried; remaining staged data is retained for review without deleting or reinstalling the destination.
+- `prepare_editor` uses the same guarded writer for its operation journal. Its existing record format is retained. Failed persistence cannot dispatch further native Editor steps or report an unpersisted transition as ready. Diagnostics identify the operation journal and the failed I/O attempt; execution-journal recovery does not write the preparation journal.
+
+### Pull requests, issues and credits
+
+- Fixes [#64](https://github.com/FunplayAI/funplay-unity-mcp/issues/64), reported and measured by [@bailang1](https://github.com/bailang1) on Windows 11 / Unity 6000.3.25f1. This addresses the observed native error and retry behavior; it does not infer which process held the file or equate this with the distinct Windows/Tuanjie environment in [#63](https://github.com/FunplayAI/funplay-unity-mcp/issues/63).
+- No pull requests were merged. Tool availability, defaults and both built-in Skills versions are unchanged.
+
+### Validation
+
+- Regression tests reproduce the missing 1175 retry on v0.7.7 and cover successful and exhausted retries, changed or missing files, a committed write followed by an exception, and journal gates before Editor side effects. Windows error codes were injected; the original Windows file-lock conditions were not reproduced directly.
+- macOS: Unity 2022.3.62f3c1 / Input System 1.14.0 and Unity 6000.3.29f1 / Input System 1.20.1 each passed 1,042 tests with zero failures and one ffmpeg-dependent skip. The isolated Unity 6 project used a persistent Input Settings asset so the existing input fixtures could restore the original settings after Play Mode. No user project settings changed.
+
 ## [0.7.7] - 2026-11-19
 
 ### Added

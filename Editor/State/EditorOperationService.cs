@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Funplay.Editor.Tools.Helpers;
-using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
@@ -17,12 +17,14 @@ namespace Funplay.Editor.State
     {
         private const string SessionKey = "Funplay.EditorOperation.Session";
         internal static readonly string JournalPath = Path.Combine(Path.GetDirectoryName(Application.dataPath), "Library/FunplayMcp/Operations/editor-operations.json");
+        private static readonly EditorOperationJournal Journal = new EditorOperationJournal(JournalPath);
         private static readonly List<EditorOperation> Operations;
         private static readonly EditorOperationCoordinator Coordinator;
         private static Task<EditorRefreshResult> refreshTask;
         private static string refreshError;
         private static bool recoveredRefresh;
         internal static string JournalError { get; private set; }
+        private static JObject journalDiagnostic;
         internal static double Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000d;
         internal static bool HasActive => Coordinator.Active != null;
         internal static string ActiveId => Coordinator.Active?.operation_id;
@@ -34,23 +36,22 @@ namespace Funplay.Editor.State
             Operations = new List<EditorOperation>();
             try
             {
-                if (File.Exists(JournalPath)) Operations = JsonConvert.DeserializeObject<List<EditorOperation>>(File.ReadAllText(JournalPath)) ?? Operations;
-                if (!EditorOperationCoordinator.ValidJournal(Operations)) throw new InvalidDataException("Invalid operation journal; no actions will be replayed.");
+                Operations = Journal.Load();
             }
-            catch (Exception ex) { Operations = new List<EditorOperation>(); JournalError = "Cannot read operation journal: " + ex.Message; }
+            catch (Exception ex) { RecordJournalFailure("load_operation_journal", ex); }
             try { Coordinator = new EditorOperationCoordinator(Operations, session, Save, Now); }
             catch (Exception ex)
             {
                 // Keep diagnostics callable even when a restarted operation cannot be persisted.
-                Operations = new List<EditorOperation>(); JournalError = "Cannot recover operation journal: " + ex.Message;
+                Operations = new List<EditorOperation>(); RecordJournalFailure("recover_operation_journal", ex);
                 Coordinator = new EditorOperationCoordinator(Operations, session, Save, Now);
             }
             recoveredRefresh = Coordinator.Active?.step == 2 && Coordinator.Active.refresh_assets;
             EditorApplication.update += Tick;
-            AssemblyReloadEvents.beforeAssemblyReload += () => Coordinator.Reload(Now);
-            CompilationPipeline.assemblyCompilationFinished += (_, messages) =>
+            AssemblyReloadEvents.beforeAssemblyReload += () => WithWritableJournal(() => Coordinator.Reload(Now));
+            CompilationPipeline.assemblyCompilationFinished += (_, messages) => WithWritableJournal(() =>
                 Coordinator.CompilerErrors(messages.Where(x => x.type == CompilerMessageType.Error)
-                    .Select(x => $"{x.file}({x.line},{x.column}): {x.message}"), Now);
+                    .Select(x => $"{x.file}({x.line},{x.column}): {x.message}"), Now));
         }
 
         internal static object CurrentEditor()
@@ -76,7 +77,7 @@ namespace Funplay.Editor.State
         };
         internal static object Start(string target, bool refresh, int timeout, string key)
         {
-            if (JournalError != null) return Response.Error("OPERATION_JOURNAL_UNAVAILABLE", new { detail = JournalError, journal_path = JournalPath });
+            if (JournalError != null) return JournalUnavailable();
             try
             {
                 // Idempotent lookup must work even while the original operation imports assets.
@@ -87,6 +88,7 @@ namespace Funplay.Editor.State
                 if (previous == null) { refreshTask = null; refreshError = null; recoveredRefresh = false; }
                 return Receipt(op);
             }
+            catch (Exception) when (JournalError != null) { return JournalUnavailable(); }
             catch (ArgumentException ex) { return Response.Error("INVALID_ARGUMENT", new { detail = ex.Message }); }
             catch (InvalidOperationException ex) { return Response.Error(ex.Message, new { active_operation_id = Coordinator.Active?.operation_id }); }
             catch (Exception ex) { return Response.Error("OPERATION_JOURNAL_UNAVAILABLE", new { detail = ex.Message }); }
@@ -98,19 +100,21 @@ namespace Funplay.Editor.State
             return op == null ? Response.Error("OPERATION_NOT_FOUND", new { retained = 32 }) : Receipt(op);
         }
         internal static object List() => Response.Success("Recent editor operations (newest first).", new
-        { operations = Operations.AsEnumerable().Reverse().ToArray(), current_editor = CurrentEditor(), journal_path = JournalPath, journal_error = JournalError });
+        { operations = Operations.AsEnumerable().Reverse().ToArray(), current_editor = CurrentEditor(), journal_path = JournalPath, journal_error = JournalError, journal_diagnostic = journalDiagnostic });
         internal static object Cancel(string id)
         {
             var op = Operations.LastOrDefault(x => x.operation_id == id);
             if (op == null) return Response.Error("OPERATION_NOT_FOUND");
-            Coordinator.Cancel(op, Now);
+            if (JournalError != null) return JournalUnavailable();
+            try { Coordinator.Cancel(op, Now); }
+            catch (Exception) when (JournalError != null) { return JournalUnavailable(); }
             return Receipt(op);
         }
         private static object Receipt(EditorOperation op) => Response.Success("Inspect operation.status; this envelope only acknowledges the query.", new
-        { operation = op, current_editor = CurrentEditor(), journal_path = JournalPath, poll_after_ms = 1000, journal_error = JournalError });
+        { operation = op, current_editor = CurrentEditor(), journal_path = JournalPath, poll_after_ms = 1000, journal_error = JournalError, journal_diagnostic = journalDiagnostic });
         private static void Tick()
         {
-            if (Coordinator.Active == null) return;
+            if (Coordinator.Active == null || JournalError != null) return;
             try
             {
                 if (refreshTask != null && refreshTask.IsCompleted)
@@ -139,21 +143,33 @@ namespace Funplay.Editor.State
             }
             catch (Exception ex)
             {
-                try { Coordinator.Fail("EDITOR_OPERATION_FAILED", ex.Message, Now); }
-                catch { JournalError = ex.Message; }
+                // A persistence failure already made the receipt terminal in memory.
+                WithWritableJournal(() => Coordinator.Fail("EDITOR_OPERATION_FAILED", ex.Message, Now));
             }
         }
+
+        private static void WithWritableJournal(Action action)
+        {
+            if (JournalError != null) return;
+            try { action(); }
+            catch (Exception) when (JournalError != null) { /* The receipt retains the storage failure. */ }
+        }
+
+        private static object JournalUnavailable() => Response.Error("OPERATION_JOURNAL_UNAVAILABLE",
+            new { detail = JournalError, journal_path = JournalPath, journal_diagnostic = journalDiagnostic });
+
+        private static void RecordJournalFailure(string stage, Exception error)
+        {
+            JournalError = "Editor operation journal unavailable (" + error.GetType().Name + ").";
+            journalDiagnostic = OperationDiagnostic.Capture(stage, error);
+            journalDiagnostic.Remove("stack_methods");
+        }
+
         private static void Save()
         {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(JournalPath));
-                var temp = JournalPath + ".tmp";
-                File.WriteAllText(temp, JsonConvert.SerializeObject(Operations, Formatting.Indented));
-                if (File.Exists(JournalPath)) File.Replace(temp, JournalPath, null);
-                else File.Move(temp, JournalPath);
-            }
-            catch (Exception ex) { JournalError = ex.Message; throw; }
+            if (JournalError != null) throw new IOException(JournalError);
+            try { Journal.Save(Operations); }
+            catch (Exception ex) { RecordJournalFailure("save_operation_journal", ex); throw; }
         }
     }
 }

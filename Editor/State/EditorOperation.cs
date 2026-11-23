@@ -114,7 +114,7 @@ namespace Funplay.Editor.State
                         Change(op, "exiting_play", "Exit requested; waiting for Edit Mode readback.", now);
                         return EditorOperationAction.ExitPlay;
                     }
-                    persist();
+                    Persist(op, now);
                     goto case 1;
                 case 1:
                     if (s.is_playing && (op.refresh_assets || op.target == "edit")) return EditorOperationAction.None;
@@ -143,7 +143,7 @@ namespace Funplay.Editor.State
                         Change(op, "entering_play", "Play requested; waiting for Play Mode readback.", now);
                         return EditorOperationAction.EnterPlay;
                     }
-                    persist();
+                    Persist(op, now);
                     goto case 3;
                 case 3:
                     if (s.compilation_failed)
@@ -175,10 +175,11 @@ namespace Funplay.Editor.State
         }
         internal void CompilerErrors(IEnumerable<string> errors, double now)
         {
-            if (Active == null) return;
-            Active.compilation_errors.AddRange(errors.Take(Math.Max(0, 100 - Active.compilation_errors.Count)));
-            Active.updated_at = Timestamp(now);
-            persist();
+            var op = Active;
+            if (op == null) return;
+            op.compilation_errors.AddRange(errors.Take(Math.Max(0, 100 - op.compilation_errors.Count)));
+            op.updated_at = Timestamp(now);
+            Persist(op, now);
         }
         private void Finish(EditorOperation op, string status, string code, string message, double now)
         {
@@ -191,7 +192,24 @@ namespace Funplay.Editor.State
             op.phase = phase; op.message = message; op.updated_at = Timestamp(now);
             op.history.Add(new EditorOperationEvent { phase = phase, message = message, timestamp = op.updated_at });
             if (op.history.Count > 100) op.history.RemoveAt(0);
-            persist();
+            Persist(op, now);
+        }
+
+        private void Persist(EditorOperation op, double now)
+        {
+            try { persist(); }
+            catch
+            {
+                // The attempted transition is not durable. In particular, a failed start
+                // must not leave a runnable receipt, and a failed final save is not "ready".
+                op.status = op.phase = "failed";
+                op.error_code = "OPERATION_JOURNAL_UNAVAILABLE";
+                op.message = "Operation state could not be persisted. No further steps will be dispatched.";
+                op.updated_at = op.finished_at = Timestamp(now);
+                op.history.Add(new EditorOperationEvent { phase = op.phase, message = op.message, timestamp = op.updated_at });
+                if (op.history.Count > 100) op.history.RemoveAt(0);
+                throw;
+            }
         }
         private static string Timestamp(double seconds) => DateTimeOffset.FromUnixTimeMilliseconds((long)(seconds * 1000)).ToString("O");
     }

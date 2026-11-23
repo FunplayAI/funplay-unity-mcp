@@ -123,7 +123,10 @@ security sandbox or exactly-once guarantee across storage loss/power failure. Do
 journal/Library files to bypass key protection. User code remains responsible for targeted
 saves, Undo registration, business invariants and exception-safe owned-resource cleanup.
 
-### Journal compatibility and storage recovery (issue #63)
+### Journal compatibility and storage recovery
+
+See [#63 (journal format compatibility)](https://github.com/FunplayAI/funplay-unity-mcp/issues/63)
+and [#64 (Windows replacement errors)](https://github.com/FunplayAI/funplay-unity-mcp/issues/64).
 
 Journal writing, reading, DTO copying, request signatures and serialization-error envelopes
 use independent Json.NET serializers, never the project's `JsonConvert.DefaultSettings`.
@@ -147,13 +150,27 @@ No raw exception message, private path, source code or unsanitized stack is retu
 named `serializing` can also contain a journal write; it does not by itself prove failure to
 serialize the business return value. Confirmed execution remains separate from delivery.
 
-Atomic replacement retains the old destination on failure and cleans only its own temporary
-file. Only explicit Win32 sharing/lock violations (32/33) retry that file operation, at most
-three attempts with 20/40 ms delays; permission, disk-full and unknown I/O failures do not
-enter a generic retry loop. Reads use delete-sharing so they do not themselves prevent a
-Windows atomic replacement. There is no delete-then-move fallback, automatic permission
-change, or attempt to kill the process suspected of holding a lock. The original reported
-`File.Replace` failure still requires diagnosis on its actual Windows/Tuanjie environment.
+Only the file operation can retry, never the command or Editor action. Exact Win32
+sharing/lock violations (32/33) and an existing-file replacement's
+`ERROR_UNABLE_TO_REMOVE_REPLACED` (1175, `0x80070497`) allow at most three total attempts
+with 20/40 ms backoff. Both the expected destination and staged bytes must still match
+before a retry. If replacement throws an I/O exception but consumed its temporary file,
+readback of the exact intended destination bytes can confirm persistence without another
+write. This does not establish that a Unity action ran or that data survived power loss.
+
+Permission, disk-full, unknown I/O and Windows partial replacement failures (1176/1177)
+are not retried. The latter can leave files under different names; any remaining staged
+file is kept for review, never installed automatically. Reads use delete-sharing; there is
+no delete-then-move fallback or automatic change to permissions. See Microsoft's
+[ReplaceFileW return values](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew#return-value).
+The specific Windows cause behind #63 was not established to be the same as #64.
+
+`prepare_editor` uses the same guarded writer for its own bounded operation journal.
+If persistence cannot be confirmed, further steps are not dispatched and the failed
+transition is not reported as ready. Inspect the retained receipt and `journal_diagnostic`
+(`file_role=editor_operation_journal`). The execution-journal command below does not
+recover the separate preparation journal; resolve its storage problem before restarting
+or initiating a new preparation.
 
 After resolving the actual storage problem, a deliberately exposed Full operator can call:
 
